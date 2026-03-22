@@ -5,6 +5,8 @@ description: Build instant, offline-capable apps that sync with Strata Sync.
 
 Build instant, offline-capable apps that sync. Strata Sync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Every read comes from a local store, so the UI stays fast. Every write enters an optimistic outbox, so mutations feel instant. A monotonic sync log on the server ensures all clients converge to the same state.
 
+Strata Sync implements the server-sequenced sync architecture that [Linear](https://linear.app) pioneered and described in their engineering blog posts and conference talks. The core protocol — monotonic sync IDs, bootstrap + delta streaming, an optimistic outbox with field-level LWW rebase — follows Linear's published design. Strata Sync extends it with Yjs CRDT collaboration, built-in undo/redo, pluggable adapters, and framework integrations.
+
 ## Key features
 
 Strata Sync provides a focused set of capabilities for building collaborative, offline-ready applications.
@@ -33,13 +35,14 @@ Strata Sync follows a five-step workflow from schema to sync.
 
 The table below highlights the most-differentiated aspects of each solution.
 
-| Feature             | Strata Sync            | TanStack DB           | InstantDB            | PowerSync            | Zero                 |
-| ------------------- | ---------------------- | --------------------- | -------------------- | -------------------- | -------------------- |
-| Local storage       | IndexedDB              | In-memory             | IndexedDB            | SQLite (WASM)        | SQLite (WASM)        |
-| Conflict resolution | Field-level LWW rebase | Custom per-collection | Server-authoritative | Server-authoritative | Server-authoritative |
-| Rich-text collab    | Yjs CRDT               | None                  | None                 | None                 | None                 |
-| Offline writes      | Persistent outbox      | Optimistic mutations  | Pending mutations    | Write-ahead log      | Optimistic mutations |
-| Undo/redo           | Built-in               | None                  | None                 | None                 | None                 |
+| Feature             | Strata Sync            | Linear (proprietary)   | TanStack DB           | InstantDB            | PowerSync            | Zero                 |
+| ------------------- | ---------------------- | ---------------------- | --------------------- | -------------------- | -------------------- | -------------------- |
+| Local storage       | IndexedDB              | IndexedDB              | In-memory             | IndexedDB            | SQLite (WASM)        | SQLite (WASM)        |
+| Conflict resolution | Field-level LWW rebase | Field-level LWW rebase | Custom per-collection | Server-authoritative | Server-authoritative | Server-authoritative |
+| Rich-text collab    | Yjs CRDT               | Proprietary            | None                  | None                 | None                 | None                 |
+| Offline writes      | Persistent outbox      | Persistent outbox      | Optimistic mutations  | Pending mutations    | Write-ahead log      | Optimistic mutations |
+| Undo/redo           | Built-in               | Built-in               | None                  | None                 | None                 | None                 |
+| Open source         | MIT                    | No                     | MIT                   | Apache 2.0           | Apache 2.0           | Apache 2.0           |
 
 ## Packages
 

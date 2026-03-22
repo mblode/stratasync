@@ -147,9 +147,9 @@ const Home = async () => {
                   Sync that works offline.
                 </h1>
                 <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-foreground/60 md:text-2xl">
-                  A local-first sync engine for TypeScript, React, and Next.js.
-                  Every read is instant. Every write works offline. Every client
-                  converges.
+                  The sync architecture Linear made famous. Open-source, for
+                  your app. Every read is instant. Every write works offline.
+                  Every client converges.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -162,6 +162,11 @@ const Home = async () => {
                     </a>
                   </Button>
                 </div>
+
+                <p className="mt-4 text-sm text-foreground/40">
+                  Implements the server-sequenced sync protocol pioneered by
+                  Linear. Independent. Open-source. Extended.
+                </p>
               </div>
             </section>
           </div>
