@@ -5,17 +5,15 @@ import {
   useSyncClientInstance,
 } from "@stratasync/react";
 import { observer } from "mobx-react-lite";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useState } from "react";
 
-import { DEV_GROUP_ID } from "@/lib/sync/config";
-import type { Todo } from "@/lib/sync/models/todo";
-
-const formatTimestamp = (value: number) =>
-  new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+import { Badge } from "@/components/ui/badge.js";
+import { Button } from "@/components/ui/button.js";
+import { Checkbox } from "@/components/ui/checkbox.js";
+import { Input } from "@/components/ui/input.js";
+import { DEV_GROUP_ID } from "@/lib/sync/config.js";
+import type { Todo } from "@/lib/sync/models/todo.js";
 
 const TodoItem = observer(
   ({
@@ -36,38 +34,28 @@ const TodoItem = observer(
     }, [onRemove, todo.id]);
 
     return (
-      <article
-        className="todo-item"
-        data-completed={todo.completed}
-        key={todo.id}
-      >
-        <input
-          aria-label={`Toggle ${todo.title}`}
+      <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+        <Checkbox
           checked={todo.completed}
-          className="todo-checkbox"
-          onChange={handleToggle}
-          type="checkbox"
+          onCheckedChange={handleToggle}
+          aria-label={`Toggle ${todo.title}`}
         />
-
-        <div className="todo-copy">
-          <span className="todo-title">{todo.title}</span>
-          <span className="todo-subtitle">
-            Group <code>{todo.groupId}</code> • Created{" "}
-            {formatTimestamp(todo.createdAt)}
-          </span>
-        </div>
-
-        <button className="ghost-button" onClick={handleRemove} type="button">
+        <span
+          className={`flex-1 text-sm ${todo.completed ? "text-muted line-through" : ""}`}
+        >
+          {todo.title}
+        </span>
+        <Button variant="ghost" size="sm" onClick={handleRemove}>
           Delete
-        </button>
-      </article>
+        </Button>
+      </div>
     );
   }
 );
 
 const ExamplePage = observer(function ExamplePage() {
   const client = useSyncClientInstance();
-  const { backlog, error, lastSyncId, status } = useConnectionState();
+  const { backlog, error, status } = useConnectionState();
   const isOffline = useIsOffline();
   const { data: todos, isLoading } = useQuery<Todo>("Todo", {
     orderBy: (a, b) => b.createdAt - a.createdAt,
@@ -76,32 +64,21 @@ const ExamplePage = observer(function ExamplePage() {
   const [draft, setDraft] = useState("");
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  const completedCount = todos.filter((todo) => todo.completed).length;
-  const getStatusTone = () => {
-    if (error) {
-      return "error";
-    }
-
-    if (isOffline || backlog > 0) {
-      return "warning";
-    }
-
-    return "ok";
-  };
-
-  const statusTone = getStatusTone();
+  const handleDraftChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      setDraft(event.currentTarget.value);
+    },
+    []
+  );
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const title = draft.trim();
-
       if (!title) {
         return;
       }
-
       setMutationError(null);
-
       try {
         await client.create("Todo", {
           completed: false,
@@ -124,7 +101,6 @@ const ExamplePage = observer(function ExamplePage() {
   const handleToggle = useCallback(
     async (todo: Todo) => {
       setMutationError(null);
-
       try {
         await client.update("Todo", todo.id, {
           completed: !todo.completed,
@@ -143,7 +119,6 @@ const ExamplePage = observer(function ExamplePage() {
   const handleRemove = useCallback(
     async (id: string) => {
       setMutationError(null);
-
       try {
         await client.delete("Todo", id);
       } catch (caughtError) {
@@ -157,123 +132,72 @@ const ExamplePage = observer(function ExamplePage() {
     [client]
   );
 
-  const handleDraftChange = useCallback(
-    (event: FormEvent<HTMLInputElement>) => {
-      setDraft(event.currentTarget.value);
-    },
-    []
-  );
+  const getStatusVariant = () => {
+    if (error) {
+      return "destructive" as const;
+    }
+    if (isOffline || backlog > 0) {
+      return "outline" as const;
+    }
+    return "secondary" as const;
+  };
+
+  const getStatusText = () => {
+    if (error) {
+      return "error";
+    }
+    if (isOffline) {
+      return "offline";
+    }
+    if (backlog > 0) {
+      return `${backlog} pending`;
+    }
+    return status;
+  };
 
   return (
-    <main className="app-shell">
-      <section className="hero-card">
-        <span className="eyebrow">Offline first + realtime</span>
+    <main className="mx-auto max-w-lg px-4 py-12">
+      <div className="mb-8 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Todos</h1>
+        <Badge variant={getStatusVariant()}>{getStatusText()}</Badge>
+      </div>
 
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <h1>Todo sync, without a demo-shaped gap.</h1>
-            <p>
-              This starter shows the full Strata Sync loop: IndexedDB-backed
-              local reads, optimistic writes, server sequencing, and live
-              updates over WebSocket.
-            </p>
-
-            <div className="hero-stats">
-              <div className="stat-card">
-                <span>Total todos</span>
-                <strong>{todos.length}</strong>
-              </div>
-
-              <div className="stat-card">
-                <span>Completed</span>
-                <strong>{completedCount}</strong>
-              </div>
-
-              <div className="stat-card">
-                <span>Outbox backlog</span>
-                <strong>{backlog}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="status-stack">
-            <div className="status-pill" data-tone={statusTone}>
-              <div>
-                <div className="status-label">Sync state</div>
-                <strong>{isOffline ? "offline" : status}</strong>
-                <div className="status-meta">
-                  Last sync id: <code>{String(lastSyncId)}</code>
-                </div>
-              </div>
-
-              <div>
-                <div className="status-label">Queue</div>
-                <strong>{backlog > 0 ? `${backlog} pending` : "clear"}</strong>
-              </div>
-            </div>
-
-            <div className="status-pill" data-tone={error ? "error" : "ok"}>
-              <div>
-                <div className="status-label">Transport</div>
-                <strong>{error ? "attention needed" : "healthy"}</strong>
-                <div className="status-meta">
-                  {error
-                    ? error.message
-                    : "Client writes stay local first and reconcile on sync."}
-                </div>
-              </div>
-            </div>
-          </div>
+      {mutationError ? (
+        <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {mutationError}
         </div>
-      </section>
+      ) : null}
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Todo list</h2>
-            <p>Open this page in two tabs, or stop the API and keep writing.</p>
-          </div>
-        </div>
+      <form className="mb-6 flex gap-2" onSubmit={handleSubmit}>
+        <Input
+          className="flex-1"
+          onChange={handleDraftChange}
+          placeholder="What needs to be done?"
+          value={draft}
+        />
+        <Button type="submit">Add</Button>
+      </form>
 
-        {mutationError ? (
-          <div className="error-banner">{mutationError}</div>
+      <div className="space-y-2">
+        {isLoading && todos.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted">Loading...</p>
         ) : null}
 
-        <form className="todo-form" onSubmit={handleSubmit}>
-          <input
-            className="todo-input"
-            onChange={handleDraftChange}
-            placeholder="Add a todo..."
-            value={draft}
+        {!isLoading && todos.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted">
+            No todos yet. Create one above.
+          </p>
+        ) : null}
+
+        {todos.map((todo) => (
+          <TodoItem
+            key={todo.id}
+            onRemove={handleRemove}
+            onToggle={handleToggle}
+            todo={todo}
           />
-
-          <button className="primary-button" type="submit">
-            Create todo
-          </button>
-        </form>
-
-        <div className="todo-list">
-          {isLoading && todos.length === 0 ? (
-            <div className="empty-state">Bootstrapping local state...</div>
-          ) : null}
-
-          {!isLoading && todos.length === 0 ? (
-            <div className="empty-state">
-              Nothing synced yet. Create a todo, refresh, then open a second
-              tab.
-            </div>
-          ) : null}
-
-          {todos.map((todo) => (
-            <TodoItem
-              key={todo.id}
-              onRemove={handleRemove}
-              onToggle={handleToggle}
-              todo={todo}
-            />
-          ))}
-        </div>
-      </section>
+        ))}
+      </div>
     </main>
   );
 });
