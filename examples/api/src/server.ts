@@ -62,7 +62,7 @@ const sync = await createSyncServer({
   auth: {
     resolveGroups: (userId) => syncDao.getUserGroups(userId),
     verifyToken: (token) =>
-      token === DEV_TOKEN ? { userId: DEV_USER_ID } : null,
+      Promise.resolve(token === DEV_TOKEN ? { userId: DEV_USER_ID } : null),
   },
   db,
   models: {
