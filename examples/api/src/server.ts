@@ -1,11 +1,8 @@
 import "dotenv/config";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
-import {
-  SyncDao,
-  createSyncServer,
-  type SyncModelConfig,
-} from "@stratasync/server";
+import type { SyncModelConfig } from "@stratasync/server";
+import { SyncDao, createSyncServer } from "@stratasync/server";
 import { inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify from "fastify";
@@ -63,8 +60,8 @@ const todoConfig: SyncModelConfig = {
 
 const sync = await createSyncServer({
   auth: {
-    resolveGroups: async (userId) => await syncDao.getUserGroups(userId),
-    verifyToken: async (token) =>
+    resolveGroups: (userId) => syncDao.getUserGroups(userId),
+    verifyToken: (token) =>
       token === DEV_TOKEN ? { userId: DEV_USER_ID } : null,
   },
   db,
@@ -84,7 +81,7 @@ const fastify = Fastify({
 await fastify.register(cors, { origin: true });
 await fastify.register(websocket);
 
-fastify.get("/health", async () => ({
+fastify.get("/health", () => ({
   ok: true,
 }));
 
@@ -96,16 +93,14 @@ const shutdown = async () => {
   await queryClient.end();
 };
 
-process.on("SIGINT", () => {
-  void shutdown().finally(() => {
-    process.exit(0);
-  });
+process.on("SIGINT", async () => {
+  await shutdown();
+  process.exit(0);
 });
 
-process.on("SIGTERM", () => {
-  void shutdown().finally(() => {
-    process.exit(0);
-  });
+process.on("SIGTERM", async () => {
+  await shutdown();
+  process.exit(0);
 });
 
 const address = await fastify.listen({

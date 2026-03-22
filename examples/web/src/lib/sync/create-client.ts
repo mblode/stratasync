@@ -31,7 +31,7 @@ export const getSyncClient = (): SyncClient => {
 
   const transport = new GraphQLTransportAdapter({
     auth: {
-      getAccessToken: () => DEV_TOKEN,
+      getAccessToken: () => Promise.resolve(DEV_TOKEN),
     },
     endpoint: `${API_BASE_URL}/sync`,
     syncEndpoint: `${API_BASE_URL}/sync`,
