@@ -5,6 +5,27 @@ description: React hooks for Yjs collaborative document editing and presence man
 
 The collaborative editing hooks integrate Yjs CRDT documents with React components. They require the `yjs` peer dependency and a configured Yjs transport on the sync client.
 
+## Prerequisites
+
+Both hooks require three things to function.
+
+1. The `yjs` peer dependency installed in your project
+2. A Yjs transport configured on the sync client via `yjsTransport`
+3. The sync client accessible via `SyncProvider`
+
+```ts
+import { createSyncClient } from "@stratasync/client";
+
+const client = createSyncClient({
+  // ... storage, transport, reactivity
+  yjsTransport: createYjsTransport({
+    wsEndpoint: "wss://api.example.com/yjs",
+  }),
+});
+```
+
+If `client.yjs` is `undefined` (no Yjs transport configured), `useYjsDocument` sets an error state and `useYjsPresence` operations become no-ops.
+
 ## useYjsDocument
 
 Manages a Yjs collaborative document lifecycle, including connection, content tracking, and session awareness.
@@ -37,13 +58,12 @@ function DescriptionEditor({ taskId }: { taskId: string }) {
   return (
     <div>
       {isSessionActive && (
-        <div className="text-sm text-gray-500">
+        <div>
           Collaborating with: {participants.map((p) => p.userId).join(", ")}
         </div>
       )}
-      {/* Your editor component (Tiptap, ProseMirror, etc.) */}
       <RichTextEditor doc={doc} onFocus={focus} onBlur={blur} />
-      {error && <div className="text-red-500">{error.message}</div>}
+      {error && <div>{error.message}</div>}
     </div>
   );
 }
@@ -53,7 +73,7 @@ function DescriptionEditor({ taskId }: { taskId: string }) {
 
 ### DocumentKey
 
-Identifies a collaborative field on a model instance:
+Identifies a collaborative field on a model instance.
 
 ```ts
 interface DocumentKey {
@@ -65,12 +85,12 @@ interface DocumentKey {
 
 ### UseYjsDocumentOptions
 
-| Option           | Type      | Default | Description                                          |
-| ---------------- | --------- | ------- | ---------------------------------------------------- |
-| `initialContent` | `string`  | --      | Initial content if the document is empty.            |
-| `autoConnect`    | `boolean` | `false` | Automatically connect when the component mounts.     |
-| `editing`        | `boolean` | --      | Whether to start in editing mode (signals presence). |
-| `skip`           | `boolean` | `false` | Skip connecting entirely.                            |
+| Option           | Type      | Default | Description                                      |
+| ---------------- | --------- | ------- | ------------------------------------------------ |
+| `initialContent` | `string`  | --      | Initial content if the document is empty.        |
+| `autoConnect`    | `boolean` | `false` | Automatically connect when the component mounts. |
+| `editing`        | `boolean` | --      | Start in editing mode (signals presence).        |
+| `skip`           | `boolean` | `false` | Skip connecting entirely.                        |
 
 ### UseYjsDocumentResult
 
@@ -84,8 +104,8 @@ interface DocumentKey {
 | `content`         | `string`               | Current text content of the document.                            |
 | `connect`         | `() => void`           | Connect to the document.                                         |
 | `disconnect`      | `() => void`           | Disconnect from the document.                                    |
-| `focus`           | `() => void`           | Signal that the user started editing.                            |
-| `blur`            | `() => void`           | Signal that the user stopped editing.                            |
+| `focus`           | `() => void`           | Signal that you started editing.                                 |
+| `blur`            | `() => void`           | Signal that you stopped editing.                                 |
 | `error`           | `Error \| null`        | Any error that occurred.                                         |
 
 ### SessionParticipant
@@ -134,27 +154,27 @@ function TaskEditor({ taskId }: { taskId: string }) {
 
 ### UseYjsPresenceOptions
 
-| Option            | Type      | Default | Description                                                       |
-| ----------------- | --------- | ------- | ----------------------------------------------------------------- |
-| `trackFocus`      | `boolean` | `false` | Track focus using `focusin`/`focusout` events on the ref element. |
-| `trackVisibility` | `boolean` | `false` | Track visibility using `IntersectionObserver` on the ref element. |
-| `skip`            | `boolean` | `false` | Skip presence tracking.                                           |
+| Option            | Type      | Default | Description                                              |
+| ----------------- | --------- | ------- | -------------------------------------------------------- |
+| `trackFocus`      | `boolean` | `false` | Track focus via `focusin`/`focusout` on the ref element. |
+| `trackVisibility` | `boolean` | `false` | Track visibility via `IntersectionObserver`.             |
+| `skip`            | `boolean` | `false` | Skip presence tracking.                                  |
 
 ### UseYjsPresenceResult
 
-| Field          | Type                                                        | Description                            |
-| -------------- | ----------------------------------------------------------- | -------------------------------------- |
-| `startViewing` | `() => void`                                                | Start viewing the document.            |
-| `stopViewing`  | `() => void`                                                | Stop viewing the document.             |
-| `focus`        | `() => void`                                                | Signal editing focus.                  |
-| `blur`         | `() => void`                                                | Signal editing blur.                   |
-| `isViewing`    | `boolean`                                                   | Whether the user is currently viewing. |
-| `isEditing`    | `boolean`                                                   | Whether the user is currently editing. |
-| `getRef`       | `<T extends HTMLElement>() => (element: T \| null) => void` | Ref callback for auto-tracking.        |
+| Field          | Type                                                        | Description                          |
+| -------------- | ----------------------------------------------------------- | ------------------------------------ |
+| `startViewing` | `() => void`                                                | Start viewing the document.          |
+| `stopViewing`  | `() => void`                                                | Stop viewing the document.           |
+| `focus`        | `() => void`                                                | Signal editing focus.                |
+| `blur`         | `() => void`                                                | Signal editing blur.                 |
+| `isViewing`    | `boolean`                                                   | Whether you're viewing the document. |
+| `isEditing`    | `boolean`                                                   | Whether you're editing the document. |
+| `getRef`       | `<T extends HTMLElement>() => (element: T \| null) => void` | Ref callback for auto-tracking.      |
 
 ### Auto-tracking with getRef
 
-The `getRef` callback attaches event listeners and an `IntersectionObserver` to the referenced element:
+The `getRef` callback attaches event listeners and an `IntersectionObserver` to the referenced element.
 
 ```tsx
 function AutoTrackedEditor({ taskId }: { taskId: string }) {
@@ -165,41 +185,10 @@ function AutoTrackedEditor({ taskId }: { taskId: string }) {
 
   return (
     <div ref={getRef()}>
-      {/* Focus tracking: focusin/focusout on this container */}
-      {/* Visibility tracking: IntersectionObserver on this container */}
       <textarea />
     </div>
   );
 }
 ```
 
-When you enable `trackVisibility`:
-
-- Viewing starts when the element becomes visible (intersection ratio > 0.1)
-- Viewing stops when the element leaves the viewport
-
-When you enable `trackFocus`:
-
-- Editing starts on `focusin` inside the container
-- Editing stops on `focusout` when focus leaves the container entirely
-
-## Prerequisites
-
-Both hooks require:
-
-1. A `yjs` peer dependency installed in your project
-2. A Yjs transport configured on the sync client via `yjsTransport`
-3. The sync client accessible via `SyncProvider`
-
-```ts
-import { createSyncClient } from "@stratasync/client";
-
-const client = createSyncClient({
-  // ... storage, transport, reactivity
-  yjsTransport: createYjsTransport({
-    wsEndpoint: "wss://api.example.com/yjs",
-  }),
-});
-```
-
-If `client.yjs` is `undefined` (no Yjs transport configured), `useYjsDocument` will set an error state and `useYjsPresence` operations will be no-ops.
+With `trackVisibility` enabled, viewing starts when the element becomes visible (intersection ratio > 0.1) and stops when it leaves the viewport. With `trackFocus` enabled, editing starts on `focusin` inside the container and stops on `focusout` when focus leaves the container.

@@ -3,11 +3,22 @@ title: Client access hooks
 description: React hooks for accessing the sync client instance, readiness state, and sync lifecycle.
 ---
 
-Client access hooks provide direct access to the sync client and its lifecycle state. They are the foundation that other hooks are built on.
+Client access hooks give you direct access to the sync client and its lifecycle state. All other hooks in this package build on top of them.
+
+## Choosing the right hook
+
+Pick the hook that matches what you need from the sync client.
+
+| Need                              | Hook                    | Returns            |
+| --------------------------------- | ----------------------- | ------------------ |
+| Full context (client + all state) | `useSyncClient`         | `SyncContextValue` |
+| The client instance alone         | `useSyncClientInstance` | `SyncClient`       |
+| Is data loaded?                   | `useSyncReady`          | `boolean`          |
+| Current state string              | `useSyncState`          | `SyncClientState`  |
 
 ## useSyncClient
 
-Returns the full sync context value. This is the most general-purpose hook -- all other hooks in the package are built on top of it.
+Returns the full sync context value, including the client instance, connection state, and all derived flags.
 
 ```tsx
 import { useSyncClient } from "@stratasync/react";
@@ -67,7 +78,7 @@ Throws an error if called outside of a `SyncProvider`.
 
 ## useSyncClientInstance
 
-Returns just the `SyncClient` instance from context. Use this when you need to call client methods directly.
+Returns the `SyncClient` instance from context. Use this when you need to call client methods directly.
 
 ```tsx
 import { useSyncClientInstance } from "@stratasync/react";
@@ -88,17 +99,16 @@ function CreateTaskButton() {
 
 **Signature:** `useSyncClientInstance(): SyncClient`
 
-This is a convenience wrapper:
+Equivalent to destructuring `client` from `useSyncClient()`:
 
 ```ts
-// These are equivalent:
 const client = useSyncClientInstance();
 const { client } = useSyncClient();
 ```
 
 ## useSyncReady
 
-Returns `true` when the sync client has finished bootstrapping and is in the `"syncing"` state. Use this to gate UI rendering until data is available.
+Returns `true` when the sync client has finished bootstrapping and entered the `"syncing"` state. Use this to gate UI rendering until data is available.
 
 ```tsx
 import { useSyncReady } from "@stratasync/react";
@@ -116,16 +126,11 @@ function AppContent() {
 
 **Signature:** `useSyncReady(): boolean`
 
-The `isReady` flag becomes `true` when `state === "syncing"`, meaning:
-
-- The client has connected to the server
-- Bootstrap data has been loaded
-- The delta subscription is active
-- The identity map is populated with initial data
+The `isReady` flag becomes `true` when `state === "syncing"`, meaning the client has connected, bootstrap data has loaded, the delta subscription is active, and the identity map is populated.
 
 ## useSyncState
 
-Returns the current `SyncClientState` value.
+Returns the current `SyncClientState` string value.
 
 ```tsx
 import { useSyncState } from "@stratasync/react";
@@ -148,14 +153,3 @@ function StateIndicator() {
 **Signature:** `useSyncState(): SyncClientState`
 
 Returns one of: `"disconnected"`, `"connecting"`, `"bootstrapping"`, `"syncing"`, `"error"`.
-
-## Choosing the right hook
-
-| Need                              | Hook                    | Returns            |
-| --------------------------------- | ----------------------- | ------------------ |
-| Full context (client + all state) | `useSyncClient`         | `SyncContextValue` |
-| Just the client instance          | `useSyncClientInstance` | `SyncClient`       |
-| Is data loaded?                   | `useSyncReady`          | `boolean`          |
-| Current state string              | `useSyncState`          | `SyncClientState`  |
-
-Use `useSyncReady` for simple "show spinner until ready" patterns. Use `useSyncClient` when you need access to multiple context values in one component. Use `useSyncClientInstance` when you only need to call mutation methods.

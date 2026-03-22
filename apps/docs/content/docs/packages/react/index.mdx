@@ -3,15 +3,7 @@ title: "@stratasync/react"
 description: React hooks and provider for connecting components to the Strata Sync engine.
 ---
 
-`@stratasync/react` provides React bindings for the Strata Sync engine. It includes a `SyncProvider` context component and a comprehensive set of hooks for reading models, querying data, monitoring connection state, and collaborating in real-time.
-
-## What it provides
-
-- **SyncProvider** -- context provider that wraps your component tree and manages the sync client lifecycle
-- **Data hooks** -- `useModel`, `useModelState`, `useModelSuspense`, `useQuery`, `useQueryAll`, `useQueryCount`
-- **Connection hooks** -- `useConnectionState`, `useIsOffline`, `usePendingCount`, `useSync`
-- **Client hooks** -- `useSyncClient`, `useSyncClientInstance`, `useSyncReady`, `useSyncState`
-- **Collaborative hooks** -- `useYjsDocument`, `useYjsPresence`
+`@stratasync/react` provides React bindings for the Strata Sync engine, including a `SyncProvider` context component and hooks for reading models, querying data, monitoring connection state, and collaborating in real time.
 
 ## Installation
 
@@ -20,6 +12,8 @@ npm install @stratasync/react
 ```
 
 ### Peer dependencies
+
+Both packages must be installed alongside `@stratasync/react`.
 
 | Package | Required version       |
 | ------- | ---------------------- |
@@ -30,7 +24,7 @@ npm install @stratasync/react
 
 ### 1. Set up the provider
 
-Wrap your component tree with `SyncProvider` and pass a configured sync client:
+Wrap your component tree with `SyncProvider` and pass a configured sync client.
 
 ```tsx
 import { SyncProvider } from "@stratasync/react";
@@ -84,7 +78,7 @@ function TaskList() {
 
 ## SyncProvider
 
-The `SyncProvider` component creates a React context that holds the sync client and its reactive state. All sync hooks must be called within this provider.
+`SyncProvider` creates a React context that holds the sync client and its reactive state. All sync hooks must be called within this provider.
 
 ```tsx
 <SyncProvider
@@ -107,7 +101,7 @@ The `SyncProvider` component creates a React context that holds the sync client 
 
 ### SyncContext
 
-The raw React context object is also exported as `SyncContext`. This is primarily useful for testing, where you may want to provide a mock sync client directly:
+The raw `SyncContext` object is exported for testing. You can provide a mock sync client directly.
 
 ```tsx
 import { SyncContext } from "@stratasync/react";
@@ -120,7 +114,7 @@ import { SyncContext } from "@stratasync/react";
 
 ### Context value
 
-The provider exposes the following values via context (accessible through `useSyncClient`):
+The provider exposes the following values via context, accessible through `useSyncClient`.
 
 | Field             | Type              | Description                                            |
 | ----------------- | ----------------- | ------------------------------------------------------ |

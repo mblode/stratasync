@@ -3,9 +3,11 @@ title: "@stratasync/storage-idb"
 description: IndexedDB storage adapter for offline-first client-side persistence in Strata Sync.
 ---
 
-`@stratasync/storage-idb` provides the IndexedDB implementation of the `StorageAdapter` interface. It persists synced model data, transaction outbox, sync metadata, partial indexes, and sync actions to the browser's IndexedDB, enabling offline-first operation and instant startup from cached data.
+`@stratasync/storage-idb` implements the `StorageAdapter` interface using IndexedDB. It persists synced model data, the transaction outbox, sync metadata, partial indexes, and sync actions to the browser, enabling offline-first operation and instant startup from cached data.
 
 ## What it provides
+
+This package includes the adapter, a database manager, and granular store operations.
 
 - **`createIndexedDbStorage`** -- factory function that creates a configured `StorageAdapter` instance
 - **`IndexedDbStorageAdapter`** -- the class implementing the full `StorageAdapter` interface
@@ -36,11 +38,11 @@ const client = createSyncClient({
 });
 ```
 
-The sync client opens the storage adapter automatically during initialization. You don't need to call `open()` manually unless you're using the adapter outside of the sync client.
+The sync client opens the storage adapter during initialization. You don't need to call `open()` manually unless you're using the adapter outside of the sync client.
 
 ## StorageAdapter interface
 
-The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/client`:
+The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/client`.
 
 ### Lifecycle
 
@@ -99,7 +101,7 @@ The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/cli
 
 ### StorageOptions
 
-The sync client typically passes these options to the `open()` method:
+The sync client passes these options to the `open()` method.
 
 ```ts
 interface StorageOptions {
@@ -122,7 +124,7 @@ When you don't provide `name`, the adapter computes the database name determinis
 
 ### StorageMeta
 
-Sync metadata stored in the `_meta` object store:
+Sync metadata stored in the `_meta` object store.
 
 ```ts
 interface StorageMeta {
@@ -140,7 +142,7 @@ interface StorageMeta {
 
 ### ModelPersistenceMeta
 
-Per-model persistence tracking:
+Per-model persistence tracking.
 
 ```ts
 interface ModelPersistenceMeta {
@@ -152,7 +154,7 @@ interface ModelPersistenceMeta {
 
 ### BatchOperation
 
-Used with `writeBatch` for atomic multi-store writes:
+Used with `writeBatch` for atomic multi-store writes.
 
 ```ts
 type BatchOperationType = "put" | "delete";
@@ -167,7 +169,7 @@ interface BatchOperation {
 
 ### PartialIndexEntry
 
-Tracks which partial index keys have been fetched from the server:
+Tracks which partial index keys have been fetched from the server.
 
 ```ts
 interface PartialIndexEntry {
@@ -180,7 +182,10 @@ interface PartialIndexEntry {
 
 ## Internal database structure
 
-The adapter manages multiple IndexedDB databases:
+<details>
+<summary>Expand to see the internal IndexedDB database layout</summary>
+
+The adapter manages multiple IndexedDB databases.
 
 ### Workspace database
 
@@ -209,20 +214,17 @@ A top-level `stratasync_databases` database tracks all workspace databases:
 | ----------- | ------ | ------------------------------------------------------------------------------ |
 | `databases` | `name` | Maps database names to `DatabaseInfo` (userId, version, schemaHash, and more). |
 
+</details>
+
 ## Schema migrations
 
-When the model schema changes (the adapter detects this via `computeSchemaHash` from `@stratasync/core`), the adapter automatically:
-
-1. Increments the IndexedDB version number
-2. Creates new object stores for changed models (using deterministic hash-based names)
-3. Creates indexes for `@Property({ indexed: true })` fields, group keys, and composite indexes
-4. Preserves existing stores for unchanged models
+When the model schema changes (detected via `computeSchemaHash` from `@stratasync/core`), the adapter automatically increments the IndexedDB version, creates new object stores for changed models, creates indexes for `@Property({ indexed: true })` fields, and preserves existing stores for unchanged models.
 
 This happens transparently during `open()`. The adapter doesn't delete old model stores -- they become unreachable but remain in the database until you clear it.
 
 ## Multi-workspace support
 
-The adapter supports multiple users and versions through deterministic database naming:
+The adapter supports multiple users and versions through deterministic database naming.
 
 ```ts
 import { computeWorkspaceDatabaseName } from "@stratasync/storage-idb";
@@ -241,6 +243,8 @@ Each user/version combination gets its own IndexedDB database, so switching acco
 
 ### Store name functions
 
+These functions generate deterministic names for stores and databases.
+
 ```ts
 import {
   computeModelStoreName,
@@ -257,7 +261,7 @@ import {
 
 ### Granular store operations
 
-For advanced use cases, the package exports individual store operation functions:
+For testing and advanced use, the package exports individual store operation functions.
 
 ```ts
 import {
@@ -271,68 +275,34 @@ import {
   // Metadata
   getMetadata,
   setMetadata,
-  updateMetadata,
   getLastSyncId,
   setLastSyncId,
-  getFirstSyncId,
-  setFirstSyncId,
-  getClientId,
-  setClientId,
   isBootstrapComplete,
   setBootstrapComplete,
-  checkSchemaHash,
-  getGroups,
-  setGroups,
-  addGroup,
-  removeGroup,
-  areModelsPersisted,
-  getModelPersistence,
-  setModelPersistence,
-  setModelsPersisted,
 
   // Outbox
   addTransaction,
-  getTransaction,
   getAllTransactions,
-  getQueuedTransactions,
-  getSentTransactions,
-  getFailedTransactions,
   getTransactionsByState,
-  getPendingCount,
   markTransactionSent,
   markTransactionCompleted,
   markTransactionFailed,
-  requeueTransaction,
-  resetSentToQueued,
   removeTransaction,
-  removeTransactions,
-  updateTransaction,
   clearOutbox,
 
   // Partial indexes
   getPartialIndex,
   setPartialIndex,
   hasPartialIndex,
-  getAllPartialIndexes,
   clearPartialIndexes,
-  createPartialIndexKey,
-  parsePartialIndexKey,
-
-  // Constants
-  META_STORE,
-  TRANSACTION_STORE,
-  PARTIAL_INDEX_STORE,
-  SYNC_META_KEY,
-  DEFAULT_META,
-  MAX_RETRY_COUNT,
 } from "@stratasync/storage-idb";
 ```
 
-The sync client primarily uses these internally but exports them for testing and advanced customization.
+The package exports additional granular operations for metadata fields, outbox management, and partial index utilities beyond those shown here.
 
 ## Architecture role
 
-`@stratasync/storage-idb` is an adapter package that provides client-side persistence:
+`@stratasync/storage-idb` provides client-side persistence for the sync client.
 
 ```
 sync-core (defines Transaction, SyncAction types)
@@ -340,4 +310,4 @@ sync-core (defines Transaction, SyncAction types)
         ^-- sync-client (uses adapter for offline persistence)
 ```
 
-The sync client depends on a `StorageAdapter` implementation at runtime. `@stratasync/storage-idb` is the IndexedDB implementation for browser environments. The same `StorageAdapter` interface could be implemented with other storage backends such as SQLite or in-memory stores.
+The sync client depends on a `StorageAdapter` implementation at runtime. The same interface can be implemented with other storage backends (SQLite, in-memory stores).

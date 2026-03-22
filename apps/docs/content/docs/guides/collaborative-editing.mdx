@@ -3,23 +3,13 @@ title: Collaborative editing with Yjs
 description: Set up real-time, multi-user collaborative editing using CRDTs, presence tracking, and rich-text editor integration.
 ---
 
-Strata Sync uses [Yjs](https://yjs.dev), a CRDT (Conflict-free Replicated Data Type) framework, to power real-time collaborative editing. Unlike Operational Transform (OT), CRDTs guarantee convergence without a central ordering server, making them a natural fit for an offline-first architecture.
+Strata Sync uses Yjs, a CRDT (Conflict-free Replicated Data Type) library, for collaborative fields. Unlike Operational Transform (OT), CRDTs merge without a central server.
 
-This guide walks through setting up collaborative editing from scratch, including document management, presence tracking, and editor integration.
-
-## CRDT approach vs. Operational Transform
-
-| Aspect                  | CRDT (Yjs)                          | OT (Google Docs-style)                                |
-| ----------------------- | ----------------------------------- | ----------------------------------------------------- |
-| Central server required | No -- peers can merge independently | Yes -- server must order operations                   |
-| Offline support         | Native -- merge when reconnected    | Difficult -- operations must be transformed in order  |
-| Convergence guarantee   | Mathematical -- all peers converge  | Algorithmic -- depends on correct transform functions |
-| Complexity              | In the data structure               | In the transformation logic                           |
-| Strata Sync choice      | Yjs CRDTs for collaborative fields  | Standard sync for non-collaborative fields            |
-
-Strata Sync takes a hybrid approach: regular model fields use the server-sequenced sync protocol with last-writer-wins semantics, while rich-text or collaborative fields use Yjs CRDTs for character-level merge resolution.
+Regular model fields use server-sequenced sync with last-writer-wins semantics. Rich-text or collaborative fields use Yjs CRDTs for character-level merge resolution.
 
 ## Architecture overview
+
+Each client's editor binds to a local Yjs document that syncs through the shared WebSocket connection.
 
 ```mermaid
 flowchart TB
@@ -45,9 +35,9 @@ flowchart TB
 
 Key design decisions:
 
-- **Live sessions are demand-driven**: The server starts a full editing session only when at least one user is actively editing and another user is viewing the same document. This reduces server resource usage by approximately 96% compared to always-on sessions.
-- **Existing WebSocket reused**: Yjs updates piggyback on the same WebSocket connection used for regular sync, avoiding additional connections.
-- **Standard sync as durability backbone**: Each client continues to sync periodically via the standard protocol. If the live editing subsystem goes down, no data is lost.
+- **Demand-driven sessions**: The server starts a live editing session only when at least two users view the same document and one is editing. This cuts server resource usage by roughly 96%.
+- **Shared WebSocket**: Yjs updates piggyback on the same WebSocket connection used for regular sync, so you don't need additional connections.
+- **Standard sync as fallback**: Each client syncs periodically through the standard protocol. If the live editing subsystem goes down, no data is lost.
 
 ## Setting up YjsDocumentManager
 
@@ -58,7 +48,6 @@ import { YjsDocumentManager } from "@stratasync/y-doc";
 import type { YjsTransportAdapter } from "@stratasync/transport-graphql";
 
 // The transport adapter provides the WebSocket connection
-// It is typically obtained from the sync client's transport
 const yjsTransport: YjsTransportAdapter = transport.createYjsAdapter();
 
 const documentManager = new YjsDocumentManager({
@@ -68,7 +57,7 @@ const documentManager = new YjsDocumentManager({
 
 ### Getting a document
 
-Call `getDocument` to obtain a Yjs `Y.Doc` for a specific model instance. The manager handles creating, caching, and connecting documents.
+Call `getDocument` to get a Yjs `Y.Doc` for a specific model instance. The manager creates, caches, and connects documents automatically.
 
 ```ts
 import type { DocumentKey } from "@stratasync/y-doc";
@@ -139,7 +128,7 @@ export function CollaborativeEditor({ taskId }: { taskId: string }) {
 
 ## Presence tracking with useYjsPresence
 
-Presence tracking shows who is viewing or editing a document, where their cursor is, and their selection state.
+The `useYjsPresence` hook shows who's viewing or editing a document, along with cursor position and selection state.
 
 ```tsx
 "use client";
@@ -153,8 +142,6 @@ export function PresenceBar({ taskId }: { taskId: string }) {
     fieldName: "description",
   });
 
-  // Note: Individual session information is available via useYjsDocument's
-  // participants field. This example shows presence tracking only.
   return (
     <div className="flex gap-2">
       <div className="text-sm">Viewing: {isViewing ? "Yes" : "No"}</div>
@@ -166,7 +153,7 @@ export function PresenceBar({ taskId }: { taskId: string }) {
 
 ### Managing presence state
 
-The `useYjsPresence` hook provides methods to signal viewing and editing state:
+You signal viewing and editing state through these methods.
 
 ```ts
 const { startViewing, stopViewing, focus, blur, isViewing, isEditing } =
@@ -176,61 +163,24 @@ const { startViewing, stopViewing, focus, blur, isViewing, isEditing } =
     fieldName: "description",
   });
 
-// Start viewing when the user navigates to the document
+// Start viewing when you navigate to the document
 startViewing();
 
-// Signal editing when the user focuses an input
+// Signal editing when you focus an input
 focus(); // Automatically calls startViewing() if not already viewing
 
-// Signal blur when the user leaves the input
+// Signal blur when you leave the input
 blur();
 
-// Stop viewing when the user navigates away
+// Stop viewing when you navigate away
 stopViewing();
 ```
 
-The `YjsPresenceManager` behind the scenes handles these signals and broadcasts them to other participants. You can also use `trackFocus` and `trackVisibility` options to automatically handle these events via a ref callback.
-
-## Message protocol
-
-Yjs messages are transported inside the existing WebSocket connection using type-prefixed envelopes. The protocol follows the standard Yjs sync protocol:
-
-### Sync handshake
-
-When a client joins a live session, it exchanges state vectors with the server to converge:
-
-1. **Sync Step 1**: Client sends its state vector to the server.
-2. **Sync Step 2**: Server responds with the diff (updates the client is missing).
-3. **Incremental updates**: After the handshake, both sides send incremental updates as edits occur.
-
-### Message types
-
-| Message prefix   | Purpose                                          |
-| ---------------- | ------------------------------------------------ |
-| `yjs_sync_step1` | Client sends state vector                        |
-| `yjs_sync_step2` | Server sends missing updates                     |
-| `yjs_update`     | Incremental CRDT update (binary, base64-encoded) |
-| `doc_view`       | Client started/stopped viewing a document        |
-| `doc_focus`      | Client started/stopped editing (has input focus) |
-| `session_state`  | Session metadata (active viewers, editors)       |
-| `live_editing_*` | Live editing session lifecycle events            |
-
-### Example update envelope
-
-```json
-{
-  "type": "yjs_update",
-  "docId": "task-abc-123",
-  "payload": "AQECBAIBAQ==",
-  "clientId": "client-xyz"
-}
-```
-
-Updates are binary Yjs payloads, base64-encoded when the WebSocket envelope uses JSON.
+You can also use the `trackFocus` and `trackVisibility` options to handle these events automatically through a ref callback.
 
 ## Session lifecycle
 
-Live editing sessions are resource-intensive, so the server only creates them when needed:
+The server creates live editing sessions on demand and tears them down after a grace period.
 
 ```mermaid
 stateDiagram-v2
@@ -242,13 +192,13 @@ stateDiagram-v2
     LiveSession --> [*]: All users leave
 ```
 
-When no live session exists, each client operates independently using the standard sync protocol. Each client sends edits as CRDT deltas rather than full document content, so when a live session starts, all clients can merge seamlessly.
+When no live session exists, each client operates independently using the standard sync protocol. Clients send edits as CRDT deltas rather than full document content, so all clients merge seamlessly when a live session starts.
 
 ## Integration with rich-text editors
 
 ### Tiptap
 
-[Tiptap](https://tiptap.dev) is a headless rich-text editor built on ProseMirror that has first-class Yjs support via `@tiptap/extension-collaboration`.
+[Tiptap](https://tiptap.dev) has first-class Yjs support through `@tiptap/extension-collaboration`. Disable Tiptap's built-in history since Yjs handles undo/redo.
 
 ```tsx
 "use client";
@@ -269,19 +219,11 @@ export function TiptapEditor({ taskId }: { taskId: string }) {
   const editor = useEditor(
     {
       extensions: [
-        StarterKit.configure({
-          // Disable default history -- Yjs handles undo/redo
-          history: false,
-        }),
-        Collaboration.configure({
-          document: doc ?? undefined,
-        }),
+        StarterKit.configure({ history: false }),
+        Collaboration.configure({ document: doc ?? undefined }),
         CollaborationCursor.configure({
           provider: null, // Strata Sync handles transport
-          user: {
-            name: "Current User",
-            color: "#3b82f6",
-          },
+          user: { name: "Current User", color: "#3b82f6" },
         }),
       ],
     },
@@ -312,46 +254,22 @@ export function TiptapEditor({ taskId }: { taskId: string }) {
 
 ### ProseMirror (direct)
 
-If you use ProseMirror directly (without Tiptap), bind using `y-prosemirror`:
+If you use ProseMirror directly, bind through `y-prosemirror`.
 
 ```ts
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin } from "y-prosemirror";
 
-const plugins = [
-  ySyncPlugin(yText),
-  yCursorPlugin(awareness),
-  yUndoPlugin(),
-  // ...other ProseMirror plugins
-];
+const plugins = [ySyncPlugin(yText), yCursorPlugin(awareness), yUndoPlugin()];
 ```
 
-The `yText` and `awareness` objects come from the Yjs document and presence manager respectively.
+Get the `yText` and `awareness` objects from the Yjs document and presence manager. For the full message protocol and internal details, see the [@stratasync/y-doc API reference](/docs/packages/sync-y-doc).
 
 ## Offline collaboration
 
-One of the key advantages of the CRDT approach is seamless offline support:
-
-1. A user edits a document while offline. The client applies changes to the local `Y.Doc` and buffers them.
-2. The standard sync mechanism continues to send CRDT deltas (not full document content) to the server when connectivity returns.
-3. If another user edited the same document while the first user was offline, both sets of changes merge automatically -- character by character, without conflicts.
-4. The server diffs API writes that send full document content against the current state, producing minimal CRDT updates that integrate with ongoing editing sessions.
-
-This means a user can work on an airplane, and when they land, their changes merge cleanly with everything that happened while they were offline.
-
-## Server-side update handling
-
-Every CRDT update the server receives goes through:
-
-1. **Authentication**: The server verifies the client has write permission for the document.
-2. **Validation**: The server checks size limits and decodes the binary payload.
-3. **Application**: The server applies the update to the in-memory `Y.Doc` (or a short-lived instance from the latest snapshot).
-4. **Distribution**: The server appends to the Redis update log and publishes via PubSub to other sync servers.
-5. **Persistence**: The server periodically flushes the derived content to the database so non-live users receive updates via the standard sync protocol.
-
-Redis stores a compact snapshot plus a bounded log of recent updates. Compaction happens when the log exceeds a size or count threshold, or when a session tears down.
+You can edit a document while offline -- the client applies changes to the local `Y.Doc` and buffers them. When connectivity returns, the standard sync mechanism sends CRDT deltas to the server. If another user edited the same document in the meantime, both sets of changes merge automatically at the character level without conflicts.
 
 ## Next steps
 
 - [Conflict Resolution](/docs/guides/conflict-resolution) -- How non-CRDT fields handle concurrent edits.
 - [Offline-First Patterns](/docs/guides/offline-first) -- Deep dive into the outbox and reconnection flow.
-- [sync-y-doc API Reference](/docs/packages/sync-y-doc) -- Full API documentation for `YjsDocumentManager` and `YjsPresenceManager`.
+- [@stratasync/y-doc API Reference](/docs/packages/sync-y-doc) -- Full API for `YjsDocumentManager`, `YjsPresenceManager`, and the message protocol.

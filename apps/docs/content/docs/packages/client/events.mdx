@@ -3,11 +3,11 @@ title: Event system
 description: Subscribe to sync lifecycle events for state management and UI updates.
 ---
 
-The sync client emits events throughout the sync lifecycle. Subscribe to these events to update UI state, show notifications, or trigger side effects.
+The sync client emits typed events throughout the sync lifecycle. You subscribe to these events to update UI, show notifications, or trigger side effects.
 
 ## Subscribing to events
 
-Use `onEvent` to subscribe to all event types. It returns an unsubscribe function.
+Use `onEvent` to listen to all event types. It returns an unsubscribe function.
 
 ```ts
 const unsubscribe = client.onEvent((event) => {
@@ -33,6 +33,8 @@ unsubscribe();
 
 ## Specialized subscribers
 
+For narrower subscriptions, use these convenience methods instead of filtering inside `onEvent`.
+
 ### onStateChange
 
 Subscribe to sync state transitions only.
@@ -56,113 +58,66 @@ const unsubscribe = client.onConnectionStateChange((state) => {
 
 ## Event types
 
-### syncStart
+Every event carries a `type` discriminant you can switch on.
 
-Emitted when a sync cycle begins.
-
-```ts
-{
-  type: "syncStart";
-}
-```
-
-### syncComplete
-
-Emitted when a sync cycle completes successfully.
-
-```ts
-{
-  type: "syncComplete",
-  lastSyncId: number // The highest sync ID received
-}
-```
-
-### syncError
-
-Emitted when a sync cycle fails.
+| Event Name         | Key Fields                                                                           | Description                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `syncStart`        | —                                                                                    | A sync cycle has begun.                                                            |
+| `syncComplete`     | `lastSyncId: number`                                                                 | A sync cycle finished. `lastSyncId` is the highest sync ID received.               |
+| `syncError`        | `error: Error`                                                                       | A sync cycle failed.                                                               |
+| `stateChange`      | `state: SyncClientState`                                                             | The client transitioned to a new sync state.                                       |
+| `connectionChange` | `state: ConnectionState`                                                             | The transport connection state changed.                                            |
+| `outboxChange`     | `pendingCount: number`                                                               | The count of unsynced transactions changed.                                        |
+| `modelChange`      | `modelName: string`, `modelId: string`, `action: ModelChangeAction`                  | A model was inserted, updated, deleted, archived, or unarchived (local or server). |
+| `rebaseConflict`   | `modelName: string`, `modelId: string`, `conflictType: string`, `resolution: string` | A conflict was detected during transaction rebasing.                               |
 
 ```ts
-{
-  type: "syncError",
-  error: Error // The error that occurred
-}
-```
+// Full type definitions
 
-### stateChange
+type SyncEvent =
+  | { type: "syncStart" }
+  | { type: "syncComplete"; lastSyncId: number }
+  | { type: "syncError"; error: Error }
+  | { type: "stateChange"; state: SyncClientState }
+  | { type: "connectionChange"; state: ConnectionState }
+  | { type: "outboxChange"; pendingCount: number }
+  | {
+      type: "modelChange";
+      modelName: string;
+      modelId: string;
+      action: ModelChangeAction;
+    }
+  | {
+      type: "rebaseConflict";
+      modelName: string;
+      modelId: string;
+      conflictType: string;
+      resolution: string;
+    };
 
-Emitted when the client state transitions.
-
-```ts
-{
-  type: "stateChange",
-  state: SyncClientState
-  // "disconnected" | "connecting" | "bootstrapping" | "syncing" | "error"
-}
-```
-
-### connectionChange
-
-Emitted when the transport connection state changes.
-
-```ts
-{
-  type: "connectionChange",
-  state: ConnectionState
-}
-```
-
-### outboxChange
-
-Emitted when the pending transaction count changes.
-
-```ts
-{
-  type: "outboxChange",
-  pendingCount: number // Current count of unsynced transactions
-}
-```
-
-### modelChange
-
-Emitted when a model is inserted, updated, deleted, archived, or unarchived -- either from a local mutation or a server delta.
-
-```ts
-{
-  type: "modelChange",
-  modelName: string,  // such as "Task"
-  modelId: string,    // such as "task-123"
-  action: ModelChangeAction
-  // "insert" | "update" | "delete" | "archive" | "unarchive"
-}
-```
-
-### rebaseConflict
-
-Emitted when a conflict is detected during transaction rebasing.
-
-```ts
-{
-  type: "rebaseConflict",
-  modelName: string,     // such as "Task"
-  modelId: string,       // such as "task-123"
-  conflictType: string,  // such as "field_conflict"
-  resolution: string     // such as "server-wins"
-}
+type ModelChangeAction =
+  | "insert"
+  | "update"
+  | "delete"
+  | "archive"
+  | "unarchive";
 ```
 
 ## SyncClientState values
 
-| State             | Description                                                       |
-| ----------------- | ----------------------------------------------------------------- |
-| `"disconnected"`  | Not connected to the server.                                      |
-| `"connecting"`    | Establishing a connection.                                        |
-| `"bootstrapping"` | Loading initial data from the server.                             |
-| `"syncing"`       | Connected and actively syncing deltas. This is the "ready" state. |
-| `"error"`         | An unrecoverable error occurred.                                  |
+These are the possible values for the `state` field on `stateChange` events.
+
+| State             | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| `"disconnected"`  | Not connected to the server.                             |
+| `"connecting"`    | Establishing a connection.                               |
+| `"bootstrapping"` | Loading initial data from the server.                    |
+| `"syncing"`       | Connected and syncing deltas. This is the "ready" state. |
+| `"error"`         | An unrecoverable error occurred.                         |
 
 ## Usage with React
 
-The React bindings in `@stratasync/react` wrap these events in hooks. You typically don't need to use `onEvent` directly in React applications:
+The `@stratasync/react` package wraps these events in hooks. You don't need to call `onEvent` directly in React apps.
 
 ```tsx
 import { useConnectionState, usePendingCount } from "@stratasync/react";
@@ -182,40 +137,4 @@ function SyncStatus() {
 }
 ```
 
-## Practical example: sync indicator
-
-```ts
-const client = createSyncClient({
-  /* ... */
-});
-
-let pendingCount = 0;
-let isOnline = true;
-
-client.onEvent((event) => {
-  switch (event.type) {
-    case "outboxChange":
-      pendingCount = event.pendingCount;
-      updateUI();
-      break;
-    case "connectionChange":
-      isOnline = event.state !== "disconnected";
-      updateUI();
-      break;
-    case "syncError":
-      showNotification(`Sync failed: ${event.error.message}`);
-      break;
-  }
-});
-
-// Your application's UI helper functions
-function updateUI() {
-  if (!isOnline) {
-    showBadge("Offline");
-  } else if (pendingCount > 0) {
-    showBadge(`${pendingCount} pending`);
-  } else {
-    showBadge("Synced");
-  }
-}
-```
+See [Offline-first patterns](/docs/guides/offline-first) for a complete sync status indicator example.

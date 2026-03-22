@@ -3,13 +3,15 @@ title: "@stratasync/mobx"
 description: MobX reactivity adapter for observable model properties and automatic UI updates in Strata Sync.
 ---
 
-`@stratasync/mobx` provides the MobX implementation of the `ReactivityAdapter` interface defined in `@stratasync/core`. It makes synced model properties observable so that MobX-powered React components (via `mobx-react-lite` or `observer`) automatically re-render when model data changes.
+`@stratasync/mobx` implements the `ReactivityAdapter` interface from `@stratasync/core` using MobX. It makes synced model properties observable so MobX-powered React components re-render when data changes.
 
 ## What it provides
 
-- **`mobxReactivityAdapter`** -- a pre-configured singleton that implements the `ReactivityAdapter` interface using MobX observables, computed values, reactions, and batched updates
-- **`createMobXReactivity`** -- a factory function that returns the same adapter (useful for explicit instantiation patterns)
-- **Core re-exports** -- all model decorators and base classes from `@stratasync/core` are re-exported for convenience
+This package exports the adapter, a factory function, and re-exported core APIs.
+
+- **`mobxReactivityAdapter`** -- a pre-configured singleton implementing `ReactivityAdapter` with MobX observables, computed values, reactions, and batched updates
+- **`createMobXReactivity`** -- a factory function returning the same adapter (useful for explicit instantiation)
+- **Core re-exports** -- model decorators and base classes from `@stratasync/core` (see [Re-exported core APIs](#re-exported-core-apis))
 
 ## Installation
 
@@ -25,7 +27,7 @@ npm install @stratasync/mobx mobx
 
 ## Usage
 
-Pass the MobX reactivity adapter when creating the sync client:
+Pass the adapter when creating the sync client.
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -37,38 +39,38 @@ const client = createSyncClient({
 });
 ```
 
-When you install this adapter, all model properties decorated with `@Property`, `@Reference`, `@ReferenceArray`, and others become MobX observables. This means:
+With this adapter installed, all model properties decorated with `@Property`, `@Reference`, `@ReferenceArray`, and others become MobX observables.
 
-- MobX `autorun`, `reaction`, and `when` will track reads and re-execute on changes
-- React components wrapped with `observer()` from `mobx-react-lite` will re-render when observed model properties change
-- The adapter wraps batch updates from the sync engine in `runInAction` to avoid unnecessary intermediate renders
+- MobX `autorun`, `reaction`, and `when` track reads and re-execute on changes
+- React components wrapped with `observer()` from `mobx-react-lite` re-render when observed properties change
+- Batch updates from the sync engine run inside `runInAction` to avoid unnecessary intermediate renders
 
 ## API reference
 
 ### mobxReactivityAdapter
 
-A singleton object implementing the `ReactivityAdapter` interface from `@stratasync/core`:
+A singleton object implementing `ReactivityAdapter` from `@stratasync/core`.
 
 ```ts
 import { mobxReactivityAdapter } from "@stratasync/mobx";
 ```
 
-The adapter implements the following methods:
+The adapter implements these methods:
 
-| Method                            | MobX Implementation               | Description                                                           |
-| --------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
-| `createBox(initialValue)`         | `observable` + `makeObservable`   | Creates a reactive boxed value.                                       |
-| `createMap(entries)`              | `observable.map`                  | Creates a reactive key-value map.                                     |
-| `createArray(items)`              | `observable.array`                | Creates a reactive array.                                             |
-| `makeObservable(target)`          | `observable(target)`              | Makes a plain object deeply observable.                               |
-| `batch(fn)`                       | `runInAction(fn)`                 | Batches multiple updates into a single reaction cycle.                |
-| `runInAction(fn)`                 | `runInAction(fn)`                 | Runs a function inside a MobX action.                                 |
-| `reaction(expr, effect, options)` | `reaction(expr, effect, options)` | Creates a MobX reaction that tracks an expression and runs an effect. |
-| `computed(getter)`                | `computed(getter)`                | Creates a MobX computed value.                                        |
+| Method                            | MobX Implementation               | Description                                                      |
+| --------------------------------- | --------------------------------- | ---------------------------------------------------------------- |
+| `createBox(initialValue)`         | `observable` + `makeObservable`   | Creates a reactive boxed value.                                  |
+| `createMap(entries)`              | `observable.map`                  | Creates a reactive key-value map.                                |
+| `createArray(items)`              | `observable.array`                | Creates a reactive array.                                        |
+| `makeObservable(target)`          | `observable(target)`              | Makes a plain object deeply observable.                          |
+| `batch(fn)`                       | `runInAction(fn)`                 | Batches multiple updates into a single reaction cycle.           |
+| `runInAction(fn)`                 | `runInAction(fn)`                 | Runs a function inside a MobX action.                            |
+| `reaction(expr, effect, options)` | `reaction(expr, effect, options)` | Creates a reaction that tracks an expression and runs an effect. |
+| `computed(getter)`                | `computed(getter)`                | Creates a MobX computed value.                                   |
 
 ### createMobXReactivity
 
-A factory function that returns the `mobxReactivityAdapter` singleton. Both approaches are equivalent:
+A factory function that returns the `mobxReactivityAdapter` singleton. Both approaches are equivalent.
 
 ```ts
 import { createMobXReactivity, mobxReactivityAdapter } from "@stratasync/mobx";
@@ -83,7 +85,7 @@ const adapter2 = createMobXReactivity();
 
 ### ReactivityAdapter interface
 
-The adapter conforms to this interface from `@stratasync/core`:
+The adapter conforms to this interface from `@stratasync/core`.
 
 ```ts
 interface ReactivityAdapter {
@@ -107,35 +109,21 @@ interface ReactivityAdapter {
 
 ## Re-exported core APIs
 
-For convenience, `@stratasync/mobx` re-exports the model base classes and decorators from `@stratasync/core`:
+For convenience, you can import model base classes and decorators directly from `@stratasync/mobx` instead of `@stratasync/core`.
 
 ```ts
 import {
-  // Model base classes
   Model,
   Collection,
-  LazyCollection,
-  CachedPromise,
-  resolvePromise,
-
-  // Decorators
   ClientModel,
   Property,
-  EphemeralProperty,
   Reference,
-  ManyToOne,
-  OneToMany,
-  BackReference,
   ReferenceArray,
-  ReferenceCollection,
-
-  // Observable helpers
-  makeObservableProperty,
-  makeReferenceModelProperty,
+  mobxReactivityAdapter,
 } from "@stratasync/mobx";
 ```
 
-This lets you define models and set up the reactivity adapter from a single import:
+This lets you define models and configure reactivity from a single import.
 
 ```ts
 import {
@@ -155,16 +143,11 @@ class Task extends Model {
 
 ## How it works
 
-When you initialize the sync client with the MobX reactivity adapter, all model instances use MobX observables internally:
-
-1. **Property reads** are tracked by MobX -- any `autorun`, `reaction`, `computed`, or `observer` component that reads a property receives notification when it changes
-2. **Property writes** from the sync engine (incoming deltas, bootstrap data) are wrapped in `runInAction` to batch multiple field updates into a single reaction cycle
-3. **Collections and references** use `observable.array` and `observable.map` under the hood, so adding/removing related models triggers reactive updates
-4. MobX automatically caches and invalidates **computed values** derived from model properties
+The adapter wraps all model property storage in MobX observables, so any `autorun`, `reaction`, `computed`, or `observer` component that reads a property receives notification on change. Incoming sync updates (deltas, bootstrap data) are wrapped in `runInAction` to batch multiple field updates into a single reaction cycle.
 
 ## Architecture role
 
-`@stratasync/mobx` is an adapter package that bridges `@stratasync/core` with MobX:
+`@stratasync/mobx` bridges `@stratasync/core` with MobX.
 
 ```
 sync-core (defines ReactivityAdapter interface)
@@ -172,4 +155,4 @@ sync-core (defines ReactivityAdapter interface)
         ^-- sync-client (uses adapter for observable state)
 ```
 
-The sync system is designed to be reactivity-agnostic. `@stratasync/mobx` is the MobX implementation, but the same `ReactivityAdapter` interface could be implemented with other state management libraries.
+The sync system is reactivity-agnostic. The same `ReactivityAdapter` interface can be implemented with other state management libraries.

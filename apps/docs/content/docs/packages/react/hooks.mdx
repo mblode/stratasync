@@ -3,11 +3,11 @@ title: Data hooks
 description: React hooks for reading single models and querying collections from the sync engine.
 ---
 
-Data hooks provide reactive access to synced models. They automatically re-render when the underlying data changes (via server deltas or local mutations).
+Data hooks give your components reactive access to synced models. They re-render automatically when the underlying data changes through server deltas or local mutations.
 
 ## useModel
 
-Reads a single model by ID using React Suspense. The component suspends while the sync client is bootstrapping or while a lazy model is being fetched.
+Reads a single model by ID using React Suspense. The component suspends while the sync client bootstraps or while a lazy model loads.
 
 ```tsx
 import { Suspense } from "react";
@@ -42,17 +42,9 @@ function TaskPage({ taskId }: { taskId: string }) {
 
 **Return value:** `T | null` -- the model instance or `null` if not found.
 
-**Behavior:**
-
-1. If `id` is `null` or `undefined`, returns `null` immediately (no suspension).
-2. If the client isn't ready (still bootstrapping), throws a promise (suspends).
-3. Reads from the identity map synchronously via `useSyncExternalStore`.
-4. If the model isn't cached and isn't marked as missing, throws a promise from `ensureModel` (suspends until loaded).
-5. Re-renders when a `modelChange` event fires for this model ID.
-
 ## useModelState
 
-Non-Suspense alternative to `useModel`. Returns a result object with explicit loading and error states.
+Non-Suspense alternative to `useModel`. Returns a result object with explicit loading and error states instead of suspending.
 
 ```tsx
 import { useModelState } from "@stratasync/react";
@@ -99,7 +91,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
 
 ## useModelSuspense
 
-Alias for `useModel`. Provided for explicit naming when you want to clarify that the component uses Suspense.
+Alias for `useModel`. Use it when you want to make the Suspense dependency explicit in your code.
 
 ```tsx
 import { useModelSuspense } from "@stratasync/react";
@@ -114,7 +106,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
 
 ## useQuery
 
-Queries models with filtering, sorting, and pagination. Does not use Suspense -- returns loading states explicitly.
+Queries models with filtering, sorting, and pagination. Returns loading states explicitly instead of using Suspense.
 
 ```tsx
 import { useQuery } from "@stratasync/react";
@@ -176,15 +168,9 @@ function TaskList({ projectId }: { projectId: string }) {
 | `hasMore`    | `boolean`             | Whether more results are available.     |
 | `refresh`    | `() => Promise<void>` | Re-execute the query.                   |
 
-**Behavior:**
-
-- On initial render, reads synchronously from the identity map to avoid a flash of empty state.
-- Re-executes when a `modelChange` event fires for the queried model name.
-- When `skip` is `true`, returns an empty array and doesn't execute.
-
 ## useQueryAll
 
-Queries all models of a type without pagination. A convenience wrapper around `useQuery` that omits `limit` and `offset`.
+Queries all models of a type without pagination. This is a convenience wrapper around `useQuery` that omits `limit` and `offset`.
 
 ```tsx
 import { useQueryAll } from "@stratasync/react";
@@ -207,7 +193,7 @@ function AllTasks() {
 
 ## useQueryCount
 
-Returns the count of models matching a filter. A convenience wrapper around `useQuery`.
+Returns the count of models matching a filter, without fetching the models themselves.
 
 ```tsx
 import { useQueryCount } from "@stratasync/react";

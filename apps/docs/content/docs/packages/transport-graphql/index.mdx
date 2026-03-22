@@ -3,9 +3,11 @@ title: "@stratasync/transport-graphql"
 description: GraphQL and REST transport adapter for sync communication, delta subscriptions, and Yjs collaborative editing in Strata Sync.
 ---
 
-`@stratasync/transport-graphql` provides the network transport layer for Strata Sync. It implements the `TransportAdapter` interface with support for NDJSON bootstrap streaming, REST and GraphQL mutations, WebSocket delta subscriptions, and Yjs collaborative editing messages -- all with built-in retry logic, exponential backoff, and timeout management.
+`@stratasync/transport-graphql` implements the `TransportAdapter` interface with NDJSON bootstrap streaming, REST and GraphQL mutations, WebSocket delta subscriptions, and Yjs collaborative editing -- all with built-in retry logic and exponential backoff.
 
 ## What it provides
+
+This package includes the transport adapter, WebSocket management, and streaming utilities.
 
 - **`createGraphQLTransport`** -- factory function that creates a configured `TransportAdapter` instance
 - **`GraphQLTransportAdapter`** -- the class implementing the full `TransportAdapter` interface
@@ -48,7 +50,7 @@ const client = createSyncClient({
 
 ## TransportAdapter interface
 
-The adapter implements the full `TransportAdapter` interface:
+The adapter implements the full `TransportAdapter` interface.
 
 | Method                    | Signature                                                                    | Description                                          |
 | ------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -57,7 +59,7 @@ The adapter implements the full `TransportAdapter` interface:
 | `mutate`                  | `(batch: TransactionBatch) => Promise<MutateResult>`                         | Sends a batch of mutations.                          |
 | `subscribe`               | `(options: SubscribeOptions) => DeltaSubscription`                           | Subscribes to real-time delta updates via WebSocket. |
 | `fetchDeltas`             | `(after: number, limit?: number) => Promise<DeltaPacket>`                    | Fetches deltas via REST for catch-up.                |
-| `getConnectionState`      | `() => ConnectionState`                                                      | Returns the current WebSocket connection state.      |
+| `getConnectionState`      | `() => ConnectionState`                                                      | Returns the WebSocket connection state.              |
 | `onConnectionStateChange` | `(callback) => () => void`                                                   | Subscribes to connection state changes.              |
 | `close`                   | `() => Promise<void>`                                                        | Closes the WebSocket connection.                     |
 
@@ -90,7 +92,7 @@ interface TransportOptions {
 
 ### AuthProvider
 
-The transport calls the authentication provider before each HTTP request and WebSocket subscription:
+The transport calls the auth provider before each HTTP request and WebSocket subscription.
 
 ```ts
 interface AuthProvider {
@@ -103,28 +105,9 @@ interface AuthProvider {
 }
 ```
 
-Example implementation:
-
-```ts
-const auth: AuthProvider = {
-  async getAccessToken() {
-    return localStorage.getItem("access_token");
-  },
-  async refreshToken() {
-    const response = await fetch("/api/refresh");
-    const { token } = await response.json();
-    localStorage.setItem("access_token", token);
-    return token;
-  },
-  onAuthError(error) {
-    window.location.href = "/login";
-  },
-};
-```
-
 ### RetryConfig
 
-Controls retry behavior for HTTP requests and WebSocket reconnection:
+Controls retry behavior for HTTP requests and WebSocket reconnection.
 
 ```ts
 interface RetryConfig {
@@ -152,7 +135,7 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 
 ## Bootstrap streaming
 
-The `bootstrap` method streams initial data as NDJSON (Newline-Delimited JSON) from the server:
+The `bootstrap` method streams initial data as NDJSON (Newline-Delimited JSON) from the server.
 
 ```ts
 const stream = transport.bootstrap({
@@ -170,7 +153,7 @@ for await (const row of stream) {
 const metadata = await stream.return(); // BootstrapMetadata
 ```
 
-The `batchLoad` method works similarly, but it fetches specific model instances:
+The `batchLoad` method works the same way but fetches specific model instances.
 
 ```ts
 const stream = transport.batchLoad({
@@ -188,25 +171,15 @@ for await (const row of stream) {
 
 ## Mutations
 
-The adapter supports two mutation modes:
+The adapter supports two mutation modes: REST (default) and GraphQL.
 
 ### REST mutations (default)
 
-When you don't configure a `mutationBuilder`, the adapter sends mutations as JSON to `{syncEndpoint}/mutate`:
-
-```ts
-const transport = createGraphQLTransport({
-  // No mutationBuilder -- uses REST
-  endpoint: "https://api.example.com/graphql",
-  syncEndpoint: "https://api.example.com/sync",
-  wsEndpoint: "wss://api.example.com/sync",
-  auth,
-});
-```
+When you don't configure a `mutationBuilder`, the adapter sends mutations as JSON to `{syncEndpoint}/mutate`.
 
 ### GraphQL mutations
 
-When you provide a `mutationBuilder`, the adapter sends mutations as a GraphQL `mutation` document:
+When you provide a `mutationBuilder`, the adapter sends mutations as a GraphQL `mutation` document. The builder receives each transaction and its batch index, and returns a `GraphQLMutationSpec`.
 
 ```ts
 import type {
@@ -229,7 +202,7 @@ const transport = createGraphQLTransport({
 });
 ```
 
-### GraphQLMutationSpec
+`GraphQLMutationSpec` has three properties:
 
 | Property        | Type                      | Description                                                                 |
 | --------------- | ------------------------- | --------------------------------------------------------------------------- |
@@ -239,7 +212,7 @@ const transport = createGraphQLTransport({
 
 ## WebSocket subscriptions
 
-The adapter uses WebSocket for real-time delta streaming:
+The adapter uses WebSocket for real-time delta streaming.
 
 ```ts
 const subscription = transport.subscribe({
@@ -260,9 +233,9 @@ subscription.unsubscribe();
 
 ### WebSocketManager
 
-The `WebSocketManager` handles connection lifecycle internally:
+The `WebSocketManager` handles connection lifecycle internally.
 
-- Automatically reconnects with exponential backoff on disconnect
+- Reconnects with exponential backoff on disconnect
 - Re-subscribes all active subscriptions after reconnection
 - Queues messages sent while disconnected and flushes them on reconnect
 - Routes Yjs/live-editing messages to the `YjsTransportAdapter`
@@ -280,31 +253,27 @@ The `WebSocketManager` handles connection lifecycle internally:
 
 ## Delta fetching
 
-For catch-up after reconnection, deltas can be fetched via REST:
+You can fetch deltas via REST for catch-up after reconnection. Use `fetchDeltas` for a single page or `fetchAllDeltas` for automatic pagination.
 
 ```ts
-import { fetchDeltas, fetchAllDeltas } from "@stratasync/transport-graphql";
-
-// Fetch a single page of deltas
+// Single page
 const packet = await transport.fetchDeltas(lastSyncId, 1000);
 
-// Or use the paginated generator
-const allDeltas = fetchAllDeltas(
-  "https://api.example.com/sync",
+// Paginated generator
+for await (const action of fetchAllDeltas(
+  syncEndpoint,
   lastSyncId,
   auth,
-  {}, // headers
-  1000 // batchSize
-);
-
-for await (const action of allDeltas) {
+  {},
+  1000
+)) {
   await applyAction(action);
 }
 ```
 
 ## Yjs transport
 
-The adapter provides a `YjsTransportAdapter` for collaborative editing:
+The adapter provides a `YjsTransportAdapter` for collaborative editing. It bridges Yjs protocol messages over the existing WebSocket connection that `WebSocketManager` manages, so you don't need a separate WebSocket.
 
 ```ts
 const yjsTransport = transport.getYjsTransport();
@@ -314,7 +283,7 @@ documentManager.setTransport(yjsTransport);
 presenceManager.setTransport(yjsTransport);
 ```
 
-The `YjsTransportAdapter` implements the `YjsTransport` interface from `@stratasync/y-doc`:
+The `YjsTransportAdapter` implements `YjsTransport` from `@stratasync/y-doc`:
 
 ```ts
 class YjsTransportAdapter implements YjsTransport {
@@ -325,26 +294,9 @@ class YjsTransportAdapter implements YjsTransport {
 }
 ```
 
-It bridges Yjs protocol messages over the existing WebSocket connection that `WebSocketManager` manages, so you don't need an additional WebSocket connection for collaborative editing.
-
 ## Retry utilities
 
-The package exports utility functions for error handling and retry logic:
-
-```ts
-import {
-  retryWithBackoff,
-  calculateBackoff,
-  delay,
-  fetchWithTimeout,
-  createTimeoutController,
-  isNetworkError,
-  isTimeoutError,
-  isRetryableError,
-  isAuthError,
-  parseBigInt,
-} from "@stratasync/transport-graphql";
-```
+The package exports utility functions for error handling and retry logic.
 
 | Function                                    | Description                                                             |
 | ------------------------------------------- | ----------------------------------------------------------------------- |
@@ -359,44 +311,9 @@ import {
 | `isAuthError(error)`                        | Returns `true` for 401/403 or Unauthorized/Forbidden errors.            |
 | `parseBigInt(value)`                        | Converts a string or number to a numeric value (for sync IDs).          |
 
-### Retry behavior
-
-The `retryWithBackoff` function uses exponential backoff with optional jitter:
-
-```
-delay = min(baseDelay * 2^attempt, maxDelay) +/- (jitter * delay)
-```
-
-With the default configuration (`baseDelay: 1000`, `maxDelay: 30000`, `jitter: 0.2`):
-
-| Attempt | Base delay | With jitter (approx.) |
-| ------- | ---------- | --------------------- |
-| 0       | 1s         | 0.8s -- 1.2s          |
-| 1       | 2s         | 1.6s -- 2.4s          |
-| 2       | 4s         | 3.2s -- 4.8s          |
-| 3       | 8s         | 6.4s -- 9.6s          |
-
-The adapter retries only errors classified as retryable (network, timeout, 5xx, 429). Auth errors (401/403) and client errors (4xx) fail immediately.
-
-## GraphQL types
-
-```ts
-interface GraphQLError {
-  message: string;
-  locations?: Array<{ line: number; column: number }>;
-  path?: Array<string | number>;
-  extensions?: { code?: string; [key: string]: unknown };
-}
-
-interface GraphQLResponse<T> {
-  data?: T;
-  errors?: GraphQLError[];
-}
-```
-
 ## Architecture role
 
-`@stratasync/transport-graphql` is the network adapter that connects the sync client to the server:
+`@stratasync/transport-graphql` connects the sync client to the server.
 
 ```
 sync-core (defines TransactionBatch, DeltaPacket, and more)
@@ -405,4 +322,4 @@ sync-core (defines TransactionBatch, DeltaPacket, and more)
               ^-- sync-client (uses adapter for all server communication)
 ```
 
-The sync client depends on a `TransportAdapter` implementation at runtime. `@stratasync/transport-graphql` is the GraphQL/REST/WebSocket implementation. The same `TransportAdapter` interface could be implemented with other protocols such as gRPC or custom WebSocket.
+The sync client depends on a `TransportAdapter` implementation at runtime. The same interface can be implemented with other protocols (gRPC, custom WebSocket).

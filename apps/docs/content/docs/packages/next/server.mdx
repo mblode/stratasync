@@ -3,9 +3,7 @@ title: Server utilities
 description: Server-side bootstrap prefetching and serialization for Next.js Server Components.
 ---
 
-The server utilities in `@stratasync/next/server` allow you to prefetch sync data on the server and pass it to client components. This reduces time-to-interactive by eliminating the client-side bootstrap network request.
-
-Import server utilities from the `/server` sub-path:
+The server utilities in `@stratasync/next/server` prefetch sync data on the server and pass it to client components. This eliminates the client-side bootstrap network request and reduces time-to-interactive.
 
 ```ts
 import {
@@ -28,7 +26,6 @@ import {
 } from "@stratasync/next/server";
 
 export default async function DashboardPage() {
-  // getServerToken() is your authentication helper that returns the user's JWT
   const snapshot = await prefetchBootstrap({
     endpoint: process.env.SYNC_ENDPOINT!,
     authorization: `Bearer ${await getServerToken()}`,
@@ -46,6 +43,8 @@ export default async function DashboardPage() {
 
 ### PrefetchBootstrapOptions
 
+These options configure the bootstrap prefetch request.
+
 | Option          | Type                     | Default  | Description                                            |
 | --------------- | ------------------------ | -------- | ------------------------------------------------------ |
 | `endpoint`      | `string`                 | Required | Sync server endpoint URL.                              |
@@ -57,6 +56,8 @@ export default async function DashboardPage() {
 | `timeout`       | `number`                 | `10000`  | Request timeout in milliseconds.                       |
 
 ### BootstrapSnapshot
+
+The snapshot contains the complete bootstrap response: all model rows, sync cursor positions, and metadata for staleness checking.
 
 ```ts
 interface BootstrapSnapshot {
@@ -71,11 +72,9 @@ interface BootstrapSnapshot {
 }
 ```
 
-The snapshot contains the complete bootstrap response: all model rows with their data, the sync cursor positions, and metadata for staleness checking.
-
 ## serializeBootstrapSnapshot
 
-Serializes a bootstrap snapshot for transfer across the Server Component boundary. The function supports optional gzip compression.
+Serializes a bootstrap snapshot for transfer across the Server Component boundary. Supports optional gzip compression.
 
 ```ts
 const payload = await serializeBootstrapSnapshot(snapshot);
@@ -88,11 +87,15 @@ const payload = await serializeBootstrapSnapshot(snapshot);
 
 ### SerializeBootstrapOptions
 
+These options control snapshot serialization behavior.
+
 | Option     | Type      | Default                                   | Description                        |
 | ---------- | --------- | ----------------------------------------- | ---------------------------------- |
 | `compress` | `boolean` | `true` (if `CompressionStream` available) | Whether to gzip-compress the data. |
 
 ### BootstrapSnapshotPayload
+
+The payload wraps the serialized data with encoding metadata.
 
 ```ts
 interface BootstrapSnapshotPayload {
@@ -102,11 +105,11 @@ interface BootstrapSnapshotPayload {
 }
 ```
 
-When compression is available (Node.js 18+ / modern browsers), the function gzip-compresses and base64-encodes the data. This significantly reduces the size of the serialized prop passed through the component boundary.
+When compression is available (Node.js 18+ / modern browsers), the function gzip-compresses and base64-encodes the data. This reduces the size of the serialized prop passed through the component boundary.
 
 ## encodeBootstrapSnapshot
 
-Encodes a bootstrap snapshot to a single JSON string (wraps `serializeBootstrapSnapshot` and `JSON.stringify`).
+Encodes a bootstrap snapshot to a single JSON string. Wraps `serializeBootstrapSnapshot` and `JSON.stringify`.
 
 ```ts
 const encoded = await encodeBootstrapSnapshot(snapshot);
@@ -117,14 +120,13 @@ const encoded = await encodeBootstrapSnapshot(snapshot);
 
 ## prefetchModels
 
-Prefetches specific model data from a server endpoint. Useful when you only need a subset of models for a particular page.
+Prefetches specific model data from a server endpoint. Use this when you need only a subset of models for a particular page.
 
 ```tsx
 // app/dashboard/page.tsx (Server Component)
 import { prefetchModels } from "@stratasync/next/server";
 
 export default async function DashboardPage() {
-  // getServerToken() is your authentication helper that returns the user's JWT
   const result = await prefetchModels({
     endpoint: process.env.API_URL + "/sync/prefetch",
     authorization: `Bearer ${await getServerToken()}`,
@@ -143,6 +145,8 @@ export default async function DashboardPage() {
 
 ### PrefetchOptions
 
+These options configure selective model prefetching.
+
 | Option          | Type                               | Default  | Description                               |
 | --------------- | ---------------------------------- | -------- | ----------------------------------------- |
 | `endpoint`      | `string`                           | Required | Prefetch API endpoint.                    |
@@ -151,6 +155,8 @@ export default async function DashboardPage() {
 | `timeout`       | `number`                           | `5000`   | Request timeout in milliseconds.          |
 
 ### PrefetchResult
+
+`PrefetchResult` is a plain object you can pass directly through the Server Component boundary via props without additional serialization.
 
 ```ts
 interface PrefetchResult {
@@ -164,42 +170,6 @@ interface PrefetchedData {
 }
 ```
 
-`PrefetchResult` is a plain object and can be passed directly through the Server Component boundary via `JSON.stringify` / props without additional serialization.
+## Complete SSR example
 
-## Complete SSR bootstrap example
-
-```tsx
-// app/layout.tsx (Server Component)
-import {
-  prefetchBootstrap,
-  encodeBootstrapSnapshot,
-} from "@stratasync/next/server";
-import { AppProviders } from "./providers";
-
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  let bootstrapData: string | undefined;
-
-  try {
-    // getServerToken() is your authentication helper that returns the user's JWT
-    const snapshot = await prefetchBootstrap({
-      endpoint: process.env.SYNC_ENDPOINT!,
-      authorization: `Bearer ${await getServerToken()}`,
-    });
-    bootstrapData = await encodeBootstrapSnapshot(snapshot);
-  } catch {
-    // Fall back to client-side bootstrap
-  }
-
-  return (
-    <html>
-      <body>
-        <AppProviders bootstrapData={bootstrapData}>{children}</AppProviders>
-      </body>
-    </html>
-  );
-}
-```
+See [SSR and bootstrap](/docs/guides/ssr-bootstrap) for a complete Next.js App Router example.

@@ -3,14 +3,16 @@ title: "@stratasync/next"
 description: Next.js App Router integration with server-side bootstrap prefetching and client-side sync provider.
 ---
 
-`@stratasync/next` provides Next.js App Router integration for Strata Sync. It includes server-side bootstrap prefetching for fast page loads, a client-side `NextSyncProvider` that handles initialization, and re-exports all hooks from `@stratasync/react`.
+`@stratasync/next` integrates Strata Sync with the Next.js App Router. It provides server-side bootstrap prefetching for fast page loads, a client-side `NextSyncProvider` that manages initialization, and re-exports all hooks from `@stratasync/react`.
 
 ## What it provides
+
+Each entry point exposes a distinct set of utilities.
 
 **Client-side (default import / `@stratasync/next/client`):**
 
 - `NextSyncProvider` -- App Router compatible provider with loading and error states
-- Most hooks from `@stratasync/react` (re-exported with `"use client"` directive). Note: `useModelState` is **not** re-exported from `@stratasync/next` -- import it directly from `@stratasync/react` if needed.
+- Most hooks from `@stratasync/react` (re-exported with `"use client"` directive). `useModelState` is **not** re-exported -- import it directly from `@stratasync/react` if needed.
 - Bootstrap decoding and seeding utilities
 - Stale checking for prefetched data
 
@@ -22,11 +24,15 @@ description: Next.js App Router integration with server-side bootstrap prefetchi
 
 ## Installation
 
+Install the package with npm.
+
 ```bash
 npm install @stratasync/next
 ```
 
 ### Peer dependencies
+
+You need these peer dependencies installed alongside `@stratasync/next`.
 
 | Package | Required version       |
 | ------- | ---------------------- |
@@ -35,7 +41,7 @@ npm install @stratasync/next
 
 ## Package exports
 
-The package has separate entry points for server and client code:
+The package uses separate entry points for server and client code.
 
 ```ts
 // Client-side (default) -- includes "use client" directive
@@ -51,37 +57,14 @@ import {
 } from "@stratasync/next/server";
 ```
 
-The conditional export in `package.json` automatically selects the right entry point:
+The conditional export in `package.json` resolves automatically:
 
 - **Browser:** resolves to `./dist/client.js`
 - **Node.js:** resolves to `./dist/server.js`
 
 ## Quick start
 
-### 1. Create the client (client component)
-
-```tsx
-// app/sync-client.ts
-"use client";
-
-import { createSyncClient } from "@stratasync/client";
-import { createIndexedDbStorage } from "@stratasync/storage-idb";
-import { createGraphQLTransport } from "@stratasync/transport-graphql";
-import { createMobXReactivity } from "@stratasync/mobx";
-
-export const syncClient = createSyncClient({
-  storage: createIndexedDbStorage(),
-  transport: createGraphQLTransport({
-    endpoint: process.env.NEXT_PUBLIC_API_URL + "/graphql",
-    syncEndpoint: process.env.NEXT_PUBLIC_API_URL + "/sync",
-    wsEndpoint: process.env.NEXT_PUBLIC_WS_URL + "/sync",
-    auth: { getAccessToken: async () => getAccessToken() },
-  }),
-  reactivity: createMobXReactivity(),
-});
-```
-
-### 2. Set up the provider
+Set up the provider and start using hooks. For SSR bootstrap prefetching, see [SSR and bootstrap](/docs/guides/ssr-bootstrap).
 
 ```tsx
 // app/providers.tsx
@@ -103,28 +86,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-### 3. Use in layout
-
-```tsx
-// app/layout.tsx
-import { Providers } from "./providers";
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
-    </html>
-  );
-}
-```
-
-### 4. Use hooks in page components
+Then wrap your layout and use hooks in client components.
 
 ```tsx
 // app/tasks/page.tsx
@@ -151,7 +113,7 @@ export default function TasksPage() {
 
 ## Architecture role
 
-`@stratasync/next` sits at the top of the dependency graph:
+`@stratasync/next` sits at the top of the dependency graph.
 
 ```
 sync-core
@@ -160,7 +122,7 @@ sync-core
               ^-- sync-next (client + server entry points)
 ```
 
-The server entry point only imports from `@stratasync/core` and `@stratasync/client` (no React). The client entry point re-exports everything from `@stratasync/react` with the `"use client"` directive.
+The server entry point imports only from `@stratasync/core` and `@stratasync/client` (no React). The client entry point re-exports everything from `@stratasync/react` with the `"use client"` directive.
 
 ## Pages in this section
 

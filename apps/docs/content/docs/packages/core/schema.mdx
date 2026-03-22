@@ -3,43 +3,28 @@ title: Schema and registry
 description: ModelRegistry for runtime schema metadata, schema hashing, and load strategy configuration.
 ---
 
-The schema system in `@stratasync/core` provides runtime metadata about your models, their properties, and relationships. The `ModelRegistry` is the central registry that decorators write to and the sync engine reads from.
+`ModelRegistry` stores runtime metadata about your models, properties, and relationships. Decorators populate it at module load time, and the sync engine reads from it at runtime.
 
 ## ModelRegistry
 
-`ModelRegistry` serves two roles:
-
-1. **Static registry** -- class-level maps populated by decorators at module load time
-2. **Instance registry** -- constructed from a schema snapshot for server-side or serialized schema usage
+`ModelRegistry` operates in two modes: a **static registry** that decorators write to at import time, and an **instance registry** constructed from a serialized snapshot for server-side use.
 
 ### Static API
 
-The static methods operate on the global registry populated by decorators:
+Static methods read from the global registry that decorators populate.
 
 ```ts
 import { ModelRegistry } from "@stratasync/core";
 
-// Check registered models
 const names = ModelRegistry.getModelNames();
 // ["Workspace", "Project", "Task", ...]
 
-// Get metadata for a model
 const meta = ModelRegistry.getModelMetadata("Task");
 // { name: "Task", loadStrategy: "instant" }
 
-// Get property metadata
 const props = ModelRegistry.getModelProperties("Task");
 // Map { "title" => { type: "property" }, "projectId" => { type: "reference", ... } }
 
-// Get bootstrap model names (instant load strategy)
-const bootstrapModels = ModelRegistry.getBootstrapModelNames();
-// ["Workspace", "Project", "Task"]
-
-// Get partial model names
-const partialModels = ModelRegistry.getPartialModelNames();
-// ["Comment", "Attachment"]
-
-// Compute schema hash
 const hash = ModelRegistry.getSchemaHash();
 // "a1b2c3d4"
 ```
@@ -51,27 +36,26 @@ const hash = ModelRegistry.getSchemaHash();
 | `registerModel(name, ctor, meta)`      | `void`                          | Registers a model (called by `@ClientModel`). |
 | `registerProperty(target, name, meta)` | `void`                          | Registers a property (called by decorators).  |
 | `getModelNames()`                      | `string[]`                      | All registered model names.                   |
-| `getModelMetadata(name)`               | `ModelMetadata \| undefined`    | Metadata for a specific model.                |
-| `getModelConstructor(name)`            | `ModelConstructor \| undefined` | Constructor class for a model name.           |
+| `getModelMetadata(name)`               | `ModelMetadata \| undefined`    | Metadata for one model.                       |
+| `getModelConstructor(name)`            | `ModelConstructor \| undefined` | Constructor for a model name.                 |
 | `getModelName(ctor)`                   | `string \| undefined`           | Model name for a constructor.                 |
 | `hasModel(name)`                       | `boolean`                       | Whether a model is registered.                |
-| `getModelMetadataEntries()`            | `[string, ModelMetadata][]`     | All model metadata entries.                   |
-| `getBootstrapModelNames()`             | `string[]`                      | Models with `loadStrategy: "instant"`.        |
-| `getPartialModelNames()`               | `string[]`                      | Models with `loadStrategy: "partial"`.        |
-| `getModelProperties(name)`             | `Map<string, PropertyMetadata>` | All property metadata for a model.            |
-| `getReferencedProperties(name)`        | `Map<string, PropertyMetadata>` | Reference/collection properties.              |
+| `getModelMetadataEntries()`            | `[string, ModelMetadata][]`     | All metadata entries.                         |
+| `getBootstrapModelNames()`             | `string[]`                      | Models with `instant` load strategy.          |
+| `getPartialModelNames()`               | `string[]`                      | Models with `partial` load strategy.          |
+| `getModelProperties(name)`             | `Map<string, PropertyMetadata>` | Property metadata map for a model.            |
+| `getReferencedProperties(name)`        | `Map<string, PropertyMetadata>` | Reference and collection properties only.     |
 | `getPropertyNames(name)`               | `string[]`                      | Sorted property names.                        |
 | `getSchemaHash()`                      | `string`                        | Deterministic hash of the full schema.        |
 | `snapshot()`                           | `ModelRegistrySnapshot`         | Serializable snapshot of the registry.        |
 
 ### Instance API
 
-For server-side usage or when working with serialized schemas, construct a `ModelRegistry` instance:
+Construct an instance from a `SchemaDefinition` when you don't have access to decorators (for example, on the server).
 
 ```ts
 import { ModelRegistry } from "@stratasync/core";
 
-// From a SchemaDefinition
 const registry = new ModelRegistry({
   models: {
     Task: {
@@ -92,27 +76,25 @@ const registry = new ModelRegistry({
   },
 });
 
-// Instance methods mirror static ones
 const names = registry.getModelNames();
 const hash = registry.getSchemaHash();
 const model = registry.getModel("Task");
-const bootstrapModels = registry.getBootstrapModels();
 ```
 
 ### Instance method reference
 
 | Method                      | Return type                     | Description                             |
 | --------------------------- | ------------------------------- | --------------------------------------- |
-| `getModelNames()`           | `string[]`                      | All model names in the schema.          |
-| `getModelMetadata(name)`    | `ModelMetadata \| undefined`    | Model metadata.                         |
-| `hasModel(name)`            | `boolean`                       | Whether a model exists in the schema.   |
+| `getModelNames()`           | `string[]`                      | All model names.                        |
+| `getModelMetadata(name)`    | `ModelMetadata \| undefined`    | Metadata for one model.                 |
+| `hasModel(name)`            | `boolean`                       | Whether a model exists.                 |
 | `getModelMetadataEntries()` | `[string, ModelMetadata][]`     | All metadata entries.                   |
 | `getBootstrapModelNames()`  | `string[]`                      | Models with `instant` load strategy.    |
 | `getPartialModelNames()`    | `string[]`                      | Models with `partial` load strategy.    |
 | `getModelProperties(name)`  | `Map<string, PropertyMetadata>` | Property metadata map.                  |
 | `getPropertyNames(name)`    | `string[]`                      | Sorted property names.                  |
 | `getSchemaHash()`           | `string`                        | Deterministic schema hash.              |
-| `snapshot()`                | `ModelRegistrySnapshot`         | The underlying snapshot data.           |
+| `snapshot()`                | `ModelRegistrySnapshot`         | Underlying snapshot data.               |
 | `getModel(name)`            | `ModelDefinition \| undefined`  | Full model definition.                  |
 | `getAllModels()`            | `ModelDefinition[]`             | All model definitions.                  |
 | `getBootstrapModels()`      | `ModelDefinition[]`             | Models for bootstrap loading.           |
@@ -121,81 +103,26 @@ const bootstrapModels = registry.getBootstrapModels();
 
 ## computeSchemaHash
 
-Computes a deterministic hash of the schema for version checking. The hash is used to detect schema mismatches between the client and server.
+`computeSchemaHash` produces a deterministic hash string for a schema, used to detect client/server mismatches.
 
 ```ts
 import { computeSchemaHash, ModelRegistry } from "@stratasync/core";
 
-// From the global registry
 const hash = computeSchemaHash(ModelRegistry.snapshot());
-
-// From a schema definition
-const hash2 = computeSchemaHash({
-  models: {
-    Task: {
-      meta: { name: "Task", loadStrategy: "instant" },
-      properties: {
-        title: { type: "property" },
-        status: { type: "property" },
-      },
-    },
-  },
-});
 ```
 
 **Signature:** `computeSchemaHash(input: ModelRegistrySnapshot | SchemaDefinition): string`
 
-The hash algorithm:
-
-1. Canonicalizes the snapshot (sorts model names, property names, removes `undefined` values)
-2. Serializes to JSON
-3. Applies a djb2 hash variant
-4. Returns an 8-character hexadecimal string
-
-The sync client compares schema hashes during bootstrap to detect when the client schema has changed and local storage needs to be cleared and re-bootstrapped.
+The function canonicalizes the snapshot (sorting model and property names, stripping `undefined` values), serializes it to JSON, applies a djb2 hash variant, and returns an 8-character hex string. The sync client compares hashes during bootstrap to decide whether local storage needs a full re-bootstrap.
 
 ## Load strategies
 
-Load strategies determine how and when model data is fetched from the server. Set the strategy in the `@ClientModel` decorator:
+Load strategies control when and how model data arrives from the server. Set the strategy in `@ClientModel`. For a full walkthrough, see [Load strategies](/docs/guides/load-strategies).
 
-```ts
-@ClientModel("Project", { loadStrategy: "instant" })
-class Project extends Model {
-  /* ... */
-}
-```
-
-### Strategy details
-
-Each load strategy controls bootstrap inclusion, on-demand fetching, and caching behavior:
-
-| Strategy                | Bootstrap | On-demand               | Cache             | Use case                           |
-| ----------------------- | --------- | ----------------------- | ----------------- | ---------------------------------- |
-| `"instant"`             | Included  | --                      | Always in memory  | Core data needed on every page.    |
-| `"lazy"`                | Excluded  | Fetched on first access | Cached after load | Referenced data not always needed. |
-| `"partial"`             | Excluded  | Fetched by index        | Cached by index   | Large collections loaded by FK.    |
-| `"explicitlyRequested"` | Excluded  | Only via `ensureModel`  | Cached after load | Rarely needed data.                |
-| `"local"`               | Excluded  | Never synced            | Local only        | Device-specific settings.          |
-
-### Partial load mode
-
-For models with `loadStrategy: "partial"`, you can set a hydration priority:
-
-```ts
-@ClientModel("Comment", {
-  loadStrategy: "partial",
-  partialLoadMode: "regular",
-})
-class Comment extends Model {
-  /* ... */
-}
-```
-
-| Mode            | Description                                     |
-| --------------- | ----------------------------------------------- |
-| `"full"`        | Highest priority, hydrated as soon as possible. |
-| `"regular"`     | Normal priority.                                |
-| `"lowPriority"` | Lowest priority, hydrated last.                 |
+| Strategy                                                     | Bootstrap | Best for                                 |
+| ------------------------------------------------------------ | --------- | ---------------------------------------- |
+| `"instant"`                                                  | Included  | Core data needed on every page           |
+| `"lazy"` / `"partial"` / `"explicitlyRequested"` / `"local"` | Excluded  | Data loaded on demand or kept local-only |
 
 ## Schema types
 
@@ -243,7 +170,7 @@ type PropertyType =
 
 ### SchemaDefinition
 
-The schema definition format is used for programmatic schema construction (as opposed to decorator-based):
+`SchemaDefinition` is the programmatic alternative to decorator-based schema registration.
 
 ```ts
 interface SchemaDefinition {

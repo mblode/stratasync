@@ -3,9 +3,9 @@ title: Configuration
 description: SyncClientOptions reference for configuring the Strata Sync client.
 ---
 
-The `createSyncClient` factory accepts a `SyncClientOptions` object that configures storage, transport, reactivity, and sync behavior.
+Pass a `SyncClientOptions` object to `createSyncClient` to configure adapters, identity, and sync behavior.
 
-## SyncClientOptions
+## Quick example
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -16,9 +16,7 @@ const client = createSyncClient({
   transport: transportAdapter,
   reactivity: reactivityAdapter,
 
-  // Optional configuration
-  schema: schemaDefinition,
-  modelFactory: customFactory,
+  // Optional
   dbName: "my-app-sync",
   userId: "user-123",
   version: 1,
@@ -28,19 +26,18 @@ const client = createSyncClient({
   batchMutations: true,
   batchDelay: 50,
   bootstrapMode: "auto",
-  yjsTransport: yjsTransportAdapter,
   rebaseStrategy: "server-wins",
   fieldLevelConflicts: true,
 });
 ```
 
-## Required options
+## Required adapters
 
 ### storage
 
 **Type:** `StorageAdapter`
 
-The storage adapter for local persistence. It handles model rows, metadata, outbox, partial indexes, and sync actions.
+Handles local persistence for model rows, metadata, the outbox, partial indexes, and sync actions.
 
 ```ts
 import { createIndexedDbStorage } from "@stratasync/storage-idb";
@@ -63,7 +60,7 @@ The `StorageAdapter` interface defines methods for:
 
 **Type:** `TransportAdapter`
 
-The transport adapter for server communication. It handles bootstrap, delta subscriptions, batch mutations, and connection state.
+Handles server communication: bootstrap, delta subscriptions, batch mutations, and connection state.
 
 ```ts
 import { createGraphQLTransport } from "@stratasync/transport-graphql";
@@ -91,7 +88,7 @@ The `TransportAdapter` interface defines:
 
 **Type:** `ReactivityAdapter`
 
-The reactivity adapter for observable state. It makes identity map entries reactive so UI frameworks re-render on changes.
+Makes identity map entries observable so UI frameworks re-render on changes.
 
 ```ts
 import { createMobXReactivity } from "@stratasync/mobx";
@@ -99,132 +96,41 @@ import { createMobXReactivity } from "@stratasync/mobx";
 const reactivity = createMobXReactivity();
 ```
 
-## Optional options
+## Simple options
 
-### schema
+These options configure identity, versioning, and batching. All are optional.
 
-**Type:** `SchemaDefinition | ModelRegistrySnapshot`
+| Option           | Type                                        | Default     | Description                                                                                                                                                              |
+| ---------------- | ------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dbName`         | `string`                                    | `"sync-db"` | Database name for storage. Each unique name creates a separate IndexedDB database.                                                                                       |
+| `userId`         | `string`                                    | —           | Logged-in user ID. Used for storage isolation in multi-user scenarios.                                                                                                   |
+| `version`        | `number`                                    | —           | Client version for storage naming. Incrementing triggers a fresh bootstrap.                                                                                              |
+| `userVersion`    | `number`                                    | —           | Per-user version for storage naming. Incrementing triggers a fresh bootstrap.                                                                                            |
+| `groups`         | `string[]`                                  | —           | Sync groups for multi-tenancy. The client syncs only models belonging to the specified groups.                                                                           |
+| `optimistic`     | `boolean`                                   | `true`      | Apply mutations to the identity map before the server confirms them. Rolls back on rejection.                                                                            |
+| `batchMutations` | `boolean`                                   | `false`     | Batch multiple mutations into a single network request.                                                                                                                  |
+| `batchDelay`     | `number` (ms)                               | —           | Delay before sending a mutation batch. Only applies when `batchMutations` is `true`.                                                                                     |
+| `bootstrapMode`  | `"auto" \| "full" \| "local"`               | `"auto"`    | `auto`: use local storage if available and the schema matches, otherwise bootstrap from server. `full`: always bootstrap from server. `local`: never contact the server. |
+| `schema`         | `SchemaDefinition \| ModelRegistrySnapshot` | —           | Explicit schema definition. If omitted, the client uses the global `ModelRegistry` populated by decorators.                                                              |
+| `modelFactory`   | `ModelFactory \| ModelFactoryFactory`       | —           | Custom factory for creating model instances from raw data. Defaults to `ModelRegistry` constructors with `_applyUpdate`.                                                 |
+| `yjsTransport`   | `YjsTransport`                              | —           | Yjs transport for collaborative editing. Enables `client.yjs` with document and presence managers. See [Y-Doc](/docs/packages/y-doc).                                    |
 
-Explicit schema definition. If not provided, the client uses the global `ModelRegistry` populated by decorators.
-
-```ts
-const client = createSyncClient({
-  schema: {
-    models: {
-      Task: {
-        loadStrategy: "instant",
-        fields: { title: {}, status: {} },
-      },
-    },
-  },
-  // ...
-});
-```
-
-### modelFactory
-
-**Type:** `ModelFactory | ModelFactoryFactory`
-
-Custom factory for creating model instances from raw data. By default, the client uses the `ModelRegistry` to find constructors and then creates instances with `_applyUpdate`.
-
-```ts
-// Simple factory
-const factory = (modelName: string, data: Record<string, unknown>) => {
-  return { ...data, __model: modelName };
-};
-
-// Factory with store context
-const factoryFactory = ({ store }) => {
-  return (modelName: string, data: Record<string, unknown>) => {
-    const instance = new (ModelRegistry.getModelConstructor(modelName))();
-    instance.store = store;
-    instance._applyUpdate(data);
-    return instance;
-  };
-};
-```
-
-### dbName
-
-**Type:** `string` -- **Default:** `"sync-db"`
-
-Database name for storage. Each unique name creates a separate IndexedDB database.
-
-### userId
-
-**Type:** `string`
-
-Logged-in user ID. The client uses this for storage isolation in multi-user scenarios.
-
-### version / userVersion
-
-**Type:** `number`
-
-Client version and per-user version for storage naming. Incrementing these values triggers a fresh bootstrap.
-
-### groups
-
-**Type:** `string[]`
-
-Sync groups for multi-tenancy. The client syncs only models belonging to the specified groups.
-
-```ts
-const client = createSyncClient({
-  groups: ["workspace-abc", "workspace-def"],
-  // ...
-});
-```
-
-### optimistic
-
-**Type:** `boolean` -- **Default:** `true`
-
-Enable optimistic updates. When `true`, the client applies mutations to the identity map immediately before sending them to the server. If the server rejects the mutation, the client rolls back the change.
-
-### batchMutations
-
-**Type:** `boolean` -- **Default:** `false`
-
-Batch multiple mutations together before sending them to the server. This is useful for reducing network requests when the user makes rapid changes.
-
-### batchDelay
-
-**Type:** `number` (milliseconds)
-
-Delay before sending a mutation batch. Only applies when `batchMutations` is `true`.
-
-### bootstrapMode
-
-**Type:** `"auto" | "full" | "local"` -- **Default:** `"auto"`
-
-Controls how the client initializes:
-
-| Mode      | Behavior                                                                              |
-| --------- | ------------------------------------------------------------------------------------- |
-| `"auto"`  | Uses local storage if available and schema matches, otherwise bootstraps from server. |
-| `"full"`  | Always bootstraps from the server, clearing local storage.                            |
-| `"local"` | Only uses local storage. Never contacts the server for bootstrap.                     |
-
-### yjsTransport
-
-**Type:** `YjsTransport`
-
-Optional Yjs transport for collaborative document editing. When you provide this, the client creates `YjsDocumentManager` and `YjsPresenceManager` instances accessible via `client.yjs`.
+## Conflict resolution
 
 ### rebaseStrategy
 
 **Type:** `"server-wins" | "client-wins" | "merge"` -- **Default:** `"server-wins"`
 
-Default conflict resolution strategy for transaction rebasing when the server has concurrent changes:
+Controls how the client resolves conflicts when the server has concurrent changes.
 
-| Strategy        | Behavior                                                                |
-| --------------- | ----------------------------------------------------------------------- |
-| `"server-wins"` | Server changes take precedence. Client changes are dropped on conflict. |
-| `"client-wins"` | Client changes take precedence. Server changes are overridden.          |
-| `"merge"`       | Field-level merge. Non-conflicting fields from both sides are kept.     |
+| Strategy        | Behavior                                                            |
+| --------------- | ------------------------------------------------------------------- |
+| `"server-wins"` | Server changes take precedence. Client changes drop on conflict.    |
+| `"client-wins"` | Client changes take precedence. Server changes are overridden.      |
+| `"merge"`       | Field-level merge. Non-conflicting fields from both sides are kept. |
 
 ### fieldLevelConflicts
 
 **Type:** `boolean` -- **Default:** `true`
 
-Enable field-level conflict detection during rebasing. When `true`, the client detects conflicts per-field rather than per-model, allowing non-overlapping field changes to coexist.
+Detect conflicts per-field rather than per-model during rebasing. When enabled, non-overlapping field changes from the client and server coexist without conflict.

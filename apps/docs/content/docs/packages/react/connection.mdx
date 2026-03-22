@@ -60,11 +60,7 @@ function OfflineBanner() {
     return null;
   }
 
-  return (
-    <div className="bg-yellow-100 p-2 text-center">
-      You are offline. Changes will sync when you reconnect.
-    </div>
-  );
+  return <div>You're offline. Changes will sync when you reconnect.</div>;
 }
 ```
 
@@ -72,7 +68,7 @@ function OfflineBanner() {
 
 ## usePendingCount
 
-Returns the count of pending (unsynced) transactions and a boolean indicating whether there are any.
+Returns the count of pending (unsynced) transactions and a boolean indicating whether any exist.
 
 ```tsx
 import { usePendingCount } from "@stratasync/react";
@@ -99,7 +95,7 @@ function PendingIndicator() {
 
 ## useSync
 
-Returns a `sync` function to manually trigger a sync cycle, and an `isSyncing` flag.
+Returns a `sync` function to trigger a sync cycle manually, along with an `isSyncing` flag.
 
 ```tsx
 import { useSync } from "@stratasync/react";
@@ -124,6 +120,8 @@ function SyncButton() {
 
 ## Complete example: sync status bar
 
+This example combines all four connection hooks into a single status bar component.
+
 ```tsx
 import {
   useConnectionState,
@@ -139,32 +137,14 @@ function SyncStatusBar() {
   const { sync, isSyncing } = useSync();
 
   return (
-    <div className="flex items-center gap-4 p-2 text-sm">
-      <StatusDot status={status} />
+    <div>
       <span>{isOffline ? "Offline" : `Synced to #${lastSyncId}`}</span>
-      {hasPending && <span className="text-yellow-600">{count} pending</span>}
-      {error && <span className="text-red-600">{error.message}</span>}
-      <button
-        onClick={sync}
-        disabled={isSyncing || isOffline}
-        className="ml-auto text-blue-600"
-      >
+      {hasPending && <span> - {count} pending</span>}
+      {error && <span> - {error.message}</span>}
+      <button onClick={sync} disabled={isSyncing || isOffline}>
         {isSyncing ? "Syncing..." : "Sync"}
       </button>
     </div>
   );
-}
-
-function StatusDot({ status }: { status: string }) {
-  const color =
-    {
-      disconnected: "bg-gray-400",
-      connecting: "bg-yellow-400",
-      bootstrapping: "bg-yellow-400",
-      syncing: "bg-green-400",
-      error: "bg-red-400",
-    }[status] ?? "bg-gray-400";
-
-  return <span className={`h-2 w-2 rounded-full ${color}`} />;
 }
 ```

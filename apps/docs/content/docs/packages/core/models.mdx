@@ -3,11 +3,11 @@ title: Model base class
 description: The Model base class provides change tracking, hydration, serialization, and CRUD operations for synced entities.
 ---
 
-Every synced entity in Strata Sync extends the `Model` base class. Models are registered with the `ModelRegistry` via decorators and participate in the sync lifecycle automatically.
+Every synced entity extends the `Model` base class. Models register with the `ModelRegistry` through decorators and participate in the sync lifecycle automatically.
 
 ## Creating a model
 
-Define a model by extending `Model` and applying decorators:
+Define a model by extending `Model` and applying decorators.
 
 ```ts
 import { Model, ClientModel, Property, ManyToOne } from "@stratasync/core";
@@ -28,34 +28,33 @@ class Task extends Model {
 }
 ```
 
-The `@ClientModel` decorator registers the class with the `ModelRegistry` under the name `"Task"`. Each `@Property` decorator registers a synced field that participates in change tracking and delta processing.
+`@ClientModel` registers the class with the `ModelRegistry` under the name `"Task"`. Each `@Property` registers a synced field that participates in change tracking and delta processing.
 
 ## Model properties
 
-| Property      | Type                      | Description                                           |
-| ------------- | ------------------------- | ----------------------------------------------------- |
-| `id`          | `string`                  | Primary key (UUID). Set automatically on creation.    |
-| `hydrated`    | `boolean`                 | Whether lazy references have been resolved.           |
-| `store`       | `SyncStore \| undefined`  | Backing store reference, injected by the sync client. |
-| `__modelName` | `string`                  | The registered model name (read-only getter).         |
-| `__data`      | `Record<string, unknown>` | Raw backing data store for property values.           |
+| Property      | Type      | Description                                        |
+| ------------- | --------- | -------------------------------------------------- |
+| `id`          | `string`  | Primary key (UUID). Set automatically on creation. |
+| `hydrated`    | `boolean` | Whether lazy references have been resolved.        |
+| `__modelName` | `string`  | The registered model name (read-only getter).      |
+
+> **Internals.** `__data` (`Record<string, unknown>`) holds raw backing data for property values. `store` (`SyncStore | undefined`) is the backing store reference injected by the sync client. You shouldn't need either in application code.
 
 ## Instance methods
 
 ### `hydrate()`
 
-Resolves all lazy references and collections for this model instance. Returns a `Promise` that resolves to the hydrated model with all references populated.
+Resolves all lazy references and collections for a model instance.
 
 ```ts
-// Assumes client is a configured SyncClient instance
 const task = await client.get<Task>("Task", taskId);
 const hydrated = await task.hydrate();
-// hydrated.project is now a resolved Project instance
+// hydrated.project is a resolved Project instance
 ```
 
 **Signature:** `hydrate(): Promise<Hydrated<this>>`
 
-The `Hydrated<T>` utility type converts all `LazyReference<T>` fields to their resolved types.
+See [Type utilities](#type-utilities) for details on the `Hydrated<T>` type.
 
 ### `save()`
 
@@ -100,7 +99,7 @@ await task.unarchive();
 
 ### `changeSnapshot()`
 
-Returns a snapshot of the current pending changes and their original values. Used internally by the transaction system.
+Returns a snapshot of pending changes and their original values.
 
 ```ts
 task.title = "New title";
@@ -111,8 +110,6 @@ const snapshot = task.changeSnapshot();
 
 **Signature:** `changeSnapshot(): ChangeSnapshot`
 
-The `ChangeSnapshot` interface:
-
 ```ts
 interface ChangeSnapshot {
   changes: Record<string, unknown>;
@@ -122,7 +119,7 @@ interface ChangeSnapshot {
 
 ### `clearChanges()`
 
-Clears all tracked property changes without persisting them.
+Discards all tracked property changes without persisting them.
 
 **Signature:** `clearChanges(): void`
 
@@ -139,34 +136,31 @@ const json = task.toJSON();
 
 ### `_applyUpdate(changes)`
 
-Applies property changes without triggering change tracking. Used internally by the sync engine when applying server deltas.
+Applies property changes without triggering change tracking. The sync engine calls this when applying server deltas.
 
 **Signature:** `_applyUpdate(changes: Record<string, unknown>): void`
 
 ## Change tracking
 
-The `Model` base class automatically tracks property changes when decorators are applied. Each decorated property uses a MobX observable box under the hood. When a property value changes, the model records the original value in an internal `modifiedProperties` map.
+Decorated properties track changes automatically. When you set a property value, the model records the original value so it can produce a delta on save.
 
 ```ts
 const task = await client.get<Task>("Task", taskId);
-task.title = "Updated"; // Change is tracked
-task.priority = 3; // This change is also tracked
+task.title = "Updated";
+task.priority = 3;
 
 const snapshot = task.changeSnapshot();
 // snapshot.changes = { title: "Updated", priority: 3 }
 // snapshot.original = { title: "Original", priority: 0 }
 
-await task.save(); // Creates an update transaction from the snapshot
-// Changes are cleared after save
+await task.save(); // Creates an update transaction, then clears changes
 ```
-
-Change tracking can be suppressed internally (for example, when applying server deltas) using the `_applyUpdate` method, which wraps updates in a tracking suppression scope.
 
 ## Type utilities
 
 ### `Hydrated<T>`
 
-A utility type that converts all lazy reference fields to their resolved types:
+Converts all lazy reference fields to their resolved types.
 
 ```ts
 import type { Hydrated } from "@stratasync/core";
@@ -178,11 +172,10 @@ const hydrated: Hydrated<Task> = await task.hydrate();
 
 ### `LazyReference<T>`
 
-Represents a reference that may not be loaded yet. Access triggers lazy loading when the sync client is available.
+Represents a reference that may not yet be loaded. Access triggers lazy loading when the sync client is available.
 
 ```ts
 import type { LazyReference } from "@stratasync/core";
 
-// LazyReference<Project> can be awaited or used with resolvePromise
 const project = await resolvePromise(task.project);
 ```

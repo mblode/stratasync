@@ -3,17 +3,7 @@ title: "@stratasync/client"
 description: Client orchestration, outbox management, identity maps, query execution, and undo/redo for Strata Sync.
 ---
 
-`@stratasync/client` is the runtime orchestrator for the Strata Sync engine. It manages the full sync lifecycle: bootstrapping, delta processing, optimistic mutations, outbox persistence, identity maps, query execution, and undo/redo history.
-
-## What it provides
-
-- **createSyncClient** -- factory function that wires up storage, transport, reactivity, and returns a `SyncClient` instance
-- **CRUD operations** -- `get`, `getCached`, `ensureModel`, `getAll`, `create`, `update`, `delete`, `archive`, `unarchive`
-- **Query engine** -- filter operators (`eq`, `neq`, `gt`, `lt`, `isIn`, `contains`, `matches`), combinators (`and`, `or`, `not`), sorting (`sortBy`, `combineSorts`)
-- **Event system** -- subscribe to sync lifecycle events (`syncStart`, `syncComplete`, `syncError`, `stateChange`, `connectionChange`, `modelChange`, `rebaseConflict`)
-- **Undo/redo** -- client-side undo and redo with full transaction history
-- **Identity map** -- in-memory cache that deduplicates model instances by ID
-- **Outbox manager** -- persists pending mutations for offline-first support
+`@stratasync/client` orchestrates the full sync lifecycle: bootstrapping, delta processing, optimistic mutations, outbox persistence, queries, and undo/redo.
 
 ## Installation
 
@@ -21,9 +11,11 @@ description: Client orchestration, outbox management, identity maps, query execu
 npm install @stratasync/client
 ```
 
-`@stratasync/client` depends on `@stratasync/core` and `@stratasync/y-doc` as workspace dependencies. It has no peer dependencies.
+`@stratasync/client` depends on `@stratasync/core` and `@stratasync/y-doc` as workspace dependencies.
 
 ## Quick start
+
+Wire up storage, transport, and reactivity, then call `start()`.
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -44,28 +36,19 @@ const client = createSyncClient({
   batchMutations: true,
 });
 
-// Start the sync lifecycle
 await client.start();
 
-// Create a task
 const task = await client.create("Task", {
   title: "My task",
   status: "todo",
 });
 
-// Query tasks
-const { data: tasks } = await client.query("Task", {
-  where: (t) => t.status === "todo",
-  orderBy: (a, b) => a.priority - b.priority,
-});
-
-// Stop when done
 await client.stop();
 ```
 
 ## Architecture role
 
-`@stratasync/client` sits between the core primitives and framework bindings:
+`@stratasync/client` sits between the core primitives and framework bindings. It stays framework-agnostic and doesn't depend on React, Next.js, or any browser API beyond what the injected adapters provide.
 
 ```
 sync-core, sync-y-doc
@@ -74,56 +57,89 @@ sync-core, sync-y-doc
               ^-- sync-next
 ```
 
-The client package is framework-agnostic. It doesn't depend on React, Next.js, or any browser API beyond what the injected adapters provide. The React hooks in `@stratasync/react` are thin wrappers around the `SyncClient` interface.
+The React hooks in `@stratasync/react` are thin wrappers around the `SyncClient` interface. See the [React package docs](/docs/packages/react) for details.
 
 ## SyncClient interface
 
-The `createSyncClient` factory returns an object implementing the `SyncClient` interface:
+`createSyncClient` returns an object implementing the `SyncClient` interface. The methods and properties break down into five categories.
 
-| Property / Method                   | Type                                                | Description                               |
-| ----------------------------------- | --------------------------------------------------- | ----------------------------------------- |
-| `state`                             | `SyncClientState`                                   | Current sync state.                       |
-| `connectionState`                   | `ConnectionState`                                   | Current connection state.                 |
-| `lastSyncId`                        | `number`                                            | Last sync ID received from server.        |
-| `lastError`                         | `Error \| null`                                     | Last error (if any).                      |
-| `clientId`                          | `string`                                            | Client instance identifier.               |
-| `yjs`                               | `{ documentManager, presenceManager } \| undefined` | Yjs managers (if configured).             |
-| `start()`                           | `Promise<void>`                                     | Start the sync lifecycle.                 |
-| `stop()`                            | `Promise<void>`                                     | Stop the sync lifecycle.                  |
-| `get(modelName, id)`                | `Promise<T \| null>`                                | Get a model by ID.                        |
-| `getCached(modelName, id)`          | `T \| null`                                         | Get from identity map only.               |
-| `ensureModel(modelName, id)`        | `Promise<T \| null>`                                | Load if not cached.                       |
-| `getAll(modelName, options?)`       | `Promise<T[]>`                                      | Get all models of a type.                 |
-| `query(modelName, options?)`        | `Promise<QueryResult<T>>`                           | Query with filters.                       |
-| `create(modelName, data)`           | `Promise<T>`                                        | Create a new model.                       |
-| `update(modelName, id, changes)`    | `Promise<T>`                                        | Update a model.                           |
-| `delete(modelName, id)`             | `Promise<void>`                                     | Delete a model.                           |
-| `archive(modelName, id)`            | `Promise<void>`                                     | Soft-delete a model.                      |
-| `unarchive(modelName, id)`          | `Promise<void>`                                     | Restore a model.                          |
-| `canUndo()`                         | `boolean`                                           | Whether undo is available.                |
-| `canRedo()`                         | `boolean`                                           | Whether redo is available.                |
-| `undo()`                            | `Promise<void>`                                     | Undo last operation.                      |
-| `redo()`                            | `Promise<void>`                                     | Redo last undone operation.               |
-| `onEvent(callback)`                 | `() => void`                                        | Subscribe to events. Returns unsubscribe. |
-| `onStateChange(callback)`           | `() => void`                                        | Subscribe to state changes.               |
-| `onConnectionStateChange(callback)` | `() => void`                                        | Subscribe to connection changes.          |
-| `getPendingCount()`                 | `Promise<number>`                                   | Pending transaction count.                |
-| `syncNow()`                         | `Promise<void>`                                     | Force an immediate sync.                  |
-| `clearAll()`                        | `Promise<void>`                                     | Clear all local data.                     |
-| `getIdentityMap(modelName)`         | `Map<string, T>`                                    | Raw identity map access.                  |
-| `isModelMissing(modelName, id)`     | `boolean`                                           | Whether a model wasn't found.             |
+### Lifecycle
+
+These methods control the sync engine and manage connection state.
+
+| Property / Method   | Type              | Description                        |
+| ------------------- | ----------------- | ---------------------------------- |
+| `state`             | `SyncClientState` | Current sync state.                |
+| `connectionState`   | `ConnectionState` | Current connection state.          |
+| `lastSyncId`        | `number`          | Last sync ID received from server. |
+| `lastError`         | `Error \| null`   | Last error (if any).               |
+| `clientId`          | `string`          | Client instance identifier.        |
+| `start()`           | `Promise<void>`   | Start the sync lifecycle.          |
+| `stop()`            | `Promise<void>`   | Stop the sync lifecycle.           |
+| `syncNow()`         | `Promise<void>`   | Force an immediate sync.           |
+| `clearAll()`        | `Promise<void>`   | Clear all local data.              |
+| `getPendingCount()` | `Promise<number>` | Pending transaction count.         |
+
+### Reading
+
+Use these methods to fetch models from local storage or the identity map.
+
+| Method                          | Type                      | Description               |
+| ------------------------------- | ------------------------- | ------------------------- |
+| `get(modelName, id)`            | `Promise<T \| null>`      | Get a model by ID.        |
+| `getCached(modelName, id)`      | `T \| null`               | Get from identity map.    |
+| `ensureModel(modelName, id)`    | `Promise<T \| null>`      | Load if not cached.       |
+| `getAll(modelName, options?)`   | `Promise<T[]>`            | Get all models of a type. |
+| `query(modelName, options?)`    | `Promise<QueryResult<T>>` | Query with filters.       |
+| `getIdentityMap(modelName)`     | `Map<string, T>`          | Raw identity map access.  |
+| `isModelMissing(modelName, id)` | `boolean`                 | Check if model not found. |
+
+### Writing
+
+These methods create and modify models. All writes go through the outbox for offline-first persistence.
+
+| Method                           | Type            | Description          |
+| -------------------------------- | --------------- | -------------------- |
+| `create(modelName, data)`        | `Promise<T>`    | Create a new model.  |
+| `update(modelName, id, changes)` | `Promise<T>`    | Update a model.      |
+| `delete(modelName, id)`          | `Promise<void>` | Delete a model.      |
+| `archive(modelName, id)`         | `Promise<void>` | Soft-delete a model. |
+| `unarchive(modelName, id)`       | `Promise<void>` | Restore a model.     |
+
+### Undo/Redo
+
+Client-side undo and redo with full transaction history. See [Undo and redo](/docs/packages/sync-client/undo-redo) for details.
+
+| Method      | Type            | Description                 |
+| ----------- | --------------- | --------------------------- |
+| `canUndo()` | `boolean`       | Whether undo is available.  |
+| `canRedo()` | `boolean`       | Whether redo is available.  |
+| `undo()`    | `Promise<void>` | Undo last operation.        |
+| `redo()`    | `Promise<void>` | Redo last undone operation. |
+
+### Events
+
+Subscribe to sync lifecycle events for state management and UI updates. See [Event system](/docs/packages/sync-client/events) for the full event reference.
+
+| Method                              | Type         | Description                               |
+| ----------------------------------- | ------------ | ----------------------------------------- |
+| `onEvent(callback)`                 | `() => void` | Subscribe to events. Returns unsubscribe. |
+| `onStateChange(callback)`           | `() => void` | Subscribe to state changes.               |
+| `onConnectionStateChange(callback)` | `() => void` | Subscribe to connection changes.          |
+
+The `yjs` property (`{ documentManager, presenceManager } | undefined`) provides access to Yjs managers when configured.
 
 ## Advanced exports
 
-The following classes and functions are exported for advanced use cases such as custom orchestration, testing, or direct identity map manipulation. Most applications won't need these directly:
+These classes and functions support custom orchestration, testing, or direct identity map manipulation. Most applications don't need them directly.
 
-| Export                | Description                                                                      |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `IdentityMap`         | In-memory cache that deduplicates model instances by ID.                         |
-| `IdentityMapRegistry` | Manages multiple `IdentityMap` instances, one per model type.                    |
-| `OutboxManager`       | Manages the pending transaction outbox for offline-first persistence.            |
-| `SyncOrchestrator`    | Coordinates the full sync lifecycle (bootstrap, delta processing, reconnection). |
-| `executeQuery`        | Runs a query against the identity map with filter operators and sorting.         |
+| Export                | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| `IdentityMap`         | In-memory cache that deduplicates model instances by ID.                 |
+| `IdentityMapRegistry` | Manages multiple `IdentityMap` instances, one per model type.            |
+| `OutboxManager`       | Manages the pending transaction outbox for offline-first persistence.    |
+| `SyncOrchestrator`    | Coordinates the full sync lifecycle (bootstrap, deltas, reconnection).   |
+| `executeQuery`        | Runs a query against the identity map with filter operators and sorting. |
 
 ## Pages in this section
 

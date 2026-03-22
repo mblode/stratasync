@@ -3,41 +3,43 @@ title: YjsPresenceManager
 description: Manages presence signaling, view/edit tracking, and session state for collaborative editing.
 ---
 
-`YjsPresenceManager` handles presence signaling for collaborative editing sessions. It tracks which documents the local user is viewing and editing, signals these states to the server, and receives session state updates containing the list of active participants.
+`YjsPresenceManager` handles presence signaling for collaborative editing. It tracks which documents you're viewing and editing, signals these states to the server, and receives session state updates with active participants.
 
 ## Creating an instance
+
+Use the same `clientId` and `connId` values as your `YjsDocumentManager`.
 
 ```ts
 import { YjsPresenceManager } from "@stratasync/y-doc";
 
 const presenceManager = new YjsPresenceManager({
-  clientId: "client-abc-123", // Same logical client ID as YjsDocumentManager
-  connId: "conn-xyz-456", // Same connection-scoped ID as YjsDocumentManager
+  clientId: "client-abc-123",
+  connId: "conn-xyz-456",
 });
 ```
 
 ### PresenceManagerConfig
 
-| Property   | Type     | Description                                                                  |
-| ---------- | -------- | ---------------------------------------------------------------------------- |
-| `clientId` | `string` | Logical client identity used for attribution.                                |
-| `connId`   | `string` | Connection-scoped identity used for echo suppression and presence ownership. |
+| Property   | Type     | Description                                                    |
+| ---------- | -------- | -------------------------------------------------------------- |
+| `clientId` | `string` | Logical client identity for attribution.                       |
+| `connId`   | `string` | Connection-scoped identity for echo suppression and ownership. |
 
 ## Setting the transport
 
-Like `YjsDocumentManager`, the presence manager requires a `YjsTransport`:
+Set a `YjsTransport` before signaling presence. See [YjsDocumentManager](/docs/packages/sync-y-doc/document-manager) for transport setup details.
 
 ```ts
 presenceManager.setTransport(yjsTransport);
 ```
 
-The presence manager listens for `session_state` messages from the server and sends `doc_view` and `doc_focus` messages.
+The presence manager listens for `session_state` messages and sends `doc_view` and `doc_focus` messages.
 
 ## API reference
 
 ### startViewing
 
-Signals to the server that the user has opened a document. Sends a `doc_view` start message.
+Signals that you've opened a document. Sends a `doc_view` start message.
 
 ```ts
 import type { DocumentKey } from "@stratasync/y-doc";
@@ -53,11 +55,11 @@ presenceManager.startViewing(docKey);
 
 **Signature:** `startViewing(docKey: DocumentKey): void`
 
-Calling `startViewing` multiple times for the same document is safe -- duplicate calls are ignored.
+Duplicate calls for the same document are ignored.
 
 ### stopViewing
 
-Signals to the server that the user has closed a document. If the user is currently editing, `blur` is called automatically before stopping.
+Signals that you've closed a document. Calls `blur` automatically if you're editing.
 
 ```ts
 presenceManager.stopViewing(docKey);
@@ -67,7 +69,7 @@ presenceManager.stopViewing(docKey);
 
 ### focus
 
-Signals that the user has focused the editor for active editing. If the user isn't already viewing the document, `startViewing` is called automatically.
+Signals that you've focused the editor for active editing. Calls `startViewing` automatically if you aren't viewing yet.
 
 ```ts
 presenceManager.focus(docKey);
@@ -79,7 +81,7 @@ Sends a `doc_focus` message with state `"focus"`.
 
 ### blur
 
-Signals that the user has blurred the editor and is no longer actively editing.
+Signals that you've blurred the editor and stopped editing.
 
 ```ts
 presenceManager.blur(docKey);
@@ -91,7 +93,7 @@ Sends a `doc_focus` message with state `"blur"`.
 
 ### isViewing
 
-Returns whether the local user is currently viewing a document.
+Returns whether you're viewing a document.
 
 ```ts
 const viewing: boolean = presenceManager.isViewing(docKey);
@@ -101,7 +103,7 @@ const viewing: boolean = presenceManager.isViewing(docKey);
 
 ### isEditing
 
-Returns whether the local user is currently editing a document.
+Returns whether you're editing a document.
 
 ```ts
 const editing: boolean = presenceManager.isEditing(docKey);
@@ -111,7 +113,7 @@ const editing: boolean = presenceManager.isEditing(docKey);
 
 ### getSessionState
 
-Returns the current session state for a document, including the list of active participants.
+Returns the session state for a document, including active participants.
 
 ```ts
 import type { SessionState } from "@stratasync/y-doc";
@@ -139,7 +141,7 @@ interface SessionState {
 | Property       | Type                   | Description                                               |
 | -------------- | ---------------------- | --------------------------------------------------------- |
 | `active`       | `boolean`              | Whether the session is active (at least one participant). |
-| `participants` | `SessionParticipant[]` | List of current participants.                             |
+| `participants` | `SessionParticipant[]` | List of participants.                                     |
 
 ### SessionParticipant
 
@@ -150,14 +152,14 @@ interface SessionParticipant {
 }
 ```
 
-| Property    | Type      | Description                                            |
-| ----------- | --------- | ------------------------------------------------------ |
-| `userId`    | `string`  | The user ID of the participant.                        |
-| `isEditing` | `boolean` | Whether the participant is actively editing (focused). |
+| Property    | Type      | Description                                   |
+| ----------- | --------- | --------------------------------------------- |
+| `userId`    | `string`  | The participant's user ID.                    |
+| `isEditing` | `boolean` | Whether the participant is editing (focused). |
 
 ### onSessionStateChange
 
-Subscribes to session state changes for a document. The manager invokes the callback with the current state (if available) and then on each subsequent change.
+Subscribes to session state changes for a document. The callback fires with the current state (if available), then on each change.
 
 ```ts
 const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
@@ -165,7 +167,6 @@ const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
   showCollaborationBadge(session.active);
 });
 
-// Later: clean up
 unsubscribe();
 ```
 
@@ -175,7 +176,7 @@ Returns an unsubscribe function.
 
 ### cleanup
 
-Stops viewing all documents, sends stop messages, and clears all internal state.
+Stops viewing all documents, sends stop messages, and clears internal state.
 
 ```ts
 presenceManager.cleanup();
@@ -185,22 +186,22 @@ presenceManager.cleanup();
 
 ## Presence lifecycle
 
-The typical lifecycle for presence tracking follows this pattern:
+A typical session follows this pattern.
 
 ```
-User opens document  --> startViewing()  --> doc_view "start" sent
-User clicks editor   --> focus()         --> doc_focus "focus" sent
-User clicks elsewhere --> blur()         --> doc_focus "blur" sent
-User closes document --> stopViewing()   --> doc_view "stop" sent
+User opens document   --> startViewing()  --> doc_view "start" sent
+User clicks editor    --> focus()         --> doc_focus "focus" sent
+User clicks elsewhere --> blur()          --> doc_focus "blur" sent
+User closes document  --> stopViewing()   --> doc_view "stop" sent
 ```
 
-Server-side, the server aggregates these signals into `SessionState` updates and broadcasts them to all participants viewing the same document.
+The server aggregates these signals into `SessionState` updates and broadcasts them to all participants viewing the same document.
 
 ## Full example
 
 ```ts
 import { YjsPresenceManager } from "@stratasync/y-doc";
-import type { DocumentKey, SessionState } from "@stratasync/y-doc";
+import type { DocumentKey } from "@stratasync/y-doc";
 
 const presenceManager = new YjsPresenceManager({
   clientId: "client-123",
@@ -215,29 +216,14 @@ const docKey: DocumentKey = {
   fieldName: "description",
 };
 
-// Track session state
 const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
   const editors = session.participants.filter((p) => p.isEditing);
-  const viewers = session.participants.filter((p) => !p.isEditing);
-
-  // Your app-specific UI update function
-  updateUI({
-    activeEditors: editors.length,
-    activeViewers: viewers.length,
-    isSessionActive: session.active,
-  });
+  updateUI({ activeEditors: editors.length, isActive: session.active });
 });
 
-// Start viewing when component mounts
 presenceManager.startViewing(docKey);
-
-// Focus when editor receives focus
 presenceManager.focus(docKey);
-
-// Blur when editor loses focus
 presenceManager.blur(docKey);
-
-// Stop viewing when component unmounts
 presenceManager.stopViewing(docKey);
 unsubscribe();
 ```

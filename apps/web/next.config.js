@@ -1,3 +1,12 @@
+import { readFileSync } from "node:fs";
+
+const { version } = JSON.parse(
+  readFileSync(
+    new URL("../../packages/core/package.json", import.meta.url),
+    "utf8"
+  )
+);
+
 /** @type {import('next').NextConfig} */
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -32,6 +41,9 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  env: {
+    STRATASYNC_VERSION: version,
+  },
   experimental: {
     // Enable filesystem caching for `next build`
     turbopackFileSystemCacheForBuild: true,

@@ -3,9 +3,11 @@ title: Query API
 description: Filter, sort, and paginate synced models with composable query operators.
 ---
 
-The query API provides composable filter and sort operators for querying models from the identity map. All queries run in-memory against the locally cached data.
+The query API filters, sorts, and paginates models from the identity map. All queries run in-memory against locally cached data.
 
 ## QueryOptions
+
+Each query accepts an options object that controls filtering, sorting, and pagination.
 
 ```ts
 interface QueryOptions<T> {
@@ -27,6 +29,8 @@ interface QueryOptions<T> {
 
 ## QueryResult
 
+Every query returns a `QueryResult` containing the matched items and pagination metadata.
+
 ```ts
 interface QueryResult<T> {
   data: T[];
@@ -35,13 +39,15 @@ interface QueryResult<T> {
 }
 ```
 
-| Field        | Description                                          |
-| ------------ | ---------------------------------------------------- |
-| `data`       | The filtered, sorted, paginated results.             |
-| `hasMore`    | `true` if there are more results beyond the `limit`. |
-| `totalCount` | Total count of matching items before pagination.     |
+| Field        | Description                                      |
+| ------------ | ------------------------------------------------ |
+| `data`       | The filtered, sorted, paginated results.         |
+| `hasMore`    | `true` if more results exist beyond the `limit`. |
+| `totalCount` | Total count of matching items before pagination. |
 
 ## Basic usage
+
+Pass a model name and options to `client.query()`.
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -71,6 +77,8 @@ const result = await client.query<Task>("Task", {
 
 ### eq -- equality
 
+Matches items where a field strictly equals a value.
+
 ```ts
 import { eq } from "@stratasync/client";
 
@@ -83,6 +91,8 @@ const result = await client.query<Task>("Task", {
 
 ### neq -- not equal
 
+Matches items where a field doesn't equal a value.
+
 ```ts
 import { neq } from "@stratasync/client";
 
@@ -93,7 +103,11 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `neq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-### gt -- greater than
+### Comparison operators
+
+The `gt` and `lt` operators work with numeric fields. They return `false` for non-numeric comparisons.
+
+#### gt -- greater than
 
 ```ts
 import { gt } from "@stratasync/client";
@@ -105,9 +119,7 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `gt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-Works with numeric fields. The operator returns `false` for non-numeric comparisons.
-
-### lt -- less than
+#### lt -- less than
 
 ```ts
 import { lt } from "@stratasync/client";
@@ -119,9 +131,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `lt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-Works with numeric fields. The operator returns `false` for non-numeric comparisons.
-
 ### isIn -- set membership
+
+Matches items where a field's value exists in a given array. Uses a `Set` internally for O(1) lookups.
 
 ```ts
 import { isIn } from "@stratasync/client";
@@ -133,9 +145,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `isIn<T, K extends keyof T>(field: K, values: T[K][]): (item: T) => boolean`
 
-Uses a `Set` internally for O(1) lookups.
-
 ### contains -- substring match
+
+Checks whether a string field includes a substring. Returns `false` for non-string fields.
 
 ```ts
 import { contains } from "@stratasync/client";
@@ -153,9 +165,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `contains<T>(field: keyof T, substring: string, caseSensitive?: boolean): (item: T) => boolean`
 
-The operator returns `false` for non-string fields.
-
 ### matches -- regex match
+
+Tests a string field against a regular expression. Returns `false` for non-string fields.
 
 ```ts
 import { matches } from "@stratasync/client";
@@ -167,9 +179,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `matches<T>(field: keyof T, pattern: RegExp): (item: T) => boolean`
 
-The operator returns `false` for non-string fields.
-
 ## Logical combinators
+
+Combine filter operators with `and`, `or`, and `not` to build compound predicates.
 
 ### and -- combine with AND
 
@@ -209,7 +221,7 @@ const result = await client.query<Task>("Task", {
 
 ## Composing complex queries
 
-Combinators can be nested to build complex filters:
+Nest combinators to build complex filters.
 
 ```ts
 import { and, or, eq, gt, contains, not } from "@stratasync/client";
@@ -227,9 +239,11 @@ const result = await client.query<Task>("Task", {
 
 ## Sort utilities
 
+Use `sortBy` and `combineSorts` to build comparator functions for `orderBy`.
+
 ### sortBy
 
-Creates a comparator function for a single field.
+Creates a comparator for a single field. Supports string, number, and Date comparisons. Sorts null/undefined values last.
 
 ```ts
 import { sortBy } from "@stratasync/client";
@@ -241,11 +255,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `sortBy<T>(field: keyof T, direction?: "asc" | "desc"): (a: T, b: T) => number`
 
-Supports string, number, and Date comparisons. The comparator sorts null/undefined values last.
-
 ### combineSorts
 
-Chains multiple sort comparators. The first comparator defines the primary sort, and subsequent ones break ties.
+Chains multiple comparators. The first comparator defines the primary sort; subsequent ones break ties.
 
 ```ts
 import { sortBy, combineSorts } from "@stratasync/client";
@@ -259,7 +271,7 @@ const result = await client.query<Task>("Task", {
 
 ## Archived items
 
-By default, queries exclude items with a truthy `archivedAt` field. To include archived items:
+Queries exclude items with a truthy `archivedAt` field by default. Set `includeArchived: true` to override this behavior.
 
 ```ts
 const result = await client.query<Task>("Task", {
@@ -267,7 +279,7 @@ const result = await client.query<Task>("Task", {
 });
 ```
 
-To query only archived items:
+To query only archived items, combine `includeArchived` with a `where` predicate:
 
 ```ts
 import { and } from "@stratasync/client";

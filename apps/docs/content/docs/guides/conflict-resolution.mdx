@@ -1,37 +1,17 @@
 ---
 title: Conflict resolution
-description: Understand the server-sequenced model, rebase strategies, and field-level conflict detection.
+description: Rebase strategies, field-level conflict detection, and manual resolution for concurrent edits.
 ---
 
-In a local-first system, multiple clients can modify the same data concurrently. Strata Sync uses a server-sequenced model where the server is the ultimate source of truth, combined with a client-side rebase algorithm that automatically resolves most conflicts. This guide explains how it works and when you need to intervene.
+Strata Sync detects and resolves conflicts when multiple clients modify the same data at the same time. The client-side rebase algorithm handles most conflicts automatically. This guide covers how conflicts are detected, which strategies resolve them, and when you need to intervene.
 
-## The server-sequenced model
+## Server-sequenced model
 
-Every committed change receives a monotonically increasing `syncId` from the server. This establishes a total order:
-
-```mermaid
-sequenceDiagram
-    participant Client A
-    participant Server
-    participant Client B
-
-    Client A->>Server: update(Task, {title: "Fix bug"})
-    Client B->>Server: update(Task, {title: "Fix typo"})
-    Server->>Server: Assign syncId 101 to Client A's change
-    Server->>Server: Assign syncId 102 to Client B's change
-    Server-->>Client A: Delta (syncId 101, 102)
-    Server-->>Client B: Delta (syncId 101, 102)
-```
-
-Key properties:
-
-- **Server assigns order**: The server decides which change "wins" when two clients modify the same record.
-- **Clients track position**: Each client stores a `lastSyncId` and applies deltas in order, never skipping.
-- **Optimistic writes are speculative**: The client applies local changes immediately but doesn't confirm them until the server delta arrives.
+Strata Sync uses a server-sequenced model where the server assigns the global order. See [Sync protocol](/docs/architecture/sync-protocol) for details.
 
 ## How rebase works
 
-When a server delta arrives for a model that has pending local transactions, the client must rebase -- replay local changes on top of the new server state.
+When a server delta arrives for a model with pending local transactions, the client rebases — it replays local changes on top of the new server state.
 
 ```mermaid
 flowchart TD
@@ -47,13 +27,11 @@ flowchart TD
     C --> K[Remaining txs stay pending]
 ```
 
-The rebase algorithm processes each server action:
+The rebase algorithm processes each server action in one of three ways:
 
-1. **Own transaction**: If the server action's `clientTxId` matches a pending transaction, that transaction is confirmed and removed from the outbox.
-2. **No conflict**: If the server action affects a different model/ID, or different fields (with field-level detection enabled), the pending transaction is untouched.
-3. **Conflict**: If the server action conflicts with a pending transaction, the conflict type is detected and a resolution strategy is applied.
-
-### Rebase in detail
+1. **Own transaction**: The server action's `clientTxId` matches a pending transaction, so that transaction is confirmed and removed from the outbox.
+2. **No conflict**: The server action affects a different model/ID, or different fields (with field-level detection enabled). The pending transaction stays unchanged.
+3. **Conflict**: The server action overlaps with a pending transaction. The conflict type is detected and a resolution strategy is applied.
 
 Each pending Update transaction stores `{ modelId, payload, original }`, where `original[field]` is the value the user saw when they started editing:
 
@@ -63,16 +41,11 @@ Client pending update:  { title: "Final" }                     <- user changed t
 Server delta arrives:   { title: "Draft",  status: "closed" }  <- another user changed status
 ```
 
-With field-level conflict detection enabled (the default):
-
-- `title`: The client has a pending change, but the server didn't change `title` -- no conflict. The pending update stays.
-- `status`: The server changed `status`, but the client has no pending change to `status` -- no conflict. The client applies the server value.
-
-Result: `{ title: "Final", status: "closed" }` -- both changes are preserved.
+With field-level conflict detection enabled (the default), `title` has a pending client change but no server change — no conflict. `status` has a server change but no pending client change — no conflict. Both changes merge to `{ title: "Final", status: "closed" }`.
 
 ## Conflict types
 
-The rebase algorithm detects four types of conflicts:
+The rebase algorithm detects four conflict types.
 
 | Type            | Local action | Server action | Example                          |
 | --------------- | ------------ | ------------- | -------------------------------- |
@@ -81,15 +54,15 @@ The rebase algorithm detects four types of conflicts:
 | `delete-update` | Delete       | Update        | Client deleted, server edited    |
 | `insert-insert` | Insert       | Insert        | Both inserted the same ID (rare) |
 
-Archive (`A`) and Unarchive (`V`) actions are normalized to Update (`U`) for conflict detection purposes, since they're semantically update-like operations.
+Archive (`A`) and Unarchive (`V`) actions are normalized to Update (`U`) for conflict detection.
 
 ## Resolution strategies
 
-Each conflict is resolved using one of three strategies:
+Each conflict resolves using one of three strategies.
 
 ### server-wins (default)
 
-The client accepts the server's version and discards the local pending transaction.
+The client accepts the server's version and discards the local pending transaction. This is the simplest strategy — the last write to reach the server wins.
 
 ```ts
 const client = createSyncClient({
@@ -98,13 +71,11 @@ const client = createSyncClient({
 });
 ```
 
-This is the default for all conflict types except `insert-insert`. It is the simplest and most predictable strategy -- the last write to reach the server wins.
-
-**When to use**: Most applications. Works well for form fields, status changes, and assignments where "latest wins" is acceptable.
+**When to use**: Most applications. Works well for form fields, status changes, and assignments.
 
 ### client-wins
 
-The client re-applies its change on top of the server state. The client keeps the pending transaction and retransmits it.
+The client re-applies its change on top of the server state. The pending transaction stays and is retransmitted.
 
 ```ts
 const client = createSyncClient({
@@ -113,11 +84,11 @@ const client = createSyncClient({
 });
 ```
 
-**When to use**: Rare. Useful when the local user's intent should always take priority, such as a "force update" action.
+**When to use**: Rare. Useful when the local user's intent should always take priority, such as a force-update action.
 
 ### merge
 
-The client combines both server and client changes at the field level. The client merges non-overlapping fields; overlapping fields use the client's value.
+The client combines both server and client changes at the field level. Non-overlapping fields merge; overlapping fields use the client's value.
 
 ```ts
 const client = createSyncClient({
@@ -127,36 +98,45 @@ const client = createSyncClient({
 });
 ```
 
-**When to use**: When different users typically edit different fields of the same record (for example, one user changes the title while another changes the assignee).
+**When to use**: When different users typically edit different fields of the same record.
 
-## Handling conflicts manually
+## Choosing a strategy
 
-For cases where automatic resolution is insufficient -- such as critical data where you need user intervention -- use the `rebaseConflict` event to detect conflicts and handle them in your application code.
+Use this table to pick the right combination for your use case.
 
-`insert-insert` conflicts always resolve to `manual` internally regardless of the configured default, since they typically indicate a bug (two clients generating the same ID). These conflicts are surfaced through the `rebaseConflict` event.
+| Scenario                          | Recommended strategy                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| General purpose (forms, settings) | `rebaseStrategy: "merge"` + `fieldLevelConflicts: true` (default)                 |
+| Simple apps, few concurrent users | `rebaseStrategy: "server-wins"` (default)                                         |
+| Collaborative text editing        | Use [Yjs CRDTs](/docs/guides/collaborative-editing) instead                       |
+| Critical data (finance, legal)    | `rebaseStrategy: "server-wins"` with `rebaseConflict` event handler for custom UI |
+| Force-update operations           | `rebaseStrategy: "client-wins"`                                                   |
 
 ## Field-level conflict detection
 
-By default, `fieldLevelConflicts` is enabled (`true`). This means that only changes to the _same fields_ on the same model+ID trigger a conflict. If you want to disable field-level detection so that any concurrent edit to the same model+ID is treated as a conflict, set it to `false`:
+Field-level conflict detection (`fieldLevelConflicts: true`) is enabled by default. Only changes to the _same fields_ on the same model+ID trigger a conflict. Disable it to treat any concurrent edit to the same model+ID as a conflict:
 
 ```ts
 const client = createSyncClient({
   // ...adapters
-  rebaseStrategy: "merge",
   fieldLevelConflicts: false, // any overlapping model+ID is a conflict
 });
 ```
 
-With field-level detection (the default):
+- **Overlapping fields**: Both client and server changed the same field — true conflict.
+- **Non-overlapping fields**: Client and server changed different fields — no conflict, changes coexist.
 
-- **Overlapping fields**: Both client and server changed the same field -- this is a true conflict.
-- **Non-overlapping fields**: Client and server changed different fields -- no conflict, the changes can coexist.
+Field-level detection reduces conflicts in practice because most concurrent edits affect different fields.
 
-This dramatically reduces the number of conflicts in practice, since most concurrent edits affect different fields.
+## Handling conflicts manually
 
-## Handling the rebaseConflict event
+For cases where automatic resolution isn't enough — such as critical data requiring user intervention — use the `rebaseConflict` event.
 
-When conflicts occur, the client emits a `rebaseConflict` event. Subscribe to it for logging, UI notifications, or custom resolution logic.
+`insert-insert` conflicts always resolve to `manual` regardless of the configured default, since they typically indicate a bug in ID generation. These conflicts surface through the `rebaseConflict` event.
+
+### Subscribing to the rebaseConflict event
+
+When conflicts occur, the client emits a `rebaseConflict` event. Subscribe to it for logging, UI notifications, or custom resolution.
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -170,39 +150,27 @@ client.onEvent((event) => {
     return;
   }
 
-  // Each conflict fires a separate event with a flat structure:
   // event.modelName, event.modelId, event.conflictType, event.resolution
-
   switch (event.conflictType) {
-    case "update-update": {
+    case "update-update":
       // Two users edited the same field on the same model
-      // event.resolution -- "server-wins" | "client-wins" | "merge"
       break;
-    }
-
-    case "update-delete": {
+    case "update-delete":
       // Local user edited a record that the server deleted
-      // You may want to show a "this item was deleted" message
       break;
-    }
-
-    case "delete-update": {
+    case "delete-update":
       // Local user deleted a record that the server updated
       break;
-    }
-
-    case "insert-insert": {
+    case "insert-insert":
       // Both clients created a record with the same ID
-      // This typically indicates a bug in ID generation
       break;
-    }
   }
 });
 ```
 
 ### Surfacing conflicts in the UI
 
-For manual conflict resolution, you can build UI that listens for the `rebaseConflict` event and lets the user choose:
+Build a component that listens for `rebaseConflict` events and lets the user choose how to resolve them.
 
 ```tsx
 "use client";
@@ -222,13 +190,10 @@ export function ConflictResolver() {
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
 
   useEffect(() => {
-    // Each rebaseConflict event is a flat object -- one event per conflict
     const unsubscribe = client.onEvent((event) => {
       if (event.type !== "rebaseConflict") {
         return;
       }
-
-      // Accumulate individual conflict events into state
       setConflicts((prev) => [
         ...prev,
         {
@@ -239,7 +204,6 @@ export function ConflictResolver() {
         },
       ]);
     });
-
     return unsubscribe;
   }, [client]);
 
@@ -248,13 +212,10 @@ export function ConflictResolver() {
   }
 
   function dismiss(conflict: ConflictRecord) {
-    // Accept server version -- discard from the list
     setConflicts((prev) => prev.filter((c) => c !== conflict));
   }
 
   async function retryWithClient(conflict: ConflictRecord) {
-    // Re-apply the local change by updating the model again
-    // In practice, you would store the original payload and re-send it
     await client.update(conflict.modelName, conflict.modelId, {});
     setConflicts((prev) => prev.filter((c) => c !== conflict));
   }
@@ -290,20 +251,13 @@ export function ConflictResolver() {
 }
 ```
 
-## Practical example: handling concurrent edits
+## Concurrent edit examples
 
-Consider two users editing the same task simultaneously:
+These examples show how strategy and field-level detection affect two users editing the same task. Both users start from `{ title: "Draft", status: "open", priority: "low" }`.
 
-```
-Timeline:
-  t0: Both users see Task { title: "Draft", status: "open", priority: "low" }
-  t1: User A changes title to "Final Report"
-  t2: User B changes status to "in-review"
-  t3: User A's change reaches server -> syncId 101
-  t4: User B's change reaches server -> syncId 102
-```
+### Field-level conflicts + merge (recommended)
 
-### With field-level conflicts + merge (recommended)
+User A changes `title` to `"Final Report"`. User B changes `status` to `"in-review"`. The changes affect different fields, so no conflict fires. Both users converge on `{ title: "Final Report", status: "in-review" }`.
 
 ```ts
 const client = createSyncClient({
@@ -313,38 +267,21 @@ const client = createSyncClient({
 });
 ```
 
-- User A receives delta 102 (status changed). Their pending title change is on a different field -- no conflict. Result: `{ title: "Final Report", status: "in-review" }`.
-- User B receives delta 101 (title changed). Their pending status change is on a different field -- no conflict. Result: `{ title: "Final Report", status: "in-review" }`.
-- Both users converge on the same state. No conflicts fired.
+### Without field-level conflicts (server-wins)
 
-### Without field-level conflicts (server-wins default)
+With `fieldLevelConflicts: false`, any concurrent edit to the same model+ID is a conflict. User A's pending title change and User B's pending status change both get discarded in favor of the server version. One user's change is lost.
 
 ```ts
 const client = createSyncClient({
   // ...adapters
   fieldLevelConflicts: false,
-  // fieldLevelConflicts defaults to true, so you must explicitly disable it
 });
 ```
 
-- User A receives delta 102: the client detects an `update-update` conflict (same model+ID). Server wins -- the client discards User A's pending title change.
-- User B receives delta 101: the client detects an `update-update` conflict. Server wins -- the client discards User B's pending status change.
-- Both users see the latest server state, but one user's change is lost.
-
-This illustrates why `fieldLevelConflicts: true` (the default) with `rebaseStrategy: "merge"` is the recommended configuration for most applications.
-
-## Choosing a strategy
-
-| Scenario                          | Recommended strategy                                                              |
-| --------------------------------- | --------------------------------------------------------------------------------- |
-| General purpose (forms, settings) | `rebaseStrategy: "merge"` + `fieldLevelConflicts: true` (default)                 |
-| Simple apps, few concurrent users | `rebaseStrategy: "server-wins"` (default)                                         |
-| Collaborative text editing        | Use [Yjs CRDTs](/docs/guides/collaborative-editing) instead                       |
-| Critical data (finance, legal)    | `rebaseStrategy: "server-wins"` with `rebaseConflict` event handler for custom UI |
-| Force-update operations           | `rebaseStrategy: "client-wins"`                                                   |
+This is why `fieldLevelConflicts: true` (the default) with `rebaseStrategy: "merge"` is the recommended configuration.
 
 ## Next steps
 
-- [Offline-First Patterns](/docs/guides/offline-first) -- How mutations flow through the outbox.
-- [Collaborative Editing](/docs/guides/collaborative-editing) -- CRDT-based editing that avoids field-level conflicts entirely.
-- [sync-core Transactions API](/docs/packages/sync-core/transactions) -- Low-level transaction creation and management.
+- [Offline-First Patterns](/docs/guides/offline-first) — How mutations flow through the outbox.
+- [Collaborative Editing](/docs/guides/collaborative-editing) — CRDT-based editing that avoids field-level conflicts.
+- [sync-core Transactions API](/docs/packages/sync-core/transactions) — Low-level transaction creation and management.

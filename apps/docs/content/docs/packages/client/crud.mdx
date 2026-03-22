@@ -3,9 +3,15 @@ title: CRUD operations
 description: Create, read, update, delete, archive, and unarchive models through the sync client.
 ---
 
-The `SyncClient` provides a complete set of CRUD operations that work with the identity map, outbox, and optimistic update system.
+The `SyncClient` provides CRUD operations that work with the identity map, outbox, and optimistic update system.
+
+## Common behavior
+
+Every mutation (`create`, `update`, `delete`, `archive`, `unarchive`) follows the same pattern. It applies the change optimistically to the local identity map, creates a transaction in the outbox, and records a history entry for undo/redo. Each mutation also emits a `modelChange` event so reactive layers (MobX, React) pick up the change immediately.
 
 ## Reading models
+
+You can read models synchronously from the identity map or asynchronously from storage and the server.
 
 ### get
 
@@ -24,7 +30,7 @@ Returns `null` if the model isn't found in either the identity map or storage.
 
 ### getCached
 
-Synchronously reads a model from the identity map only. Does not check storage or trigger network requests.
+Synchronously reads a model from the identity map only. Doesn't check storage or trigger network requests.
 
 ```ts
 const task = client.getCached<Task>("Task", "task-123");
@@ -33,11 +39,11 @@ const task = client.getCached<Task>("Task", "task-123");
 
 **Signature:** `getCached<T>(modelName: string, id: string): T | null`
 
-This is the fastest way to read a model, but it only works for models that have already been loaded into memory.
+This is the fastest way to read a model, but it only works for models already loaded into memory.
 
 ### ensureModel
 
-Ensures a model is available locally. If not cached, it attempts to load from storage. If the model's load strategy is `"lazy"`, `"partial"`, or `"explicitlyRequested"`, it fetches from the server via `batchLoad`.
+Guarantees a model is available locally. If not cached, it loads from storage. If the model's load strategy is `"lazy"`, `"partial"`, or `"explicitlyRequested"`, it fetches from the server via `batchLoad`.
 
 ```ts
 const task = await client.ensureModel<Task>("Task", "task-123");
@@ -96,7 +102,7 @@ See the [Queries](/docs/packages/sync-client/queries) page for detailed query AP
 
 ### create
 
-Creates a new model instance with optimistic update support.
+Creates a new model instance. Generates a UUID if no `id` is provided.
 
 ```ts
 const task = await client.create<Task>("Task", {
@@ -110,13 +116,6 @@ console.log(task.id); // Auto-generated UUID
 ```
 
 **Signature:** `create<T>(modelName: string, data: T, options?): Promise<T>`
-
-**Behavior:**
-
-1. Generates a UUID if no `id` is provided in the data.
-2. If `optimistic` is enabled (default), immediately adds to the identity map and emits a `modelChange` event with action `"insert"`.
-3. Creates an insert transaction and queues it in the outbox.
-4. Records a history entry for undo support.
 
 **Options:**
 
@@ -132,7 +131,7 @@ await client.create("Task", data, {
 
 ### update
 
-Updates an existing model with partial changes.
+Updates an existing model with partial changes. Reads the current model from the identity map and computes original values for the changed fields. Throws if the model isn't found in the identity map.
 
 ```ts
 const updated = await client.update<Task>("Task", "task-123", {
@@ -142,14 +141,6 @@ const updated = await client.update<Task>("Task", "task-123", {
 ```
 
 **Signature:** `update<T>(modelName: string, id: string, changes: Partial<T>, options?): Promise<T>`
-
-**Behavior:**
-
-1. Reads the current model from the identity map.
-2. Computes original values for the changed fields.
-3. If `optimistic` is enabled, applies changes to the identity map immediately and emits a `modelChange` event with action `"update"`.
-4. Creates an update transaction with the changes and originals.
-5. Records a history entry for undo support.
 
 **Options:**
 
@@ -162,28 +153,17 @@ await client.update("Task", "task-123", changes, {
 });
 ```
 
-The method throws an error if the model isn't found in the identity map.
-
 ## Deleting models
 
 ### delete
 
-Permanently deletes a model instance.
+Permanently deletes a model instance. Reads the current model from the identity map and stores the original data in the transaction for undo. Throws if the model isn't found in the identity map.
 
 ```ts
 await client.delete("Task", "task-123");
 ```
 
 **Signature:** `delete(modelName: string, id: string, options?): Promise<void>`
-
-**Behavior:**
-
-1. Reads the current model from the identity map.
-2. If `optimistic` is enabled, removes from the identity map and emits a `modelChange` event with action `"delete"`.
-3. Creates a delete transaction with the original data.
-4. Records a history entry for undo support.
-
-The method throws an error if the model isn't found in the identity map.
 
 ## Archiving models
 
@@ -250,7 +230,7 @@ for (const [id, task] of map) {
 
 ### isModelMissing
 
-Checks whether the client previously looked up a model but did not find it. The React hooks use this internally to avoid repeated failed lookups.
+Checks whether the client looked up a model but didn't find it. The React hooks use this internally to avoid repeated failed lookups.
 
 ```ts
 const missing = client.isModelMissing("Task", "task-123");

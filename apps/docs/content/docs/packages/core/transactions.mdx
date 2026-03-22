@@ -3,27 +3,27 @@ title: Transactions
 description: Create, serialize, and batch transactions for offline-first mutations in Strata Sync.
 ---
 
-Transactions are the atomic unit of mutation in Strata Sync. Every local change -- create, update, delete, archive, or unarchive -- becomes a `Transaction` object that flows through the outbox, the transport sends to the server, and the sync protocol confirms.
+Transactions are the atomic unit of mutation in Strata Sync. Every local change becomes a `Transaction` object that flows through the outbox, travels to the server via the transport layer, and gets confirmed by the sync protocol.
 
 ## Transaction interface
 
-The `Transaction` interface defines the structure of every mutation in the system:
+Every mutation in the system conforms to this structure.
 
 ```ts
 interface Transaction {
-  clientTxId: string; // Unique ID for idempotency
-  clientId: string; // Client instance identifier
-  modelName: string; // Name of the model being mutated
-  modelId: string; // ID of the model instance
-  action: TransactionAction; // Type of mutation
-  payload: Record<string, unknown>; // New/changed data
-  original?: Record<string, unknown>; // Original data (for rollback)
-  state: TransactionState; // Current state in the pipeline
-  createdAt: number; // Timestamp (ms since epoch)
-  retryCount: number; // Number of retry attempts
-  lastError?: string; // Last error message
-  syncIdNeededForCompletion?: number; // Required sync ID
-  batchIndex?: number; // Batch grouping index
+  clientTxId: string;
+  clientId: string;
+  modelName: string;
+  modelId: string;
+  action: TransactionAction;
+  payload: Record<string, unknown>;
+  original?: Record<string, unknown>;
+  state: TransactionState;
+  createdAt: number;
+  retryCount: number;
+  lastError?: string;
+  syncIdNeededForCompletion?: number;
+  batchIndex?: number;
 }
 ```
 
@@ -39,19 +39,19 @@ interface Transaction {
 
 ### TransactionState
 
-| State            | Description                                                           |
-| ---------------- | --------------------------------------------------------------------- |
-| `"queued"`       | In the local outbox, not yet sent to the server.                      |
-| `"sent"`         | Sent to the server, awaiting confirmation.                            |
-| `"awaitingSync"` | Server confirmed, waiting for the sync ID to arrive via delta stream. |
-| `"completed"`    | Fully synced.                                                         |
-| `"failed"`       | Failed permanently after all retries.                                 |
+| State            | Description                                                     |
+| ---------------- | --------------------------------------------------------------- |
+| `"queued"`       | In the local outbox, not yet sent.                              |
+| `"sent"`         | Sent to the server, awaiting confirmation.                      |
+| `"awaitingSync"` | Server confirmed, waiting for the sync ID via the delta stream. |
+| `"completed"`    | Fully synced.                                                   |
+| `"failed"`       | Failed permanently after all retries.                           |
 
 ## Creating transactions
 
 ### createTransaction
 
-The general-purpose factory. All other factory functions delegate to this one.
+All other factory functions delegate to this general-purpose factory.
 
 ```ts
 import { createTransaction } from "@stratasync/core";
@@ -64,12 +64,6 @@ const tx = createTransaction({
   payload: { title: "Updated title" },
   original: { title: "Original title" },
 });
-```
-
-**Signature:**
-
-```ts
-function createTransaction(options: CreateTransactionOptions): Transaction;
 ```
 
 **CreateTransactionOptions:**
@@ -90,18 +84,12 @@ Creates an `"I"` (insert) transaction for a new model instance.
 ```ts
 import { createInsertTransaction } from "@stratasync/core";
 
-const tx = createInsertTransaction(
-  "client-abc", // clientId
-  "Task", // modelName
-  "task-123", // modelId
-  {
-    // data (full model)
-    title: "New Task",
-    status: "todo",
-    priority: 0,
-    projectId: "project-456",
-  }
-);
+const tx = createInsertTransaction("client-abc", "Task", "task-123", {
+  title: "New Task",
+  status: "todo",
+  priority: 0,
+  projectId: "project-456",
+});
 ```
 
 ### createUpdateTransaction
@@ -112,62 +100,48 @@ Creates a `"U"` (update) transaction with changed fields and their original valu
 import { createUpdateTransaction } from "@stratasync/core";
 
 const tx = createUpdateTransaction(
-  "client-abc", // clientId
-  "Task", // modelName
-  "task-123", // modelId
-  { title: "Updated title" }, // changes
-  { title: "Original title" } // original values
+  "client-abc",
+  "Task",
+  "task-123",
+  { title: "Updated title" },
+  { title: "Original title" }
 );
 ```
 
 ### createDeleteTransaction
 
-Creates a `"D"` (delete) transaction. Requires the original data for undo support.
+Creates a `"D"` (delete) transaction. You must pass the original data so undo can re-create the model.
 
 ```ts
 import { createDeleteTransaction } from "@stratasync/core";
 
-const tx = createDeleteTransaction(
-  "client-abc", // clientId
-  "Task", // modelName
-  "task-123", // modelId
-  {
-    // original data (for undo)
-    title: "Task to delete",
-    status: "done",
-  }
-);
+const tx = createDeleteTransaction("client-abc", "Task", "task-123", {
+  title: "Task to delete",
+  status: "done",
+});
 ```
 
-### createArchiveTransaction
+### createArchiveTransaction and createUnarchiveTransaction
 
-Creates an `"A"` (archive) transaction for soft-deleting a model.
-
-```ts
-import { createArchiveTransaction } from "@stratasync/core";
-
-const tx = createArchiveTransaction(
-  "client-abc", // clientId
-  "Task", // modelName
-  "task-123", // modelId
-  {
-    original: { archivedAt: undefined },
-    archivedAt: "2025-01-15T10:30:00.000Z",
-  }
-);
-```
-
-### createUnarchiveTransaction
-
-Creates a `"V"` (unarchive) transaction for restoring a soft-deleted model.
+Archive (`"A"`) soft-deletes a model by setting `archivedAt`. Unarchive (`"V"`) restores it.
 
 ```ts
-import { createUnarchiveTransaction } from "@stratasync/core";
+import {
+  createArchiveTransaction,
+  createUnarchiveTransaction,
+} from "@stratasync/core";
 
-const tx = createUnarchiveTransaction(
-  "client-abc", // clientId
-  "Task", // modelName
-  "task-123", // modelId
+// Soft-delete
+const archiveTx = createArchiveTransaction("client-abc", "Task", "task-123", {
+  original: { archivedAt: undefined },
+  archivedAt: "2025-01-15T10:30:00.000Z",
+});
+
+// Restore
+const unarchiveTx = createUnarchiveTransaction(
+  "client-abc",
+  "Task",
+  "task-123",
   {
     original: { archivedAt: "2025-01-15T10:30:00.000Z" },
   }
@@ -176,7 +150,7 @@ const tx = createUnarchiveTransaction(
 
 ### createUndoTransaction
 
-Creates the inverse transaction for any given transaction. Returns `null` if the transaction can't be undone (for example, a delete without original data).
+Creates the inverse transaction for a given transaction. Returns `null` if the transaction can't be undone (for example, a delete without original data).
 
 ```ts
 import { createUndoTransaction } from "@stratasync/core";
@@ -245,7 +219,7 @@ interface TransactionBatch {
 
 ## Serialization
 
-Transactions can be serialized to a compact format for storage (IndexedDB outbox) or transport (network payloads). The serialized format uses short keys to minimize payload size.
+You can serialize transactions to a compact format for storage (IndexedDB outbox) or transport (network payloads).
 
 ### Single transactions
 
@@ -287,7 +261,7 @@ const parsed = batchFromJson(json);
 
 ### Serialized format
 
-The compact format maps field names to short keys:
+Short keys minimize payload size.
 
 | Transaction field           | Serialized key |
 | --------------------------- | -------------- |
@@ -307,17 +281,17 @@ The compact format maps field names to short keys:
 
 ## Server result types
 
-When transactions are submitted to the server, the response contains result objects:
+The server returns these result objects after you submit transactions.
 
 ### TransactionResult
 
 ```ts
 interface TransactionResult {
-  clientTxId: string; // Echoed client transaction ID
-  success: boolean; // Whether the transaction succeeded
-  syncId?: number; // Assigned sync ID (if successful)
-  error?: string; // Error message (if failed)
-  errorCode?: string; // Machine-readable error code
+  clientTxId: string;
+  success: boolean;
+  syncId?: number;
+  error?: string;
+  errorCode?: string;
 }
 ```
 
@@ -325,8 +299,8 @@ interface TransactionResult {
 
 ```ts
 interface MutateResult {
-  success: boolean; // Whether the batch succeeded
-  lastSyncId: number; // Highest sync ID after mutations
-  results: TransactionResult[]; // Per-transaction results
+  success: boolean;
+  lastSyncId: number;
+  results: TransactionResult[];
 }
 ```
