@@ -3,7 +3,7 @@ import type { MDXComponents } from "mdx/types";
 import type { ComponentPropsWithoutRef } from "react";
 import { isValidElement } from "react";
 
-import { Mermaid } from "./components/mermaid.js";
+import { Mermaid } from "./components/mermaid";
 
 const extractTextContent = (node: React.ReactNode): string => {
   if (typeof node === "string") {
