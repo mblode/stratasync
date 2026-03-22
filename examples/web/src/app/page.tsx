@@ -7,7 +7,8 @@ import {
   useSyncClientInstance,
 } from "@stratasync/react";
 import { observer } from "mobx-react-lite";
-import { useState, type FormEvent } from "react";
+import type { FormEvent } from "react";
+import { useCallback, useState } from "react";
 
 import { DEV_GROUP_ID } from "@/lib/sync/config";
 import type { Todo } from "@/lib/sync/models/todo";
@@ -17,6 +18,54 @@ const formatTimestamp = (value: number) =>
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+
+const TodoItem = observer(
+  ({
+    onRemove,
+    onToggle,
+    todo,
+  }: {
+    onRemove: (id: string) => void;
+    onToggle: (todo: Todo) => void;
+    todo: Todo;
+  }) => {
+    const handleToggle = useCallback(() => {
+      onToggle(todo);
+    }, [onToggle, todo]);
+
+    const handleRemove = useCallback(() => {
+      onRemove(todo.id);
+    }, [onRemove, todo.id]);
+
+    return (
+      <article
+        className="todo-item"
+        data-completed={todo.completed}
+        key={todo.id}
+      >
+        <input
+          aria-label={`Toggle ${todo.title}`}
+          checked={todo.completed}
+          className="todo-checkbox"
+          onChange={handleToggle}
+          type="checkbox"
+        />
+
+        <div className="todo-copy">
+          <span className="todo-title">{todo.title}</span>
+          <span className="todo-subtitle">
+            Group <code>{todo.groupId}</code> • Created{" "}
+            {formatTimestamp(todo.createdAt)}
+          </span>
+        </div>
+
+        <button className="ghost-button" onClick={handleRemove} type="button">
+          Delete
+        </button>
+      </article>
+    );
+  }
+);
 
 const ExamplePage = observer(function ExamplePage() {
   const client = useSyncClientInstance();
@@ -30,70 +79,92 @@ const ExamplePage = observer(function ExamplePage() {
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const completedCount = todos.filter((todo) => todo.completed).length;
-  const statusTone = error
-    ? "error"
-    : isOffline
-      ? "warning"
-      : backlog > 0
-        ? "warning"
-        : "ok";
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const title = draft.trim();
-
-    if (!title) {
-      return;
+  const getStatusTone = () => {
+    if (error) {
+      return "error";
     }
 
-    setMutationError(null);
-
-    try {
-      await client.create("Todo", {
-        completed: false,
-        createdAt: Date.now(),
-        groupId: DEV_GROUP_ID,
-        title,
-      });
-      setDraft("");
-    } catch (caughtError) {
-      setMutationError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to create todo."
-      );
+    if (isOffline || backlog > 0) {
+      return "warning";
     }
+
+    return "ok";
   };
 
-  const toggleTodo = async (todo: Todo) => {
-    setMutationError(null);
+  const statusTone = getStatusTone();
 
-    try {
-      await client.update("Todo", todo.id, {
-        completed: !todo.completed,
-      });
-    } catch (caughtError) {
-      setMutationError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to update todo."
-      );
-    }
-  };
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const title = draft.trim();
 
-  const removeTodo = async (id: string) => {
-    setMutationError(null);
+      if (!title) {
+        return;
+      }
 
-    try {
-      await client.delete("Todo", id);
-    } catch (caughtError) {
-      setMutationError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to delete todo."
-      );
-    }
-  };
+      setMutationError(null);
+
+      try {
+        await client.create("Todo", {
+          completed: false,
+          createdAt: Date.now(),
+          groupId: DEV_GROUP_ID,
+          title,
+        });
+        setDraft("");
+      } catch (caughtError) {
+        setMutationError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to create todo."
+        );
+      }
+    },
+    [client, draft]
+  );
+
+  const handleToggle = useCallback(
+    async (todo: Todo) => {
+      setMutationError(null);
+
+      try {
+        await client.update("Todo", todo.id, {
+          completed: !todo.completed,
+        });
+      } catch (caughtError) {
+        setMutationError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to update todo."
+        );
+      }
+    },
+    [client]
+  );
+
+  const handleRemove = useCallback(
+    async (id: string) => {
+      setMutationError(null);
+
+      try {
+        await client.delete("Todo", id);
+      } catch (caughtError) {
+        setMutationError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to delete todo."
+        );
+      }
+    },
+    [client]
+  );
+
+  const handleDraftChange = useCallback(
+    (event: FormEvent<HTMLInputElement>) => {
+      setDraft(event.currentTarget.value);
+    },
+    []
+  );
 
   return (
     <main className="app-shell">
@@ -170,15 +241,10 @@ const ExamplePage = observer(function ExamplePage() {
           <div className="error-banner">{mutationError}</div>
         ) : null}
 
-        <form
-          className="todo-form"
-          onSubmit={(event) => void handleSubmit(event)}
-        >
+        <form className="todo-form" onSubmit={handleSubmit}>
           <input
             className="todo-input"
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
+            onChange={handleDraftChange}
             placeholder="Add a todo..."
             value={draft}
           />
@@ -201,39 +267,12 @@ const ExamplePage = observer(function ExamplePage() {
           ) : null}
 
           {todos.map((todo) => (
-            <article
-              className="todo-item"
-              data-completed={todo.completed}
+            <TodoItem
               key={todo.id}
-            >
-              <input
-                aria-label={`Toggle ${todo.title}`}
-                checked={todo.completed}
-                className="todo-checkbox"
-                onChange={() => {
-                  void toggleTodo(todo);
-                }}
-                type="checkbox"
-              />
-
-              <div className="todo-copy">
-                <span className="todo-title">{todo.title}</span>
-                <span className="todo-subtitle">
-                  Group <code>{todo.groupId}</code> • Created{" "}
-                  {formatTimestamp(todo.createdAt)}
-                </span>
-              </div>
-
-              <button
-                className="ghost-button"
-                onClick={() => {
-                  void removeTodo(todo.id);
-                }}
-                type="button"
-              >
-                Delete
-              </button>
-            </article>
+              onRemove={handleRemove}
+              onToggle={handleToggle}
+              todo={todo}
+            />
           ))}
         </div>
       </section>

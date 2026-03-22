@@ -1,5 +1,6 @@
 // oxlint-disable no-use-before-define -- helper functions grouped after factory function
-import { createSyncClient, type SyncClient } from "@stratasync/client";
+import type { SyncClient } from "@stratasync/client";
+import { createSyncClient } from "@stratasync/client";
 import { ModelRegistry } from "@stratasync/core";
 import { createMobXReactivity } from "@stratasync/mobx";
 import { createIndexedDbStorage } from "@stratasync/storage-idb";
@@ -30,7 +31,7 @@ export const getSyncClient = (): SyncClient => {
 
   const transport = new GraphQLTransportAdapter({
     auth: {
-      getAccessToken: async () => DEV_TOKEN,
+      getAccessToken: () => DEV_TOKEN,
     },
     endpoint: `${API_BASE_URL}/sync`,
     syncEndpoint: `${API_BASE_URL}/sync`,

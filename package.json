@@ -12,7 +12,7 @@
   "author": "Matthew Blode",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/stratasync/stratasync.git"
+    "url": "https://github.com/stratasync/stratasync"
   },
   "workspaces": [
     "apps/*",
