@@ -43,7 +43,7 @@
     "drizzle-orm": "1.0.0-beta.15-859cf75",
     "turbo": "^2.8.19",
     "typescript": "5.9.3",
-    "ultracite": "^7.2.2",
+    "ultracite": "^7.3.2",
     "vitest": "^4.0.0"
   },
   "engines": {

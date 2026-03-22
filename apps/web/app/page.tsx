@@ -1,11 +1,11 @@
 import {
-  ArrowUpDown,
-  Database,
-  Eye,
-  Undo2,
-  Users,
-  WifiOff,
-} from "lucide-react";
+  SortArrowUpDownIcon as ArrowUpDown,
+  StorageIcon as Database,
+  EyeOpenIcon as Eye,
+  HistoryIcon as Undo2,
+  PeopleIcon as Users,
+  OfflineIcon as WifiOff,
+} from "blode-icons-react";
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";

@@ -1,7 +1,7 @@
 "use client";
 
 import { cva, type VariantProps } from "class-variance-authority";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { Checkmark1Icon as CheckIcon, CopySimpleIcon as CopyIcon } from "blode-icons-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type MouseEvent, useCallback } from "react";
 

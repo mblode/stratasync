@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "ultracite": "^6.5.0"
+    "ultracite": "^7.3.2"
   }
 }
