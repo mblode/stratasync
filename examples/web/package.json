@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbopack --port 3002",
-    "build": "next build --turbopack",
-    "start": "next start --port 3002",
+    "dev": "vite --port 3002",
+    "build": "vite build",
+    "start": "vite preview --port 3002",
     "lint": "npm exec -- ultracite check",
     "lint:fix": "npm exec -- ultracite fix",
     "format": "npm exec -- ultracite fix",
@@ -13,29 +13,37 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "*",
     "@stratasync/client": "*",
     "@stratasync/core": "*",
     "@stratasync/mobx": "*",
-    "@stratasync/next": "*",
     "@stratasync/react": "*",
     "@stratasync/storage-idb": "*",
     "@stratasync/transport-graphql": "*",
     "@stratasync/y-doc": "*",
+    "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/react-router": "^1.120.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "mobx": "^6.15.0",
     "mobx-react-lite": "^4.1.1",
-    "next": "16.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.2",
     "yjs": "^13.6.30"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@tanstack/router-devtools": "^1.120.2",
+    "@tanstack/router-plugin": "^1.120.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react-swc": "^4.3.0",
     "lefthook": "^2.1.4",
     "oxfmt": "^0.41.0",
     "oxlint": "^1.56.0",
     "typescript": "^5.9.3",
-    "ultracite": "^7.3.2"
+    "ultracite": "^7.3.2",
+    "vite": "^8.0.1"
   }
 }
