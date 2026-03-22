@@ -7,8 +7,8 @@
     "dev": "portless stratasync next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "biome check",
-    "format": "biome format --write",
+    "lint": "ultracite check",
+    "format": "ultracite fix",
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
@@ -29,7 +29,6 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.8",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",

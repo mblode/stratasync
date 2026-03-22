@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""} https://www.googletagmanager.com`,
   "connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com",
   "img-src 'self' data: https://www.google-analytics.com https://images.unsplash.com",
   "style-src 'self' 'unsafe-inline'",
@@ -33,71 +33,71 @@ const securityHeaders = [
 
 const nextConfig = {
   experimental: {
-    // Enable filesystem caching for `next dev`
-    turbopackFileSystemCacheForDev: true,
     // Enable filesystem caching for `next build`
     turbopackFileSystemCacheForBuild: true,
+    // Enable filesystem caching for `next dev`
+    turbopackFileSystemCacheForDev: true,
+  },
+  headers() {
+    return [
+      {
+        headers: [
+          ...securityHeaders.filter(
+            (h) => h.key !== "Cross-Origin-Resource-Policy"
+          ),
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+        ],
+        source: "/opengraph-image.png",
+      },
+      {
+        headers: [
+          ...securityHeaders.filter(
+            (h) => h.key !== "Cross-Origin-Resource-Policy"
+          ),
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+        ],
+        source: "/twitter-image.png",
+      },
+      {
+        headers: [
+          ...securityHeaders.filter(
+            (h) => h.key !== "Cross-Origin-Resource-Policy"
+          ),
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+        ],
+        source: "/web-app-manifest-:size.png",
+      },
+      {
+        headers: [
+          ...securityHeaders.filter(
+            (h) => h.key !== "Cross-Origin-Resource-Policy"
+          ),
+          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+        ],
+        source: "/images/:path*",
+      },
+      {
+        headers: [
+          ...securityHeaders.filter(
+            (h) => h.key !== "Cross-Origin-Resource-Policy"
+          ),
+          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
+        ],
+        source: "/fonts/:path*",
+      },
+      {
+        headers: securityHeaders,
+        source: "/(.*)",
+      },
+    ];
   },
   images: {
     remotePatterns: [
       {
-        protocol: "https",
         hostname: "images.unsplash.com",
+        protocol: "https",
       },
     ],
-  },
-  async headers() {
-    return [
-      {
-        source: "/opengraph-image.png",
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
-      },
-      {
-        source: "/twitter-image.png",
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
-      },
-      {
-        source: "/web-app-manifest-:size.png",
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
-      },
-      {
-        source: "/images/:path*",
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-        ],
-      },
-      {
-        source: "/fonts/:path*",
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-        ],
-      },
-      {
-        source: "/(.*)",
-        headers: securityHeaders,
-      },
-    ];
   },
 };
 
