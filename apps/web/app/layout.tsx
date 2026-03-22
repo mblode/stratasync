@@ -1,5 +1,5 @@
+import { GeistMono } from "geist/font/mono";
 import type { Metadata } from "next";
-import { Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
 import type React from "react";
@@ -7,15 +7,10 @@ import type React from "react";
 import "./globals.css";
 
 const glide = localFont({
+  display: "swap",
   src: [{ path: "../public/glide-variable.woff2" }],
   variable: "--font-glide",
   weight: "400 900",
-  display: "swap",
-});
-
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
 });
 
 const GA_MEASUREMENT_ID = "G-H2PKLJ0615";
@@ -25,31 +20,34 @@ const siteDescription =
   "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
-  title: siteTitle,
-  description: siteDescription,
   alternates: {
     canonical: "/",
   },
+  description: siteDescription,
+  metadataBase: new URL(siteUrl),
   openGraph: {
-    type: "website",
-    url: siteUrl,
-    title: siteTitle,
     description: siteDescription,
     images: [
       {
+        alt: siteTitle,
+        height: 630,
         url: "/opengraph-image.png",
         width: 1200,
-        height: 630,
-        alt: siteTitle,
       },
     ],
+    title: siteTitle,
+    type: "website",
+    url: siteUrl,
   },
+  other: {
+    "apple-mobile-web-app-title": "Strata Sync",
+  },
+  title: siteTitle,
   twitter: {
     card: "summary_large_image",
-    title: siteTitle,
     description: siteDescription,
     images: ["/opengraph-image.png"],
+    title: siteTitle,
   },
 };
 
@@ -60,7 +58,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      className={`${glide.variable} ${geistMono.variable} min-h-screen font-sans antialiased`}
+      className={`${glide.variable} ${GeistMono.variable} min-h-screen font-sans antialiased`}
       lang="en"
     >
       <body className="flex min-h-screen flex-col">

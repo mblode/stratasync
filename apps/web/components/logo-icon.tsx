@@ -1,16 +1,16 @@
 import type { SVGProps } from "react";
 
-export function Logo(props: SVGProps<SVGSVGElement>) {
+export function LogoIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      aria-labelledby="stratasync-logo-title"
+      aria-labelledby="stratasync-logo-icon-title"
       fill="none"
       role="img"
       viewBox="0 0 800 562"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
-      <title id="stratasync-logo-title">Strata Sync</title>
+      <title id="stratasync-logo-icon-title">Strata Sync</title>
       <path
         d="M373.245.816c110.8-5.93 283.036 20.003 371.672 92.899 35.929 29.554 50.818 57.887 55.083 103.214-30.293-.334-60.941-.047-91.27.02-3.579-28.035-42.4-50.601-66.186-60.553-140.672-58.845-317.532-59.04-461.147-10.201-28.993 9.859-73.287 31.337-87.644 59.376-15.879 35.421 50.619 66.054 75.857 76.695 66.796 31.308 172.326 39.092 244.979 39.656l65.001 90.823c-42.663 0-94.144 1.177-136.61-1.937-101.213-8.446-212.693-29.261-293.186-95.31-57.38-47.083-68.57-128.102-15.642-182.454C116.393 28.592 261.396 5.696 373.245.816Z"
         fill="currentColor"

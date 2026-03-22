@@ -139,7 +139,7 @@ export default async function Home() {
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
           {/* Hero */}
-          <div className="bg-linear-to-b from-white to-[#f7ecd2] dark:from-background dark:to-card">
+          <div className="bg-linear-to-b from-white to-[#e8edda] dark:from-background dark:to-card">
             <section className="py-16 text-center md:py-24">
               <div className="container-wrapper">
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">

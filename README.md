@@ -1,44 +1,66 @@
-# stratasync
+# Strata Sync
 
-Local-first, server-sequenced sync engine for TypeScript, React, and Next.js
+Sync that works offline.
 
-## Installation
+A local-first sync engine for TypeScript, React, and Next.js. Every read is instant. Every write works offline. Every client converges.
+
+## Features
+
+- **Instant reads** — Local IndexedDB replica. No spinners, no round-trips.
+- **Offline support** — Persistent outbox. Changes sync when you reconnect.
+- **Fine-grained reactivity** — MobX observables. Only affected components re-render.
+- **Real-time collaboration** — Yjs CRDT for rich text and structured data.
+- **Undo and redo** — Transaction-based history tracking.
+- **Modular** — Swap storage, transport, or reactivity adapters.
+
+## Quick Start
 
 ```bash
-npm install -g stratasync
+npm install @stratasync/core @stratasync/client @stratasync/react
 ```
-
-Or use directly with npx:
-
-```bash
-npx stratasync --help
-```
-
-## Usage
-
-```bash
-stratasync --help
-```
-
-## Programmatic API
 
 ```typescript
-import {} from "stratasync";
+import { ClientModel, Model, Property } from "@stratasync/core";
+
+@ClientModel("Todo", { loadStrategy: "instant" })
+class Todo extends Model {
+  @Property() declare title: string;
+  @Property() declare completed: boolean;
+}
 ```
 
-## Usage with AI Agents
+```tsx
+import { useQuery, useSyncClient } from "@stratasync/react";
 
-Add the skill to your AI coding assistant:
+function TodoList() {
+  const { data: todos } = useQuery("Todo", {
+    where: (t) => !t.completed,
+  });
+  const { client } = useSyncClient();
 
-```bash
-npx skills add stratasync/stratasync
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.title}</li>
+      ))}
+      <button
+        onClick={() =>
+          client.create("Todo", {
+            title: "New todo",
+            completed: false,
+          })
+        }
+      >
+        Add
+      </button>
+    </ul>
+  );
+}
 ```
 
-This works with Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Goose, OpenCode, and Windsurf.
+## Packages
 
-## Requirements
-
-- Node.js >= 22
+`core` | `client` | `react` | `mobx` | `y-doc` | `next` | `storage-idb` | `transport-graphql` | `server`
 
 ## License
 
