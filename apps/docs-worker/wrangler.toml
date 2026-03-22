@@ -6,6 +6,6 @@ compatibility_date = "2024-12-01"
 enabled = true
 
 [vars]
-DOCS_URL = "matthewblode.mintlify.dev"
+DOCS_URL = "docs.stratasync.dev"
 CUSTOM_URL = "stratasync.dev"
 LANDING_URL = "landing.stratasync.dev"
