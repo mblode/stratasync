@@ -17,7 +17,7 @@ import {
   isSessionStateMessage,
   isYjsSyncStep2Message,
   isYjsUpdateMessage,
-} from "@stratasync/yjs";
+} from "@stratasync/y-doc";
 
 import { createBatchLoadStream, createBootstrapStream } from "./bootstrap.js";
 import { fetchDeltas } from "./deltas.js";

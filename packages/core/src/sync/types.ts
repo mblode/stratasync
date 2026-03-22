@@ -31,7 +31,7 @@ export interface SyncAction {
   clientId?: string;
   /** Timestamp when the change was created */
   createdAt?: Date;
-  /** Class name marker (Done payloads include __class) */
+  /** Class name marker (sync payloads include __class) */
   __class?: "SyncAction";
 }
 

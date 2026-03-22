@@ -14,7 +14,7 @@ export interface ChangeSnapshot {
 }
 
 /**
- * Base model class for Done models.
+ * Base model class.
  */
 export class Model {
   // ── Tracking infrastructure (must initialize before any decorated field) ──

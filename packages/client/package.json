@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@stratasync/core": "*",
-    "@stratasync/yjs": "*"
+    "@stratasync/y-doc": "*"
   },
   "devDependencies": {
     "lefthook": "^2.1.4",

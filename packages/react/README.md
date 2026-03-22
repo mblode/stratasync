@@ -1,6 +1,6 @@
 # @stratasync/react
 
-React bindings and hooks for the Done.
+React bindings and hooks for the sync engine.
 
 ## Overview
 

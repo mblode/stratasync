@@ -1,6 +1,6 @@
 # @stratasync/transport-graphql
 
-GraphQL transport adapter for sync communication and mutations in the Done.
+GraphQL transport adapter for sync communication and mutations.
 
 ## Overview
 
@@ -17,7 +17,7 @@ sync-transport-graphql handles communication between the sync client and server:
 npm install @stratasync/transport-graphql
 ```
 
-Dependencies: `@stratasync/core`, `@stratasync/yjs`
+Dependencies: `@stratasync/core`, `@stratasync/y-doc`
 
 ## Usage
 

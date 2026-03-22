@@ -21,7 +21,7 @@ import {
 } from "../src/stores/outbox";
 import { deleteDatabases } from "./test-utils";
 
-test("outbox state transitions follow Done semantics", async () => {
+test("outbox state transitions follow expected state machine semantics", async () => {
   const dbName = `outbox-${randomUUID()}`;
   const db = await openDB(dbName, 1, {
     upgrade(database) {

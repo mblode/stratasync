@@ -19,7 +19,7 @@ npm exec -- ultracite check # lint check (CI)
 ```
 packages/
   core/               # Model runtime, schema, decorators, transactions
-  yjs/                # Yjs CRDT for collaborative editing
+  y-doc/              # Yjs CRDT for collaborative editing
   client/             # Client orchestrator, outbox, queries, events
   react/              # React hooks and provider
   mobx/               # MobX reactivity adapter
@@ -35,8 +35,8 @@ apps/
 
 ```
 Layer 0: core, server (no internal deps)
-Layer 1: yjs, mobx (depend on core)
-Layer 2: client (depends on core, yjs)
+Layer 1: y-doc, mobx (depend on core)
+Layer 2: client (depends on core, y-doc)
 Layer 3: react, storage-idb, transport-graphql (depend on client + core)
 Layer 4: next (depends on client, core, react)
 ```

@@ -1,6 +1,6 @@
 # @stratasync/next
 
-Next.js integration helpers for the Done with App Router support.
+Next.js App Router integration helpers.
 
 ## Overview
 

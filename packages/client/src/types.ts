@@ -23,7 +23,7 @@ import type {
   YjsDocumentManager,
   YjsPresenceManager,
   YjsTransport,
-} from "@stratasync/yjs";
+} from "@stratasync/y-doc";
 
 /**
  * Storage adapter options

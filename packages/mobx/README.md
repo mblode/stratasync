@@ -1,6 +1,6 @@
 # @stratasync/mobx
 
-MobX reactivity adapter for the Done.
+MobX reactivity adapter for the sync engine.
 
 ## Overview
 

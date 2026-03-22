@@ -1,0 +1,98 @@
+---
+title: Installation
+description: Install Strata Sync packages and their peer dependencies for your project.
+---
+
+This guide walks you through installing Strata Sync packages for different use cases and configuring TypeScript for decorator support.
+
+## Requirements
+
+- **Node.js** >= 18
+- **React** 18 or 19
+- **Next.js** 14 or 15 (if using `@stratasync/next`)
+- **TypeScript** 5.9+ with `experimentalDecorators` enabled
+
+## Install by use case
+
+Choose the packages that match your stack. All packages are published under the `@stratasync` scope.
+
+### Basic sync client (no framework)
+
+For a framework-agnostic sync client with IndexedDB storage and GraphQL transport:
+
+```bash
+npm install @stratasync/core @stratasync/client @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+```
+
+### React application
+
+Add React hooks and the `SyncProvider` component:
+
+```bash
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+```
+
+### Next.js application
+
+Add SSR bootstrap prefetching and the `NextSyncProvider`:
+
+```bash
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/next @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+```
+
+### With collaborative editing
+
+Add Yjs CRDT support for real-time multi-user editing:
+
+```bash
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/next @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql @stratasync/y-doc
+```
+
+## Peer dependencies
+
+Some packages require peer dependencies that your application must install directly. Packages not listed here have no peer dependencies.
+
+| Package             | Peer dependencies                         |
+| ------------------- | ----------------------------------------- |
+| `@stratasync/react` | `react ^18 \|\| ^19`, `yjs ^13.6`         |
+| `@stratasync/next`  | `next ^14 \|\| ^15`, `react ^18 \|\| ^19` |
+| `@stratasync/mobx`  | `mobx ^6.0`                               |
+
+> **Note:** `@stratasync/core`, `@stratasync/client`, `@stratasync/y-doc`, `@stratasync/storage-idb`, and `@stratasync/transport-graphql` have no peer dependencies. Their internal dependencies (such as `mobx` in core and `yjs` in yjs) are bundled as regular dependencies.
+
+Install the required peer dependencies if they aren't already in your project:
+
+```bash
+npm install react mobx yjs
+```
+
+## TypeScript configuration
+
+Strata Sync uses TypeScript decorators for model schema definitions. Enable experimental decorators in your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  }
+}
+```
+
+The `emitDecoratorMetadata` option isn't required. Strata Sync decorators work purely through runtime registration with the `ModelRegistry`.
+
+## Verify installation
+
+After installing, verify that the packages resolve correctly by importing the core factory:
+
+```ts
+import { createSyncClient } from "@stratasync/client";
+import { Model, ClientModel, Property } from "@stratasync/core";
+import { SyncProvider, useModel, useQuery } from "@stratasync/react";
+```
+
+If your bundler resolves these imports without errors, you're ready to proceed to the [Quick Start](/docs/quick-start).

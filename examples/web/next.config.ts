@@ -13,7 +13,7 @@ const config: NextConfig = {
     "@stratasync/react",
     "@stratasync/storage-idb",
     "@stratasync/transport-graphql",
-    "@stratasync/yjs",
+    "@stratasync/y-doc",
   ],
 };
 

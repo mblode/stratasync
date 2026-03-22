@@ -49,7 +49,7 @@ tests/
 ## Gotchas
 
 - Uses `tsconfig.build.json` for builds (not `tsconfig.json`) — the build config excludes test files
-- Depends on `@stratasync/core` and `@stratasync/yjs` — both must be built first (`npm run build` from root handles this via Turbo)
+- Depends on `@stratasync/core` and `@stratasync/y-doc` — both must be built first (`npm run build` from root handles this via Turbo)
 - Tests use **Vitest**, not Node's built-in test runner — test mocks use `InMemoryStorage` and `TestTransport` (defined inline in test files), not shared fixtures
 - IMPORTANT: **Identity map batching is critical** — all delta application wraps identity map ops in `batch()` so MobX observers see server state + pending optimistic state atomically. Breaking this causes UI flashing during conflict resolution
 - **Never create model instances outside the identity map** — use `client.create()` or let the orchestrator hydrate from deltas. The identity map deduplicates instances and wires MobX reactivity

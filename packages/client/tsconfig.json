@@ -6,7 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@stratasync/core": ["../core/src/index.ts"],
-      "@stratasync/yjs": ["../yjs/src/index.ts"]
+      "@stratasync/y-doc": ["../y-doc/src/index.ts"]
     },
     "lib": ["ES2023", "DOM"],
     "declaration": true,

@@ -20,7 +20,7 @@ import {
   ModelRegistry,
   readArchivedAt,
 } from "@stratasync/core";
-import { YjsDocumentManager, YjsPresenceManager } from "@stratasync/yjs";
+import { YjsDocumentManager, YjsPresenceManager } from "@stratasync/y-doc";
 
 import type { HistoryEntry, HistoryOperation } from "./history-manager.js";
 import { HistoryManager } from "./history-manager.js";

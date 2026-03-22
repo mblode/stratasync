@@ -19,7 +19,7 @@ sync-client coordinates the client-side sync lifecycle:
 npm install @stratasync/client
 ```
 
-Dependencies: `@stratasync/core`, `@stratasync/yjs`
+Dependencies: `@stratasync/core`, `@stratasync/y-doc`
 
 ## Usage
 

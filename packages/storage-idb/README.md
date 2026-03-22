@@ -1,6 +1,6 @@
 # @stratasync/storage-idb
 
-IndexedDB storage adapter for client-side persistence in the Done.
+IndexedDB storage adapter for client-side persistence.
 
 ## Overview
 

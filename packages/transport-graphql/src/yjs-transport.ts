@@ -3,7 +3,7 @@ import type {
   ServerMessage,
   YjsTransport,
   YjsTransportConnectionState,
-} from "@stratasync/yjs";
+} from "@stratasync/y-doc";
 
 /**
  * Adapter that wires Yjs transport messages into the GraphQL WebSocket manager.

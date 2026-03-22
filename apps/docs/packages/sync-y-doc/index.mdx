@@ -1,0 +1,121 @@
+---
+title: "@stratasync/y-doc"
+description: Yjs CRDT integration for real-time collaborative editing in Strata Sync.
+---
+
+`@stratasync/y-doc` provides the client-side Yjs CRDT integration for Strata Sync. It manages Y.Doc instances for collaborative text editing, handles the Yjs sync protocol (state vector exchange and incremental updates), and tracks presence/session state for each collaborative document.
+
+## What it provides
+
+- **YjsDocumentManager** -- manages Y.Doc instances per entity field, handles sync protocol messages, tracks connection state, and derives text content from CRDT state
+- **YjsPresenceManager** -- tracks viewing/editing presence per document, signals focus/blur to the server, and receives session state updates (active participants)
+- **Message types** -- typed client and server messages for the Yjs sync protocol, presence signaling, and error handling
+- **Utility functions** -- `DocumentKey` serialization helpers and message type guards
+
+## Installation
+
+```bash
+npm install @stratasync/y-doc
+```
+
+`@stratasync/y-doc` has no peer dependencies. It bundles `yjs` ^13.6.21 as a direct dependency.
+
+## Package exports
+
+```ts
+import {
+  // Document management
+  YjsDocumentManager,
+
+  // Presence management
+  YjsPresenceManager,
+
+  // DocumentKey utilities
+  toDocumentKeyString,
+  fromDocumentKeyString,
+
+  // Message type guards
+  isYjsSyncStep2Message,
+  isYjsUpdateMessage,
+  isSessionStateMessage,
+  isLiveEditingErrorMessage,
+} from "@stratasync/y-doc";
+
+// Type-only exports
+import type {
+  DocumentKey,
+  DocumentConnectionState,
+  ConnectOptions,
+  SessionParticipant,
+  SessionState,
+  YjsDocumentManagerConfig,
+  YjsTransport,
+  ClientMessage,
+  ServerMessage,
+  DocViewMessage,
+  DocFocusMessage,
+  YjsSyncStep1Message,
+  YjsSyncStep2Message,
+  YjsUpdateMessage,
+  YjsUpdateToServerMessage,
+  LiveEditingErrorMessage,
+} from "@stratasync/y-doc";
+```
+
+## Core concepts
+
+### DocumentKey
+
+Every collaborative field is identified by a `DocumentKey` -- a triple of entity type, entity ID, and field name:
+
+```ts
+interface DocumentKey {
+  entityType: string; // Model name, such as "Task"
+  entityId: string; // Model instance ID
+  fieldName: string; // Field name, such as "description"
+}
+```
+
+The `toDocumentKeyString` and `fromDocumentKeyString` functions convert between `DocumentKey` objects and their string representation (`"Task:abc-123:description"`).
+
+### Yjs sync protocol
+
+The package implements a two-step sync protocol:
+
+1. **SyncStep1** -- the client sends its state vector to the server
+2. **SyncStep2** -- the server responds with the diff (missing updates)
+3. **Updates** -- after sync, incremental updates flow bidirectionally
+
+All Yjs data is binary-encoded (`Uint8Array`) and transmitted as base64 strings within JSON messages.
+
+### Transport layer
+
+Both managers require a `YjsTransport` implementation to send and receive messages:
+
+```ts
+interface YjsTransport {
+  send(message: ClientMessage): void;
+  onMessage(callback: (message: ServerMessage) => void): () => void;
+  isConnected(): boolean;
+}
+```
+
+In practice, the transport is provided by `@stratasync/transport-graphql` via `YjsTransportAdapter`, which bridges the Yjs protocol over the existing WebSocket connection.
+
+## Architecture role
+
+`@stratasync/y-doc` sits between `@stratasync/core` and the higher-level packages:
+
+```
+sync-core
+  ^-- sync-y-doc
+        ^-- sync-transport-graphql (provides YjsTransportAdapter)
+        ^-- sync-react (useYjsDocument, useYjsPresence hooks)
+```
+
+The package is framework-agnostic -- it has no React or browser-specific dependencies beyond the `yjs` library itself.
+
+## Pages in this section
+
+- [YjsDocumentManager](/docs/packages/sync-y-doc/document-manager) -- Manage Y.Doc instances, sync protocol, connection state, and content change tracking.
+- [YjsPresenceManager](/docs/packages/sync-y-doc/presence) -- Presence signaling, view/edit tracking, and session state for collaborative editing.

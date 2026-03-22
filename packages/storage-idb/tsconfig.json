@@ -26,7 +26,7 @@
     "paths": {
       "@stratasync/core": ["../core/src/index.ts"],
       "@stratasync/client": ["../client/src/index.ts"],
-      "@stratasync/yjs": ["../yjs/src/index.ts"]
+      "@stratasync/y-doc": ["../y-doc/src/index.ts"]
     }
   },
   "include": ["src/**/*"],

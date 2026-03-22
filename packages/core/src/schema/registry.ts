@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 
 /**
- * Runtime registry for model metadata (Done).
+ * Runtime registry for model metadata for model metadata.
  *
  * Static methods operate on the global decorator-driven registry, populated at
  * import time by @ClientModel/@Property decorators.
