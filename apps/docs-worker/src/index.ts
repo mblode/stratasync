@@ -35,7 +35,7 @@ export default {
         });
       }
 
-      // Proxy requests to /docs path to Mintlify
+      // Proxy requests to /docs path to Fumadocs
       if (urlObject.pathname.startsWith("/docs")) {
         const url = new URL(request.url);
         url.hostname = docsUrl;
