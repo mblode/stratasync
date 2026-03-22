@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 
-const siteUrl = "https://stratasync.dev";
+import { siteConfig } from "@/lib/config";
+
 const staticRoutes = ["", "docs"];
 const TRAILING_SLASH_REGEX = /\/$/;
 
@@ -17,13 +18,15 @@ const getPriority = (route: string) => {
   return 0.6;
 };
 
-export default function sitemap(): MetadataRoute.Sitemap {
+const sitemap = (): MetadataRoute.Sitemap => {
   const lastModified = new Date();
 
   return staticRoutes.map((route) => ({
-    url: `${siteUrl}/${route}`.replace(TRAILING_SLASH_REGEX, ""),
-    lastModified,
     changeFrequency: getChangeFrequency(route),
+    lastModified,
     priority: getPriority(route),
+    url: `${siteConfig.url}/${route}`.replace(TRAILING_SLASH_REGEX, ""),
   }));
-}
+};
+
+export default sitemap;

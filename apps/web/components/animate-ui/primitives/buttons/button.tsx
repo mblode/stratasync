@@ -1,11 +1,10 @@
 "use client";
 
-import { type HTMLMotionProps, motion } from "motion/react";
+import type { HTMLMotionProps } from "motion/react";
+import { motion } from "motion/react";
 
-import {
-  Slot,
-  type WithAsChild,
-} from "@/components/animate-ui/primitives/animate/slot";
+import type { WithAsChild } from "@/components/animate-ui/primitives/animate/slot";
+import { Slot } from "@/components/animate-ui/primitives/animate/slot";
 
 type ButtonProps = WithAsChild<
   HTMLMotionProps<"button"> & {
@@ -14,12 +13,12 @@ type ButtonProps = WithAsChild<
   }
 >;
 
-function Button({
+const Button = ({
   hoverScale = 1.05,
   tapScale = 0.95,
   asChild = false,
   ...props
-}: ButtonProps) {
+}: ButtonProps) => {
   const Component = asChild ? Slot : motion.button;
 
   return (
@@ -29,6 +28,6 @@ function Button({
       {...props}
     />
   );
-}
+};
 
 export { Button, type ButtonProps };

@@ -1,0 +1,4 @@
+{
+  "title": "@stratasync/next",
+  "pages": ["index", "server", "client"]
+}

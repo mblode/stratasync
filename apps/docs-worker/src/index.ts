@@ -17,13 +17,21 @@ export default {
         return await fetch(request);
       }
 
+      // Redirect docs.stratasync.dev → stratasync.dev/docs
+      if (urlObject.hostname === `docs.${customUrl}`) {
+        const redirectUrl = new URL(urlObject.pathname, `https://${customUrl}`);
+        redirectUrl.pathname = `/docs${urlObject.pathname === "/" ? "" : urlObject.pathname}`;
+        redirectUrl.search = urlObject.search;
+        return Response.redirect(redirectUrl.toString(), 301);
+      }
+
       // Proxy OpenGraph image requests to landing page
       if (urlObject.pathname === "/opengraph-image.png") {
         const landingUrl = new URL(request.url);
         landingUrl.hostname = landingHost;
         return await fetch(landingUrl, {
-          method: request.method,
           headers: request.headers,
+          method: request.method,
         });
       }
 
@@ -49,9 +57,9 @@ export default {
       const landingUrl = new URL(request.url);
       landingUrl.hostname = landingHost;
       return await fetch(landingUrl, {
-        method: request.method,
-        headers: request.headers,
         body: request.body,
+        headers: request.headers,
+        method: request.method,
       });
     } catch {
       return await fetch(request);

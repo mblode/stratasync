@@ -1,0 +1,154 @@
+---
+title: Undo and redo
+description: Client-side undo and redo with full transaction history.
+---
+
+The sync client maintains an undo/redo stack that allows users to reverse and replay their local mutations. Every create, update, delete, archive, and unarchive operation is recorded in a history stack.
+
+## Basic usage
+
+```ts
+// Make some changes
+await client.create("Task", { title: "Task 1", status: "todo" });
+await client.update("Task", "task-123", { title: "Updated" });
+
+// Undo the last change
+if (client.canUndo()) {
+  await client.undo();
+}
+
+// Redo it
+if (client.canRedo()) {
+  await client.redo();
+}
+```
+
+## API reference
+
+### canUndo()
+
+Returns `true` if the undo stack has entries.
+
+```ts
+const canUndo: boolean = client.canUndo();
+```
+
+### canRedo()
+
+Returns `true` if the redo stack has entries.
+
+```ts
+const canRedo: boolean = client.canRedo();
+```
+
+### undo()
+
+Pops the last entry from the undo stack, applies the inverse operation, and pushes the entry to the redo stack.
+
+```ts
+await client.undo();
+```
+
+If the undo operation fails (for example, due to a conflict), the client pushes the entry back onto the undo stack and throws the error.
+
+### redo()
+
+Pops the last entry from the redo stack, re-applies the original operation, and pushes the entry back to the undo stack.
+
+```ts
+await client.redo();
+```
+
+## How it works
+
+Each mutation creates a **history entry** containing both the undo and redo operations:
+
+| Original action   | Undo operation               | Redo operation               |
+| ----------------- | ---------------------------- | ---------------------------- |
+| Create (`"I"`)    | Delete the created model     | Re-create with the same data |
+| Update (`"U"`)    | Update with original values  | Update with new values       |
+| Delete (`"D"`)    | Re-create with original data | Delete again                 |
+| Archive (`"A"`)   | Unarchive the model          | Re-archive                   |
+| Unarchive (`"V"`) | Archive the model            | Unarchive again              |
+
+When you call `undo()`, the client:
+
+1. Pops the top entry from the undo stack
+2. Executes the undo operation as a new mutation (which itself goes through the outbox)
+3. Suppresses history recording so the undo operation doesn't create a new history entry
+4. Pushes the entry to the redo stack
+
+When you call `redo()`, the same process runs in reverse with the redo operation.
+
+## History and the outbox
+
+Undo/redo operations create real transactions that flow through the outbox to the server. They are not client-only rollbacks. This means:
+
+- The client persists and syncs undo operations just like regular mutations
+- Other connected clients see the undo effect as a normal update/delete/insert
+- If the server rejects a transaction, the client removes the corresponding history entry from both stacks
+
+## Stack behavior
+
+The undo stack follows standard undo/redo semantics:
+
+- Making a new mutation clears the redo stack (you can't redo after making a new change)
+- Calling `clearAll()` clears the stacks
+- The client removes history entries if the server rejects their associated transaction
+
+## React integration
+
+Use the sync client hooks in `@stratasync/react` to bind undo/redo to your UI:
+
+```tsx
+import { useSyncClientInstance } from "@stratasync/react";
+
+function UndoRedoButtons() {
+  const client = useSyncClientInstance();
+
+  return (
+    <div>
+      <button onClick={() => client.undo()} disabled={!client.canUndo()}>
+        Undo
+      </button>
+      <button onClick={() => client.redo()} disabled={!client.canRedo()}>
+        Redo
+      </button>
+    </div>
+  );
+}
+```
+
+## Keyboard shortcuts
+
+A common pattern is to bind undo/redo to keyboard shortcuts:
+
+```tsx
+import { useEffect } from "react";
+import { useSyncClientInstance } from "@stratasync/react";
+
+function useUndoRedoShortcuts() {
+  const client = useSyncClientInstance();
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod) {
+        return;
+      }
+
+      if (e.key === "z" && !e.shiftKey && client.canUndo()) {
+        e.preventDefault();
+        client.undo();
+      }
+      if (e.key === "z" && e.shiftKey && client.canRedo()) {
+        e.preventDefault();
+        client.redo();
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [client]);
+}
+```

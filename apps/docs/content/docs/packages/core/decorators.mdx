@@ -1,0 +1,388 @@
+---
+title: Decorators
+description: Decorator reference for defining synced models, properties, and relations in Strata Sync.
+---
+
+Strata Sync uses TypeScript decorators to declaratively define model schemas. Decorators register metadata with the `ModelRegistry` at class definition time, and the sync engine uses this metadata for change tracking, serialization, delta processing, and schema hashing.
+
+Enable decorators in your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true
+  }
+}
+```
+
+## @ClientModel
+
+Registers a class as a synced model with the `ModelRegistry`.
+
+```ts
+import { Model, ClientModel } from "@stratasync/core";
+
+@ClientModel("Task")
+class Task extends Model {
+  // properties...
+}
+```
+
+**Signature:** `ClientModel(modelName: string, options?: ModelOptions)`
+
+### ModelOptions
+
+| Option                  | Type              | Default     | Description                                                |
+| ----------------------- | ----------------- | ----------- | ---------------------------------------------------------- |
+| `loadStrategy`          | `LoadStrategy`    | `"instant"` | How and when the model data is fetched.                    |
+| `partialLoadMode`       | `PartialLoadMode` | --          | Hydration priority for partial models.                     |
+| `usedForPartialIndexes` | `boolean`         | --          | Whether this model is used for partial index dependencies. |
+| `schemaVersion`         | `number`          | --          | Schema version for migration tracking.                     |
+| `tableName`             | `string`          | --          | Optional database table name override.                     |
+| `groupKey`              | `string`          | --          | Sync-group key field for multi-tenancy.                    |
+
+### Load strategies
+
+```ts
+@ClientModel("Project", { loadStrategy: "instant" })
+class Project extends Model {
+  /* ... */
+}
+
+@ClientModel("Attachment", { loadStrategy: "lazy" })
+class Attachment extends Model {
+  /* ... */
+}
+
+@ClientModel("Comment", { loadStrategy: "partial" })
+class Comment extends Model {
+  /* ... */
+}
+```
+
+| Strategy                | Behavior                                                           |
+| ----------------------- | ------------------------------------------------------------------ |
+| `"instant"`             | Loaded during bootstrap. Always available in memory.               |
+| `"lazy"`                | Loaded on first access, cached thereafter.                         |
+| `"partial"`             | Loaded on demand, partially hydrated.                              |
+| `"explicitlyRequested"` | Never auto-loaded. Must be explicitly requested via `ensureModel`. |
+| `"local"`               | Never synced. Only stored locally on the device.                   |
+
+## @Property
+
+Registers a synced property that participates in change tracking and delta processing.
+
+```ts
+import { Model, ClientModel, Property } from "@stratasync/core";
+
+@ClientModel("Task")
+class Task extends Model {
+  @Property()
+  title = "";
+
+  @Property()
+  status = "todo";
+
+  @Property({ lazy: true })
+  description = "";
+
+  @Property({ serializer: dateSerializer })
+  dueDate: Date | null = null;
+}
+```
+
+**Signature:** `Property(options?: PropertyOptions)`
+
+### PropertyOptions
+
+| Option       | Type                 | Default | Description                               |
+| ------------ | -------------------- | ------- | ----------------------------------------- |
+| `lazy`       | `boolean`            | `false` | Whether the property is lazily hydrated.  |
+| `serializer` | `PropertySerializer` | --      | Custom serializer for the property value. |
+
+### Custom serializers
+
+Implement the `PropertySerializer` interface for custom types:
+
+```ts
+import type { PropertySerializer } from "@stratasync/core";
+
+const dateSerializer: PropertySerializer<Date | null> = {
+  serialize(value: Date | null): unknown {
+    return value ? value.toISOString() : null;
+  },
+  deserialize(value: unknown): Date | null {
+    return typeof value === "string" ? new Date(value) : null;
+  },
+};
+
+@ClientModel("Event")
+class Event extends Model {
+  @Property({ serializer: dateSerializer })
+  startsAt: Date | null = null;
+}
+```
+
+## @EphemeralProperty
+
+Registers a property that is observable but **not persisted** to the server. Useful for local UI state that should be reactive but not synced.
+
+```ts
+@ClientModel("Task")
+class Task extends Model {
+  @Property()
+  title = "";
+
+  @EphemeralProperty()
+  isExpanded = false;
+
+  @EphemeralProperty()
+  localDraft = "";
+}
+```
+
+**Signature:** `EphemeralProperty(options?: PropertyOptions)`
+
+The options are identical to `@Property`. Ephemeral properties participate in MobX observability but are excluded from transactions and delta processing.
+
+## @Reference
+
+Registers a foreign-key reference to another model. Creates both the foreign key field and a lazy-resolved model accessor.
+
+```ts
+@ClientModel("Task")
+class Task extends Model {
+  @Reference(() => Project, "tasks")
+  project!: Project;
+  // Also creates: projectId: string (the foreign key)
+}
+```
+
+**Signature:** `Reference(modelFactory: () => ModelConstructor, inverseProperty?: string, options?: ReferenceOptions)`
+
+| Parameter         | Description                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `modelFactory`    | A factory function returning the referenced model constructor. Uses a factory to avoid circular dependency tasks. |
+| `inverseProperty` | Name of the inverse collection property on the referenced model (such as `"tasks"` on `Project`).                 |
+| `options`         | Additional reference options.                                                                                     |
+
+### ReferenceOptions
+
+| Option       | Type                 | Default                                | Description                          |
+| ------------ | -------------------- | -------------------------------------- | ------------------------------------ |
+| `foreignKey` | `string`             | `"<propertyName>Id"`                   | Override the foreign key field name. |
+| `nullable`   | `boolean`            | --                                     | Whether the reference can be null.   |
+| `indexed`    | `boolean`            | `true` (when `inverseProperty` is set) | Whether to index this foreign key.   |
+| `lazy`       | `boolean`            | `false`                                | Whether to lazily hydrate.           |
+| `serializer` | `PropertySerializer` | --                                     | Custom serializer.                   |
+
+### Custom foreign key
+
+```ts
+@ClientModel("Task")
+class Task extends Model {
+  @Reference(() => User, undefined, { foreignKey: "ownerId" })
+  assignee!: User;
+  // Creates: ownerId: string (instead of default "assigneeId")
+}
+```
+
+## @ManyToOne
+
+Alias for `@Reference` with a more explicit relationship name. Accepts a model name string or factory function.
+
+```ts
+@ClientModel("Task")
+class Task extends Model {
+  @ManyToOne("Project", "tasks")
+  project!: Project;
+
+  @ManyToOne(() => User)
+  assignee!: User;
+}
+```
+
+**Signature:** `ManyToOne(modelNameOrFactory: string | (() => ModelConstructor), inverseProperty?: string, options?: ReferenceOptions)`
+
+When you provide a string, it uses the registered model name directly. When you provide a factory, it extracts the constructor name.
+
+## @OneToMany
+
+Registers a one-to-many collection on the parent side of a relationship. Returns a `LazyCollection` that resolves child models via the sync client.
+
+```ts
+@ClientModel("Project")
+class Project extends Model {
+  @Property()
+  name = "";
+
+  @OneToMany()
+  tasks!: LazyCollection<Task>;
+}
+```
+
+**Signature:** `OneToMany(options?: ReferenceCollectionOptions)`
+
+### ReferenceCollectionOptions
+
+| Option       | Type                 | Default | Description                                              |
+| ------------ | -------------------- | ------- | -------------------------------------------------------- |
+| `foreignKey` | `string`             | --      | Override the foreign key used for the collection lookup. |
+| `indexed`    | `boolean`            | --      | Whether the collection uses an index.                    |
+| `nullable`   | `boolean`            | --      | Whether the collection can be null.                      |
+| `lazy`       | `boolean`            | `false` | Whether to lazily hydrate.                               |
+| `serializer` | `PropertySerializer` | --      | Custom serializer.                                       |
+
+### Usage with the inverse side
+
+`@ManyToOne` on the child side creates the foreign key, while `@OneToMany` on the parent side creates the collection:
+
+```ts
+@ClientModel("Project")
+class Project extends Model {
+  @Property()
+  name = "";
+
+  @OneToMany()
+  tasks!: LazyCollection<Task>;
+}
+
+@ClientModel("Task")
+class Task extends Model {
+  @Property()
+  title = "";
+
+  @ManyToOne("Project", "tasks")
+  project!: Project;
+  // Creates projectId foreign key, which @OneToMany uses
+}
+```
+
+## @BackReference
+
+Registers a back-reference to the parent model. Use this for inverse lookups when you define the relationship on the other side.
+
+```ts
+@ClientModel("Comment")
+class Comment extends Model {
+  @Property()
+  body = "";
+
+  @BackReference({ foreignKey: "commentId" })
+  replies!: Reply[];
+}
+```
+
+**Signature:** `BackReference(options?: BackReferenceOptions)`
+
+### BackReferenceOptions
+
+| Option       | Type                 | Default | Description                                 |
+| ------------ | -------------------- | ------- | ------------------------------------------- |
+| `foreignKey` | `string`             | --      | The foreign key field on the related model. |
+| `lazy`       | `boolean`            | `false` | Whether to lazily hydrate.                  |
+| `serializer` | `PropertySerializer` | --      | Custom serializer.                          |
+
+## @ReferenceArray
+
+Registers an array of references, typically for many-to-many relationships through a join model.
+
+```ts
+@ClientModel("Task")
+class Task extends Model {
+  @Property()
+  title = "";
+
+  @ReferenceArray({ through: "TaskTag" })
+  tags!: Tag[];
+}
+```
+
+**Signature:** `ReferenceArray(options?: ReferenceArrayOptions)`
+
+### ReferenceArrayOptions
+
+| Option       | Type                 | Default | Description                                             |
+| ------------ | -------------------- | ------- | ------------------------------------------------------- |
+| `through`    | `string`             | --      | Join/through model name for many-to-many relationships. |
+| `lazy`       | `boolean`            | `false` | Whether to lazily hydrate.                              |
+| `serializer` | `PropertySerializer` | --      | Custom serializer.                                      |
+
+## @ReferenceCollection
+
+Alias for `@OneToMany`. Both decorators produce identical metadata and behavior.
+
+```ts
+@ClientModel("Project")
+class Project extends Model {
+  @ReferenceCollection()
+  tasks!: LazyCollection<Task>;
+}
+```
+
+**Signature:** `ReferenceCollection(options?: ReferenceCollectionOptions)`
+
+## Complete example
+
+Here is a complete example showing a project management domain model:
+
+```ts
+import {
+  Model,
+  ClientModel,
+  Property,
+  EphemeralProperty,
+  ManyToOne,
+  OneToMany,
+  ReferenceArray,
+} from "@stratasync/core";
+import type { LazyCollection } from "@stratasync/core";
+
+@ClientModel("Workspace", { loadStrategy: "instant" })
+class Workspace extends Model {
+  @Property()
+  name = "";
+
+  @OneToMany()
+  projects!: LazyCollection<Project>;
+}
+
+@ClientModel("Project", { loadStrategy: "instant" })
+class Project extends Model {
+  @Property()
+  name = "";
+
+  @Property()
+  color = "#000000";
+
+  @ManyToOne("Workspace", "projects")
+  workspace!: Workspace;
+
+  @OneToMany()
+  tasks!: LazyCollection<Task>;
+}
+
+@ClientModel("Task", { loadStrategy: "instant" })
+class Task extends Model {
+  @Property()
+  title = "";
+
+  @Property()
+  status = "todo";
+
+  @Property()
+  priority = 0;
+
+  @ManyToOne("Project", "tasks")
+  project!: Project;
+
+  @ManyToOne("User")
+  assignee!: User;
+
+  @ReferenceArray({ through: "TaskTag" })
+  tags!: Tag[];
+
+  @EphemeralProperty()
+  isSelected = false;
+}
+```

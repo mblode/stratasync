@@ -51,8 +51,8 @@ type CopyButtonProps = Omit<ButtonPrimitiveProps, "children"> &
   VariantProps<typeof buttonVariants> & {
     content: string;
     copied?: boolean;
-    onCopiedChange?: (copied: boolean, content?: string) => void;
     delay?: number;
+    onCopiedChange?: (copied: boolean, content?: string) => void;
   };
 
 const CopyButton = ({

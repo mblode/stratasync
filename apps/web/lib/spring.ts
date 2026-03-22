@@ -18,24 +18,24 @@ export const MAX_ROTATION = 45;
 
 /** Default spring configuration for rotation - creates underdamped oscillation */
 export const SPRING_DEFAULTS = {
-  stiffness: 100,
   damping: 10,
   mass: 1,
+  stiffness: 100,
 };
 
 /** Scale spring configuration - snappier response (from swing-card.tsx lines 29-33) */
 export const SCALE_SPRING_CONFIG = {
-  stiffness: 550,
   damping: 30,
   restSpeed: 10,
+  stiffness: 550,
 };
 
 /** Position spring config - subtle underdamped bounce (zeta=0.7, ~5% overshoot) */
 export const POSITION_SPRING_CONFIG = {
-  stiffness: 200,
   damping: 20,
-  restSpeed: 1,
   restDistance: 0.5,
+  restSpeed: 1,
+  stiffness: 200,
 };
 
 // ============================================================================
@@ -43,14 +43,14 @@ export const POSITION_SPRING_CONFIG = {
 // ============================================================================
 
 export interface SpringConfig {
-  stiffness?: number;
   damping?: number;
-  mass?: number;
   from?: number;
+  mass?: number;
+  restDistance?: number;
+  restSpeed?: number;
+  stiffness?: number;
   to?: number;
   velocity?: number;
-  restSpeed?: number;
-  restDistance?: number;
 }
 
 export type RotationSpringSettings = Required<
@@ -65,45 +65,45 @@ export type ScaleSpringSettings = Required<
 >;
 
 export interface DragSwingSettings {
-  velocityWindowMs: number;
-  velocityScale: number;
-  maxRotation: number;
   dragScale: number;
+  maxRotation: number;
   rotationSpring: RotationSpringSettings;
   scaleSpring: ScaleSpringSettings;
+  velocityScale: number;
+  velocityWindowMs: number;
 }
 
 export interface SpringState {
+  current: number;
   done: boolean;
   hasReachedTarget: boolean;
-  current: number;
   target: number;
 }
 
 export interface PointWithTimestamp {
+  timestamp: number;
   x: number;
   y: number;
-  timestamp: number;
 }
 
 export const DRAG_SWING_DEFAULTS: DragSwingSettings = {
-  velocityWindowMs: VELOCITY_WINDOW_MS,
-  velocityScale: VELOCITY_SCALE,
-  maxRotation: MAX_ROTATION,
   dragScale: 1.04,
+  maxRotation: MAX_ROTATION,
   rotationSpring: {
-    stiffness: SPRING_DEFAULTS.stiffness,
     damping: SPRING_DEFAULTS.damping,
     mass: SPRING_DEFAULTS.mass,
-    restSpeed: 2,
     restDistance: 0.5,
+    restSpeed: 2,
+    stiffness: SPRING_DEFAULTS.stiffness,
   },
   scaleSpring: {
-    stiffness: SCALE_SPRING_CONFIG.stiffness,
     damping: SCALE_SPRING_CONFIG.damping,
-    restSpeed: SCALE_SPRING_CONFIG.restSpeed,
     restDistance: 0.001,
+    restSpeed: SCALE_SPRING_CONFIG.restSpeed,
+    stiffness: SCALE_SPRING_CONFIG.stiffness,
   },
+  velocityScale: VELOCITY_SCALE,
+  velocityWindowMs: VELOCITY_WINDOW_MS,
 };
 
 export const getDragSwingDefaults = (): DragSwingSettings => ({
@@ -123,19 +123,19 @@ export const getDragSwingDefaults = (): DragSwingSettings => ({
  */
 export const createLiveSpring = (
   config: {
-    stiffness?: number;
     damping?: number;
     mass?: number;
-    restSpeed?: number;
     restDistance?: number;
+    restSpeed?: number;
+    stiffness?: number;
   } = {}
 ) => {
   const configState = {
-    stiffness: config.stiffness ?? SPRING_DEFAULTS.stiffness,
     damping: config.damping ?? SPRING_DEFAULTS.damping,
     mass: config.mass ?? SPRING_DEFAULTS.mass,
-    restSpeed: config.restSpeed ?? 2,
     restDistance: config.restDistance ?? 0.5,
+    restSpeed: config.restSpeed ?? 2,
+    stiffness: config.stiffness ?? SPRING_DEFAULTS.stiffness,
   };
 
   let currentValue = 0;
@@ -144,27 +144,62 @@ export const createLiveSpring = (
   let lastTime: number | null = null;
 
   return {
-    setTarget(target: number) {
-      targetValue = target;
+    getTarget() {
+      return targetValue;
+    },
+
+    getValue() {
+      return currentValue;
+    },
+
+    reset() {
+      currentValue = 0;
+      currentVelocity = 0;
+      targetValue = 0;
+      lastTime = null;
+    },
+
+    setConfig(nextConfig: SpringConfig) {
+      if (typeof nextConfig.damping === "number") {
+        configState.damping = nextConfig.damping;
+      }
+      if (typeof nextConfig.mass === "number") {
+        configState.mass = nextConfig.mass;
+      }
+      if (typeof nextConfig.restDistance === "number") {
+        configState.restDistance = nextConfig.restDistance;
+      }
+      if (typeof nextConfig.restSpeed === "number") {
+        configState.restSpeed = nextConfig.restSpeed;
+      }
+      if (typeof nextConfig.stiffness === "number") {
+        configState.stiffness = nextConfig.stiffness;
+      }
     },
 
     setCurrent(value: number) {
       currentValue = value;
       currentVelocity = 0;
-      lastTime = null; // Reset time so next step starts fresh
+      // Reset time so next step starts fresh
+      lastTime = null;
+    },
+
+    setTarget(target: number) {
+      targetValue = target;
     },
 
     /**
      * Step the simulation forward by the given time delta (in ms)
      * Returns the current value and whether the spring is at rest
      */
-    step(now: number): { value: number; velocity: number; done: boolean } {
+    step(now: number): { done: boolean; value: number; velocity: number } {
       if (lastTime === null) {
         lastTime = now;
-        return { value: currentValue, velocity: currentVelocity, done: false };
+        return { done: false, value: currentValue, velocity: currentVelocity };
       }
 
-      const deltaTime = Math.min(now - lastTime, 64); // Cap at ~15fps minimum
+      // Cap at ~15fps minimum
+      const deltaTime = Math.min(now - lastTime, 64);
       lastTime = now;
 
       // Spring physics simulation (Euler integration)
@@ -177,7 +212,8 @@ export const createLiveSpring = (
 
       // Update velocity and position using Euler integration
       // dt is in seconds, velocity is in units/second, so position change = velocity * dt
-      const dt = deltaTime / 1000; // Convert to seconds for physics
+      // Convert to seconds for physics
+      const dt = deltaTime / 1000;
       currentVelocity += acceleration * dt;
       currentValue += currentVelocity * dt;
 
@@ -192,43 +228,10 @@ export const createLiveSpring = (
       }
 
       return {
+        done: isAtRest,
         value: currentValue,
         velocity: currentVelocity,
-        done: isAtRest,
       };
-    },
-
-    reset() {
-      currentValue = 0;
-      currentVelocity = 0;
-      targetValue = 0;
-      lastTime = null;
-    },
-
-    setConfig(nextConfig: SpringConfig) {
-      if (typeof nextConfig.stiffness === "number") {
-        configState.stiffness = nextConfig.stiffness;
-      }
-      if (typeof nextConfig.damping === "number") {
-        configState.damping = nextConfig.damping;
-      }
-      if (typeof nextConfig.mass === "number") {
-        configState.mass = nextConfig.mass;
-      }
-      if (typeof nextConfig.restSpeed === "number") {
-        configState.restSpeed = nextConfig.restSpeed;
-      }
-      if (typeof nextConfig.restDistance === "number") {
-        configState.restDistance = nextConfig.restDistance;
-      }
-    },
-
-    getValue() {
-      return currentValue;
-    },
-
-    getTarget() {
-      return targetValue;
     },
   };
 };
@@ -265,7 +268,7 @@ export const calculateVelocityFromHistory = (
     if (latest.timestamp - oldestSample.timestamp > windowMs) {
       break;
     }
-    i--;
+    i -= 1;
   }
 
   if (!oldestSample) {

@@ -4,6 +4,8 @@ import localFont from "next/font/local";
 import Script from "next/script";
 import type React from "react";
 
+import { siteConfig } from "@/lib/config";
+
 import "./globals.css";
 
 const glide = localFont({
@@ -14,19 +16,16 @@ const glide = localFont({
 });
 
 const GA_MEASUREMENT_ID = "G-H2PKLJ0615";
-const siteUrl = "https://stratasync.dev";
-const siteTitle = "Strata Sync - Local-first sync engine";
-const siteDescription =
-  "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js";
+const siteTitle = `${siteConfig.name} - Local-first sync engine`;
 
 export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
-  description: siteDescription,
-  metadataBase: new URL(siteUrl),
+  description: siteConfig.description,
+  metadataBase: new URL(siteConfig.url),
   openGraph: {
-    description: siteDescription,
+    description: siteConfig.description,
     images: [
       {
         alt: siteTitle,
@@ -37,43 +36,87 @@ export const metadata: Metadata = {
     ],
     title: siteTitle,
     type: "website",
-    url: siteUrl,
+    url: siteConfig.url,
   },
   other: {
-    "apple-mobile-web-app-title": "Strata Sync",
+    "apple-mobile-web-app-title": siteConfig.name,
   },
   title: siteTitle,
   twitter: {
     card: "summary_large_image",
-    description: siteDescription,
+    description: siteConfig.description,
     images: ["/opengraph-image.png"],
     title: siteTitle,
   },
 };
 
-export default function RootLayout({
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  logo: `${siteConfig.url}/icon0.svg`,
+  name: siteConfig.name,
+  sameAs: [siteConfig.links.github],
+  url: siteConfig.url,
+};
+
+const webSiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: siteConfig.name,
+  url: siteConfig.url,
+};
+
+const softwareJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  applicationCategory: "DeveloperApplication",
+  codeRepository: siteConfig.links.github,
+  description: siteConfig.description,
+  name: siteConfig.name,
+  programmingLanguage: "TypeScript",
+  runtimePlatform: "Node.js",
+  url: siteConfig.url,
+};
+
+const RootLayout = ({
   children,
 }: Readonly<{
   children: React.ReactNode;
-}>) {
-  return (
-    <html
-      className={`${glide.variable} ${GeistMono.variable} min-h-screen font-sans antialiased`}
-      lang="en"
-    >
-      <body className="flex min-h-screen flex-col">
-        <Script
-          src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
-          strategy="afterInteractive"
-        />
-        <Script id="gtag-init" strategy="afterInteractive">
-          {`window.dataLayer = window.dataLayer || [];
+}>) => (
+  <html
+    className={`${glide.variable} ${GeistMono.variable} min-h-screen font-sans antialiased`}
+    lang="en"
+  >
+    <body className="flex min-h-screen flex-col">
+      {/* oxlint-disable react/no-danger -- JSON-LD structured data requires dangerouslySetInnerHTML */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(organizationJsonLd),
+        }}
+        type="application/ld+json"
+      />
+      <script
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(webSiteJsonLd) }}
+        type="application/ld+json"
+      />
+      <script
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareJsonLd) }}
+        type="application/ld+json"
+      />
+      {/* oxlint-enable react/no-danger */}
+      <Script
+        src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
+        strategy="afterInteractive"
+      />
+      <Script id="gtag-init" strategy="afterInteractive">
+        {`window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
 gtag('config', '${GA_MEASUREMENT_ID}');`}
-        </Script>
-        {children}
-      </body>
-    </html>
-  );
-}
+      </Script>
+      {children}
+    </body>
+  </html>
+);
+
+export default RootLayout;

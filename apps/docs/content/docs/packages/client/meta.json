@@ -1,0 +1,4 @@
+{
+  "title": "@stratasync/client",
+  "pages": ["index", "configuration", "crud", "queries", "events", "undo-redo"]
+}

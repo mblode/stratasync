@@ -1,0 +1,4 @@
+{
+  "title": "@stratasync/core",
+  "pages": ["index", "models", "decorators", "transactions", "schema"]
+}

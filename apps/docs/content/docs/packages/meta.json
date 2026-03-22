@@ -1,0 +1,13 @@
+{
+  "title": "Packages",
+  "pages": [
+    "core",
+    "client",
+    "react",
+    "next",
+    "y-doc",
+    "mobx",
+    "storage-idb",
+    "transport-graphql"
+  ]
+}

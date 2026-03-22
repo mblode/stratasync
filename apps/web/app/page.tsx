@@ -1,3 +1,4 @@
+/* eslint-disable react/no-danger -- shiki outputs pre-rendered HTML */
 import {
   BoltIcon,
   EyeOpenIcon,
@@ -60,46 +61,46 @@ function TodoList() {
 
 const features = [
   {
-    icon: BoltIcon,
-    title: "Instant reads",
     description:
       "All reads come from a local IndexedDB replica. No spinners, no round-trips.",
+    icon: BoltIcon,
+    title: "Instant reads",
   },
   {
-    icon: OfflineIcon,
-    title: "Offline support",
     description:
       "Mutations queue in a persistent outbox. Changes sync when you reconnect.",
+    icon: OfflineIcon,
+    title: "Offline support",
   },
   {
-    icon: EyeOpenIcon,
-    title: "Fine-grained reactivity",
     description:
       "MobX makes each field observable. Only affected components re-render.",
+    icon: EyeOpenIcon,
+    title: "Fine-grained reactivity",
   },
   {
-    icon: PeopleIcon,
-    title: "Real-time collaboration",
     description:
       "Yjs CRDT integration for multi-user editing of rich text and structured data.",
+    icon: PeopleIcon,
+    title: "Real-time collaboration",
   },
   {
-    icon: HistoryIcon,
-    title: "Undo and redo",
     description:
       "Transaction-based history tracking, built into the sync client.",
+    icon: HistoryIcon,
+    title: "Undo and redo",
   },
   {
-    icon: LayersThreeIcon,
-    title: "Modular",
     description:
       "Swap storage, transport, or reactivity adapters. Use only what you need.",
+    icon: LayersThreeIcon,
+    title: "Modular",
   },
 ];
 
 const highlighterOptions = {
-  themes: ["github-light", "github-dark"],
   langs: ["bash", "tsx"],
+  themes: ["github-light", "github-dark"],
 };
 let highlighterPromise: ReturnType<typeof getSingletonHighlighter> | null =
   null;
@@ -111,21 +112,21 @@ const getHighlighter = () => {
   return highlighterPromise;
 };
 
-async function getCodeHtml(code: string, lang: "bash" | "tsx") {
+const getCodeHtml = async (code: string, lang: "bash" | "tsx") => {
   const highlighter = await getHighlighter();
   return highlighter.codeToHtml(code, {
     lang,
     themes: {
-      light: "github-light",
       dark: "github-dark",
+      light: "github-light",
     },
   });
-}
+};
 
 const shikiClassName =
   "overflow-x-auto pb-4 text-xs md:text-sm [&>pre]:m-0 [&>pre]:p-0 [&>pre]:!bg-transparent [&>pre]:!font-mono [&>pre>code]:!font-mono dark:[&>pre]:!text-[color:var(--shiki-dark)] dark:[&>pre_span]:!text-[color:var(--shiki-dark)]";
 
-export default async function Home() {
+const Home = async () => {
   const [modelHtml, clientHtml, hooksHtml] = await Promise.all([
     getCodeHtml(MODEL_SNIPPET, "tsx"),
     getCodeHtml(CLIENT_SNIPPET, "tsx"),
@@ -253,4 +254,6 @@ export default async function Home() {
       </main>
     </div>
   );
-}
+};
+
+export default Home;

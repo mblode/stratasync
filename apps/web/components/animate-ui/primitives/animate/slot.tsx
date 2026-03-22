@@ -1,16 +1,16 @@
 "use client";
 
-import { type HTMLMotionProps, isMotionComponent, motion } from "motion/react";
-import {
-  type CSSProperties,
-  type ElementType,
-  isValidElement,
-  type ReactElement,
-  type Ref,
-  type RefCallback,
-  type RefObject,
-  useMemo,
+import type { HTMLMotionProps } from "motion/react";
+import { isMotionComponent, motion } from "motion/react";
+import type {
+  CSSProperties,
+  ElementType,
+  ReactElement,
+  Ref,
+  RefCallback,
+  RefObject,
 } from "react";
+import { isValidElement, useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -27,8 +27,9 @@ type WithAsChild<Base extends object> =
 
 type SlotProps<T extends HTMLElement = HTMLElement> = DOMMotionProps<T>;
 
-function mergeRefs<T>(...refs: (Ref<T> | undefined)[]): RefCallback<T> {
-  return (node) => {
+const mergeRefs =
+  <T,>(...refs: (Ref<T> | undefined)[]): RefCallback<T> =>
+  (node) => {
     for (const ref of refs) {
       if (!ref) {
         continue;
@@ -40,12 +41,11 @@ function mergeRefs<T>(...refs: (Ref<T> | undefined)[]): RefCallback<T> {
       }
     }
   };
-}
 
-function mergeProps<T extends HTMLElement>(
+const mergeProps = <T extends HTMLElement>(
   childProps: AnyProps,
   slotProps: DOMMotionProps<T>
-): AnyProps {
+): AnyProps => {
   const merged: AnyProps = { ...childProps, ...slotProps };
 
   if (childProps.className || slotProps.className) {
@@ -63,13 +63,13 @@ function mergeProps<T extends HTMLElement>(
   }
 
   return merged;
-}
+};
 
-function Slot<T extends HTMLElement = HTMLElement>({
+const Slot = <T extends HTMLElement = HTMLElement>({
   children,
   ref,
   ...props
-}: SlotProps<T>) {
+}: SlotProps<T>) => {
   const childElement = isValidElement(children) ? children : null;
   const elementType = childElement ? childElement.type : "div";
   const isAlreadyMotion =
@@ -94,6 +94,6 @@ function Slot<T extends HTMLElement = HTMLElement>({
   const mergedProps = mergeProps(childProps, props);
 
   return <Base {...mergedProps} ref={mergeRefs(childRef as Ref<T>, ref)} />;
-}
+};
 
 export { Slot, type WithAsChild };

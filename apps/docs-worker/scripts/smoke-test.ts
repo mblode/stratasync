@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import worker from "../src/index.ts";
 
 const env = {
-  DOCS_URL: "docs.example.com",
   CUSTOM_URL: "stratasync.dev",
+  DOCS_URL: "docs.example.com",
   LANDING_URL: "landing.example.com",
 };
 
@@ -47,12 +47,42 @@ const run = async () => {
     // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], "stratasync.dev");
+
+    // docs.stratasync.dev → stratasync.dev/docs (301 redirect)
+    requests.length = 0;
+    const docsSubdomainRes = await worker.fetch(
+      new Request("https://docs.stratasync.dev/quick-start?ref=test"),
+      env
+    );
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(docsSubdomainRes.status, 301);
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(
+      docsSubdomainRes.headers.get("Location"),
+      "https://stratasync.dev/docs/quick-start?ref=test"
+    );
+
+    // docs.stratasync.dev root → stratasync.dev/docs
+    requests.length = 0;
+    const docsRootRes = await worker.fetch(
+      new Request("https://docs.stratasync.dev/"),
+      env
+    );
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(docsRootRes.status, 301);
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(
+      docsRootRes.headers.get("Location"),
+      "https://stratasync.dev/docs"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
 };
 
-run().catch((error) => {
+try {
+  await run();
+} catch (error) {
   console.error(error);
   process.exitCode = 1;
-});
+}

@@ -1,10 +1,11 @@
 export const siteConfig = {
-  name: "Strata Sync",
   description:
-    "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js",
+    "StrataSync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration.",
   links: {
-    github: "https://github.com/stratasync/stratasync",
-    docs: "https://stratasync.dev/docs",
     author: "https://matthewblode.com",
+    docs: "https://stratasync.dev/docs",
+    github: "https://github.com/stratasync/stratasync",
   },
+  name: "Strata Sync",
+  url: "https://stratasync.dev",
 };
