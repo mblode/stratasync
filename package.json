@@ -38,13 +38,13 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.0",
-    "@types/node": "^22.19.11",
+    "@changesets/cli": "^2.30.0",
+    "@types/node": "^25.5.0",
     "drizzle-orm": "1.0.0-beta.15-859cf75",
-    "turbo": "^2.8.19",
+    "turbo": "^2.8.20",
     "typescript": "5.9.3",
     "ultracite": "^7.3.2",
-    "vitest": "^4.0.0"
+    "vitest": "^4.1.0"
   },
   "engines": {
     "node": ">=22"

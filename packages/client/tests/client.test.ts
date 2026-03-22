@@ -30,13 +30,14 @@ interface Deferred<T> {
 }
 
 const createDeferred = <T>(): Deferred<T> => {
+  // oxlint-disable-next-line consistent-function-scoping -- noop placeholder reassigned inside Promise constructor
   let resolve: (value: T | PromiseLike<T>) => void = () => {
     /* noop */
   };
 
   // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
+  const promise = new Promise<T>((_resolve) => {
+    resolve = _resolve;
   });
 
   return { promise, resolve };
@@ -55,6 +56,7 @@ const schema: SchemaDefinition = {
 };
 
 class DelayedOpenStorage implements StorageAdapter {
+  // oxlint-disable-next-line no-invalid-void-type -- void is the correct type for a signal-only deferred
   private readonly openDeferred = createDeferred<void>();
   private readonly outbox: Transaction[];
   private meta: StorageMeta;
@@ -250,29 +252,27 @@ class DelayedOpenStorage implements StorageAdapter {
   }
 }
 
+// oxlint-disable-next-line max-classes-per-file -- test helpers colocated
 class NoopTransport implements TransportAdapter {
   private readonly connectionListeners = new Set<
     (state: ConnectionState) => void
   >();
 
-  bootstrap(
+  // oxlint-disable-next-line require-yield -- returns metadata without yielding rows for noop
+  async *bootstrap(
     _options: BootstrapOptions
   ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown> {
-    return (async function* bootstrap() {
-      await Promise.resolve();
-      return {
-        lastSyncId: "7",
-        subscribedSyncGroups: [],
-      };
-    })();
+    return {
+      lastSyncId: "7",
+      subscribedSyncGroups: [],
+    };
   }
 
-  batchLoad(
+  // oxlint-disable-next-line require-yield -- empty async generator for noop
+  async *batchLoad(
     _options: BatchLoadOptions
   ): AsyncGenerator<ModelRow, void, unknown> {
-    return (async function* batchLoad() {
-      await Promise.resolve();
-    })();
+    /* noop */
   }
 
   mutate(batch: TransactionBatch): Promise<MutateResult> {
@@ -289,8 +289,9 @@ class NoopTransport implements TransportAdapter {
 
   subscribe(_options: SubscribeOptions): DeltaSubscription {
     return {
-      [Symbol.asyncIterator]: async function* iterator() {
-        await Promise.resolve();
+      // oxlint-disable-next-line require-yield -- empty async generator for noop
+      async *[Symbol.asyncIterator]() {
+        /* noop */
       },
       unsubscribe: () => {
         /* noop */
@@ -318,6 +319,7 @@ class NoopTransport implements TransportAdapter {
     callback: (state: ConnectionState) => void
   ): () => void {
     this.connectionListeners.add(callback);
+    // oxlint-disable-next-line prefer-await-to-callbacks -- synchronous invocation for immediate state
     callback("connected");
     return () => {
       this.connectionListeners.delete(callback);

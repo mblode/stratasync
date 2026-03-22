@@ -26,9 +26,6 @@
     "check-types": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "yjs": "^13.6.0"
-  },
   "devDependencies": {
     "lefthook": "^2.1.4",
     "oxfmt": "^0.41.0",

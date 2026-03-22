@@ -372,14 +372,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     outboxManager = null;
   };
 
-  const getPendingCountInternal = async (options?: {
+  const getPendingCountInternal = async (pendingOpts?: {
     awaitStart?: boolean;
   }): Promise<number> => {
     if (!outboxManager) {
       return 0;
     }
 
-    if (options?.awaitStart !== false && startPromise) {
+    if (pendingOpts?.awaitStart !== false && startPromise) {
       try {
         await startPromise;
       } catch {
@@ -394,13 +394,13 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     return outboxManager.getPendingCount();
   };
 
-  const emitPendingCount = async (options?: {
+  const emitPendingCount = async (pendingOpts?: {
     awaitStart?: boolean;
   }): Promise<void> => {
     if (!outboxManager) {
       return;
     }
-    const pendingCount = await getPendingCountInternal(options);
+    const pendingCount = await getPendingCountInternal(pendingOpts);
     emitEvent({ pendingCount, type: "outboxChange" });
   };
 

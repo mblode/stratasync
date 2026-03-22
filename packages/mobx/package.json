@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@stratasync/core": "*",
-    "mobx": "^6.0.0"
+    "mobx": "^6.15.0"
   },
   "devDependencies": {
     "lefthook": "^2.1.4",

@@ -45,7 +45,7 @@
     "typescript": "^5.9.3",
     "ultracite": "^7.3.2",
     "vitest": "^4.1.0",
-    "ws": "^8.19.0"
+    "ws": "^8.20.0"
   },
   "peerDependencies": {
     "@fastify/websocket": ">=11.0.0",

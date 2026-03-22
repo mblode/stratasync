@@ -1,10 +1,10 @@
 import {
-  SortArrowUpDownIcon as ArrowUpDown,
-  StorageIcon as Database,
-  EyeOpenIcon as Eye,
-  HistoryIcon as Undo2,
-  PeopleIcon as Users,
-  OfflineIcon as WifiOff,
+  BoltIcon,
+  EyeOpenIcon,
+  HistoryIcon,
+  LayersThreeIcon,
+  OfflineIcon,
+  PeopleIcon,
 } from "blode-icons-react";
 import { getSingletonHighlighter } from "shiki";
 
@@ -13,72 +13,87 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 
-const INSTALL_COMMAND =
-  "npm install @stratasync/core @stratasync/client @stratasync/react";
+const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
 
-const MODEL_SNIPPET = `import { ClientModel, Property, Model } from "@stratasync/core"
-
-@ClientModel({ name: "Todo" })
+@ClientModel("Todo", { loadStrategy: "instant" })
 class Todo extends Model {
-  @Property() title = ""
-  @Property() completed = false
+  @Property() declare title: string
+  @Property() declare completed: boolean
 }`;
 
 const CLIENT_SNIPPET = `import { createSyncClient } from "@stratasync/client"
-import { createIdbStorage } from "@stratasync/storage-idb"
-import { createGraphQLTransport } from "@stratasync/transport-graphql"
+import { createMobXReactivity } from "@stratasync/mobx"
+import { createIndexedDbStorage } from "@stratasync/storage-idb"
+import { GraphQLTransportAdapter } from "@stratasync/transport-graphql"
 
 const client = createSyncClient({
-  storage: createIdbStorage({ name: "my-app" }),
-  transport: createGraphQLTransport({ url: "/api/graphql" }),
+  storage: createIndexedDbStorage(),
+  transport: new GraphQLTransportAdapter({
+    endpoint: "/api/sync",
+    wsEndpoint: "wss://api.example.com/sync/ws",
+  }),
+  reactivity: createMobXReactivity(),
 })`;
 
-const HOOKS_SNIPPET = `import { SyncProvider, useModel, useQuery } from "@stratasync/react"
+const HOOKS_SNIPPET = `import { useQuery, useSyncClient } from "@stratasync/react"
 
 function TodoList() {
-  const todos = useQuery(Todo, { where: { completed: false } })
+  const { data: todos } = useQuery("Todo", {
+    where: (t) => !t.completed,
+  })
+  const { client } = useSyncClient()
 
-  return todos.map((todo) => (
-    <TodoItem key={todo.id} todo={todo} />
-  ))
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.title}</li>
+      ))}
+      <button onClick={() => client.create("Todo", {
+        title: "New todo",
+        completed: false,
+      })}>
+        Add
+      </button>
+    </ul>
+  )
 }`;
 
 const features = [
   {
-    icon: Database,
-    title: "Local-First Reads",
+    icon: BoltIcon,
+    title: "Instant reads",
     description:
-      "All data is read from a local IndexedDB replica. No network round-trips for rendering.",
+      "All reads come from a local IndexedDB replica. No spinners, no round-trips.",
   },
   {
-    icon: ArrowUpDown,
-    title: "Server-Sequenced",
+    icon: OfflineIcon,
+    title: "Offline support",
     description:
-      "The server assigns a monotonic syncId to every change, providing a single global ordering.",
+      "Mutations queue in a persistent outbox. Changes sync when you reconnect.",
   },
   {
-    icon: Eye,
-    title: "Observable Models",
+    icon: EyeOpenIcon,
+    title: "Fine-grained reactivity",
     description:
-      "MobX makes model instances observable. Sync deltas trigger fine-grained re-renders automatically.",
+      "MobX makes each field observable. Only affected components re-render.",
   },
   {
-    icon: WifiOff,
-    title: "Offline Support",
+    icon: PeopleIcon,
+    title: "Real-time collaboration",
     description:
-      "Mutations queue in a persistent outbox and replay when connectivity resumes. Fully offline-capable.",
+      "Yjs CRDT integration for multi-user editing of rich text and structured data.",
   },
   {
-    icon: Users,
-    title: "Real-Time Collaboration",
+    icon: HistoryIcon,
+    title: "Undo and redo",
     description:
-      "Yjs CRDT integration enables multi-user collaborative editing of rich-text and structured documents.",
+      "Transaction-based history tracking, built into the sync client.",
   },
   {
-    icon: Undo2,
-    title: "Undo / Redo",
+    icon: LayersThreeIcon,
+    title: "Modular",
     description:
-      "Transaction-based undo and redo with full history tracking, built into the sync client.",
+      "Swap storage, transport, or reactivity adapters. Use only what you need.",
   },
 ];
 
@@ -111,8 +126,7 @@ const shikiClassName =
   "overflow-x-auto pb-4 text-xs md:text-sm [&>pre]:m-0 [&>pre]:p-0 [&>pre]:!bg-transparent [&>pre]:!font-mono [&>pre>code]:!font-mono dark:[&>pre]:!text-[color:var(--shiki-dark)] dark:[&>pre_span]:!text-[color:var(--shiki-dark)]";
 
 export default async function Home() {
-  const [installHtml, modelHtml, clientHtml, hooksHtml] = await Promise.all([
-    getCodeHtml(INSTALL_COMMAND, "bash"),
+  const [modelHtml, clientHtml, hooksHtml] = await Promise.all([
     getCodeHtml(MODEL_SNIPPET, "tsx"),
     getCodeHtml(CLIENT_SNIPPET, "tsx"),
     getCodeHtml(HOOKS_SNIPPET, "tsx"),
@@ -124,139 +138,110 @@ export default async function Home() {
 
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
+          {/* Hero */}
           <div className="bg-linear-to-b from-white to-[#f7ecd2] dark:from-background dark:to-card">
             <section className="py-16 text-center md:py-24">
               <div className="container-wrapper">
-                <h1 className="font-light font-serif text-7xl tracking-tight">
-                  Strata Sync
+                <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
+                  Sync that works offline.
                 </h1>
-                <p className="mx-auto mt-4 max-w-150 text-balance text-center font-serif text-2xl text-foreground/60 md:text-3xl">
-                  Local-first, server-sequenced sync for TypeScript, React, and
-                  Next.js
+                <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-foreground/60 md:text-2xl">
+                  A local-first sync engine for TypeScript, React, and Next.js.
+                  Every read is instant. Every write works offline. Every client
+                  converges.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
                   <Button asChild size="lg">
                     <a href="https://stratasync.dev/docs">Get started</a>
                   </Button>
-
                   <Button asChild size="lg" variant="outline">
                     <a href="https://github.com/stratasync/stratasync">
                       GitHub
                     </a>
                   </Button>
                 </div>
-
-                <code className="relative mt-8 inline-flex items-center gap-2 font-mono text-sm">
-                  <div className="max-w-125 truncate">
-                    npm install @stratasync/core @stratasync/client
-                    @stratasync/react
-                  </div>
-                  <CopyButton
-                    content="npm install @stratasync/core @stratasync/client @stratasync/react"
-                    size="xs"
-                    variant="ghost"
-                  />
-                </code>
-              </div>
-            </section>
-
-            <section className="pb-16">
-              <div className="container-wrapper">
-                <div className="mx-auto grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {features.map((feature) => (
-                    <div
-                      className="rounded-2xl border bg-background/50 p-6 backdrop-blur"
-                      key={feature.title}
-                    >
-                      <feature.icon className="mb-3 h-6 w-6 text-primary" />
-                      <h3 className="font-semibold font-serif text-lg">
-                        {feature.title}
-                      </h3>
-                      <p className="mt-1 text-muted-foreground text-sm">
-                        {feature.description}
-                      </p>
-                    </div>
-                  ))}
-                </div>
               </div>
             </section>
           </div>
 
-          <section className="pb-16">
+          {/* Features */}
+          <section className="py-16">
             <div className="container-wrapper">
-              <div className="mx-auto max-w-5xl">
-                <div className="mt-16 space-y-10">
-                  <div className="space-y-4">
-                    <h2 className="font-semibold font-serif text-2xl text-foreground tracking-tight">
-                      Installation
-                    </h2>
-                    <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                      <CopyButton
-                        className="absolute top-3 right-3"
-                        content={INSTALL_COMMAND}
-                        size="xs"
-                        variant="ghost"
-                      />
-                      <div
-                        className={shikiClassName}
-                        dangerouslySetInnerHTML={{ __html: installHtml }}
-                      />
-                    </div>
+              <div className="mx-auto grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {features.map((feature) => (
+                  <div
+                    className="rounded-2xl border bg-background/50 p-6"
+                    key={feature.title}
+                  >
+                    <feature.icon className="mb-3 h-6 w-6 text-primary" />
+                    <h3 className="font-semibold font-sans text-lg">
+                      {feature.title}
+                    </h3>
+                    <p className="mt-1 text-muted-foreground text-sm">
+                      {feature.description}
+                    </p>
                   </div>
+                ))}
+              </div>
+            </div>
+          </section>
 
-                  <div className="space-y-4">
-                    <h2 className="font-semibold font-serif text-2xl text-foreground tracking-tight">
-                      Define your models
-                    </h2>
-                    <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                      <CopyButton
-                        className="absolute top-3 right-3"
-                        content={MODEL_SNIPPET}
-                        size="xs"
-                        variant="ghost"
-                      />
-                      <div
-                        className={shikiClassName}
-                        dangerouslySetInnerHTML={{ __html: modelHtml }}
-                      />
-                    </div>
+          {/* Code examples */}
+          <section className="py-16">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-3xl space-y-10">
+                <div className="space-y-3">
+                  <h2 className="font-semibold font-sans text-xl tracking-tight">
+                    Define your models
+                  </h2>
+                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
+                    <CopyButton
+                      className="absolute top-3 right-3"
+                      content={MODEL_SNIPPET}
+                      size="xs"
+                      variant="ghost"
+                    />
+                    <div
+                      className={shikiClassName}
+                      dangerouslySetInnerHTML={{ __html: modelHtml }}
+                    />
                   </div>
+                </div>
 
-                  <div className="space-y-4">
-                    <h2 className="font-semibold font-serif text-2xl text-foreground tracking-tight">
-                      Create the sync client
-                    </h2>
-                    <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                      <CopyButton
-                        className="absolute top-3 right-3"
-                        content={CLIENT_SNIPPET}
-                        size="xs"
-                        variant="ghost"
-                      />
-                      <div
-                        className={shikiClassName}
-                        dangerouslySetInnerHTML={{ __html: clientHtml }}
-                      />
-                    </div>
+                <div className="space-y-3">
+                  <h2 className="font-semibold font-sans text-xl tracking-tight">
+                    Create the client
+                  </h2>
+                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
+                    <CopyButton
+                      className="absolute top-3 right-3"
+                      content={CLIENT_SNIPPET}
+                      size="xs"
+                      variant="ghost"
+                    />
+                    <div
+                      className={shikiClassName}
+                      dangerouslySetInnerHTML={{ __html: clientHtml }}
+                    />
                   </div>
+                </div>
 
-                  <div className="space-y-4">
-                    <h2 className="font-semibold font-serif text-2xl text-foreground tracking-tight">
-                      Use React hooks
-                    </h2>
-                    <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                      <CopyButton
-                        className="absolute top-3 right-3"
-                        content={HOOKS_SNIPPET}
-                        size="xs"
-                        variant="ghost"
-                      />
-                      <div
-                        className={shikiClassName}
-                        dangerouslySetInnerHTML={{ __html: hooksHtml }}
-                      />
-                    </div>
+                <div className="space-y-3">
+                  <h2 className="font-semibold font-sans text-xl tracking-tight">
+                    Use React hooks
+                  </h2>
+                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
+                    <CopyButton
+                      className="absolute top-3 right-3"
+                      content={HOOKS_SNIPPET}
+                      size="xs"
+                      variant="ghost"
+                    />
+                    <div
+                      className={shikiClassName}
+                      dangerouslySetInnerHTML={{ __html: hooksHtml }}
+                    />
                   </div>
                 </div>
               </div>
