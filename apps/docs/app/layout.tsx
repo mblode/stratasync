@@ -1,3 +1,4 @@
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
 
@@ -15,6 +16,7 @@ export default function Layout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-screen flex-col">
         <RootProvider>{children}</RootProvider>
       </body>
+      <GoogleAnalytics gaId="G-5EQKSBTWY6" />
     </html>
   );
 }

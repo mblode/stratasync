@@ -1,7 +1,7 @@
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { GeistMono } from "geist/font/mono";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import Script from "next/script";
 import type React from "react";
 
 import { siteConfig } from "@/lib/config";
@@ -15,7 +15,6 @@ const glide = localFont({
   weight: "400 900",
 });
 
-const GA_MEASUREMENT_ID = "G-H2PKLJ0615";
 const siteTitle = `${siteConfig.name} - Local-first sync engine`;
 
 export const metadata: Metadata = {
@@ -104,17 +103,8 @@ const RootLayout = ({
         type="application/ld+json"
       />
       {/* oxlint-enable react/no-danger */}
-      <Script
-        src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
-        strategy="afterInteractive"
-      />
-      <Script id="gtag-init" strategy="afterInteractive">
-        {`window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', '${GA_MEASUREMENT_ID}');`}
-      </Script>
       {children}
+      <GoogleAnalytics gaId="G-5EQKSBTWY6" />
     </body>
   </html>
 );

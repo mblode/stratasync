@@ -19,6 +19,14 @@ Linear described a sync architecture that became the gold standard for local-fir
 
 ## Quick Start
 
+Scaffold a full-stack app with the Claude Code skill:
+
+```bash
+npx skills add stratasync/stratasync
+```
+
+Or install the packages manually:
+
 ```bash
 npm install @stratasync/core @stratasync/client @stratasync/react
 ```

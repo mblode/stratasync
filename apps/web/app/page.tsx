@@ -10,6 +10,7 @@ import {
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
+import { SyncDemo } from "@/components/demo/sync-demo";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -135,40 +136,45 @@ const Home = async () => {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
           {/* Hero */}
-          <div className="bg-linear-to-b from-white to-[#e8edda] dark:from-background dark:to-card">
+          <div className="bg-[#3E521D] text-white">
+            <SiteHeader />
             <section className="py-16 text-center md:py-24">
               <div className="container-wrapper">
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
                   Sync that works offline.
                 </h1>
-                <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-foreground/60 md:text-2xl">
-                  The sync architecture Linear made famous, open-source. Every
-                  read is instant. Every write works offline. Every client
-                  converges.
+                <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
+                  Inspired by Linear&apos;s sync engine. Open-source.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-                  <Button asChild size="lg">
+                  <Button
+                    asChild
+                    className="border-white bg-white text-[#3E521D] hover:bg-white/90 active:bg-white/95"
+                    size="lg"
+                  >
                     <a href="https://stratasync.dev/docs">Get started</a>
                   </Button>
-                  <Button asChild size="lg" variant="outline">
+                  <Button
+                    asChild
+                    className="border-white bg-transparent text-white hover:bg-white/10 active:bg-white/20"
+                    size="lg"
+                    variant="outline"
+                  >
                     <a href="https://github.com/stratasync/stratasync">
                       GitHub
                     </a>
                   </Button>
                 </div>
-
-                <p className="mt-4 text-sm text-foreground/40">
-                  Based on Linear's sync protocol. Independent and open-source.
-                </p>
               </div>
             </section>
           </div>
+
+          {/* Interactive demo */}
+          <SyncDemo />
 
           {/* Features */}
           <section className="py-16">

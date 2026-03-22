@@ -5,6 +5,12 @@ description: Build a sync-enabled React app in five steps.
 
 Set up a local-first React app with real-time sync, offline support, and undo/redo.
 
+Want to skip the manual setup? Scaffold a complete app with the Claude Code skill:
+
+```bash
+npx skills add stratasync/stratasync
+```
+
 ## Step 1: Define your model
 
 A model is a TypeScript class decorated with schema metadata. `@ClientModel` registers the model, and `@Property` marks each synced field.
