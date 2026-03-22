@@ -297,7 +297,7 @@ export class DemoTransport implements TransportAdapter {
     const actions = this.server.getSyncActions(after);
     return Promise.resolve({
       actions,
-      lastSyncId: actions.length > 0 ? actions.at(-1).id : after,
+      lastSyncId: actions.length > 0 ? (actions.at(-1)?.id ?? after) : after,
     });
   }
 
