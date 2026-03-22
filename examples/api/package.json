@@ -1,0 +1,36 @@
+{
+  "name": "@stratasync/example-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "lint": "npm exec -- ultracite check",
+    "lint:fix": "npm exec -- ultracite fix",
+    "format": "npm exec -- ultracite fix",
+    "format:check": "npm exec -- ultracite check",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/websocket": "^11.0.1",
+    "@stratasync/server": "*",
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "1.0.0-beta.15-859cf75",
+    "fastify": "^5.8.2",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "drizzle-kit": "^0.31.1",
+    "lefthook": "^2.1.4",
+    "oxfmt": "^0.41.0",
+    "oxlint": "^1.56.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "ultracite": "^7.3.2"
+  }
+}

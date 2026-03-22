@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "sync-core",
+    "sync-client",
+    "sync-react",
+    "sync-next",
+    "sync-yjs",
+    "sync-mobx",
+    "sync-storage-idb",
+    "sync-transport-graphql"
+  ]
+}

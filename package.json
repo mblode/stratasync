@@ -1,0 +1,53 @@
+{
+  "name": "stratasync",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js",
+  "keywords": [],
+  "homepage": "https://github.com/stratasync/stratasync#readme",
+  "bugs": {
+    "url": "https://github.com/stratasync/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": "Matthew Blode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stratasync/stratasync.git"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "examples/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "tsc --noEmit",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "turbo run format",
+    "format:check": "turbo run format:check",
+    "check-types": "turbo run check-types",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "release": "turbo run build && changeset publish",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0",
+    "@types/node": "^22.19.11",
+    "drizzle-orm": "1.0.0-beta.15-859cf75",
+    "turbo": "^2.8.19",
+    "typescript": "5.9.3",
+    "ultracite": "^7.2.2",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "npm@11.12.0"
+}

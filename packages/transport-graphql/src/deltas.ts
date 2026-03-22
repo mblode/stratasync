@@ -1,0 +1,132 @@
+import type { DeltaPacket, SyncAction, SyncId } from "@stratasync/core";
+import { maxSyncId } from "@stratasync/core";
+
+import {
+  joinSyncUrl,
+  normalizeSyncEndpoint,
+  parseDeltaPacket,
+} from "./protocol.js";
+import type { AuthProvider, RetryConfig } from "./types.js";
+import {
+  buildRequestHeaders,
+  fetchChecked,
+  isRetryableError,
+  parseSyncId,
+  resolveAuthToken,
+  retryWithBackoff,
+} from "./utils.js";
+
+export interface FetchDeltasOptions {
+  syncEndpoint: string;
+  afterSyncId: SyncId;
+  auth: AuthProvider;
+  headers?: Record<string, string>;
+  limit?: number;
+  groups?: string[];
+  retryConfig?: RetryConfig;
+  timeoutMs?: number;
+}
+
+/**
+ * Fetches deltas from the server via REST
+ */
+export const fetchDeltas = async (
+  opts: FetchDeltasOptions
+): Promise<DeltaPacket> => {
+  const response = await retryWithBackoff(
+    async () => {
+      const token = await resolveAuthToken(opts.auth);
+      const requestHeaders = buildRequestHeaders({
+        accept: "application/json",
+        headers: opts.headers,
+        token,
+      });
+      const params = new URLSearchParams();
+      params.set(
+        "after",
+        parseSyncId(opts.afterSyncId, "Fetch deltas afterSyncId")
+      );
+      if (opts.limit !== undefined) {
+        params.set("limit", String(opts.limit));
+      }
+      if (opts.groups && opts.groups.length > 0) {
+        params.set("syncGroups", opts.groups.join(","));
+      }
+
+      const syncBase = normalizeSyncEndpoint(opts.syncEndpoint);
+      const url = `${joinSyncUrl(syncBase, "/deltas")}?${params.toString()}`;
+
+      const res = await fetchChecked(
+        url,
+        { headers: requestHeaders, method: "GET" },
+        opts.timeoutMs,
+        "Fetch deltas failed"
+      );
+
+      return res.json() as Promise<unknown>;
+    },
+    opts.retryConfig,
+    isRetryableError
+  );
+
+  const packet = parseDeltaPacket(response);
+  if (!packet) {
+    throw new Error("Delta response is not in a supported format");
+  }
+
+  return packet;
+};
+
+export interface FetchAllDeltasOptions {
+  syncEndpoint: string;
+  afterSyncId: SyncId;
+  auth: AuthProvider;
+  headers?: Record<string, string>;
+  batchSize?: number;
+  groups?: string[];
+  retryConfig?: RetryConfig;
+  timeoutMs?: number;
+}
+
+/**
+ * Fetches all deltas since a sync ID, handling pagination
+ */
+// oxlint-disable-next-line func-style -- generators require function declaration
+// oxlint-disable-next-line require-yields, func-style
+// oxlint-disable-next-line func-style
+// oxlint-disable-next-line require-yields, func-style
+// oxlint-disable-next-line func-style
+// oxlint-disable-next-line require-yields, func-style
+export async function* fetchAllDeltas(
+  opts: FetchAllDeltasOptions
+): AsyncGenerator<SyncAction, SyncId, unknown> {
+  const batchSize = opts.batchSize ?? 1000;
+  let currentSyncId = opts.afterSyncId;
+  let lastSyncId = opts.afterSyncId;
+
+  while (true) {
+    const packet = await fetchDeltas({
+      afterSyncId: currentSyncId,
+      auth: opts.auth,
+      groups: opts.groups,
+      headers: opts.headers,
+      limit: batchSize,
+      retryConfig: opts.retryConfig,
+      syncEndpoint: opts.syncEndpoint,
+      timeoutMs: opts.timeoutMs,
+    });
+
+    for (const action of packet.actions) {
+      yield action;
+      lastSyncId = maxSyncId(lastSyncId, action.id);
+    }
+
+    if (!packet.hasMore || packet.actions.length === 0) {
+      break;
+    }
+
+    currentSyncId = packet.lastSyncId;
+  }
+
+  return lastSyncId;
+}

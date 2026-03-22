@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "**/.next/**",
+    "**/.turbo/**",
+    "**/coverage/**",
+    "**/dist/**",
+    "**/dist-zip/**",
+    "**/evals/results/**",
+    "**/release/**",
+    "**/store/generated/**",
+    "**/store/screenshots/**",
+    "**/*.graphql"
+  ],
+  "extends": [
+    "./node_modules/ultracite/config/oxlint/core/.oxlintrc.json",
+    "./node_modules/ultracite/config/oxlint/react/.oxlintrc.json",
+    "./node_modules/ultracite/config/oxlint/next/.oxlintrc.json"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "**/*.test.{ts,tsx,js,jsx}",
+        "**/__tests__/**/*.{ts,tsx,js,jsx}"
+      ],
+      "plugins": ["vitest"],
+      "rules": {
+        "vitest/prefer-called-times": "off",
+        "class-methods-use-this": "off"
+      }
+    }
+  ]
+}

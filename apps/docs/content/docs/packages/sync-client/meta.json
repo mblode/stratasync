@@ -1,0 +1,3 @@
+{
+  "pages": ["index", "configuration", "crud", "queries", "events", "undo-redo"]
+}

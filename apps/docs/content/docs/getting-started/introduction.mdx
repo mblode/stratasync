@@ -1,0 +1,69 @@
+---
+title: Introduction
+description: What is Strata Sync, its key features, and how it compares to other local-first sync solutions.
+---
+
+Strata Sync is a local-first, server-sequenced sync engine that provides instant, offline-capable applications with MobX-powered reactivity, real-time collaboration, and robust conflict resolution for TypeScript, React, and Next.js.
+
+## What is Strata Sync?
+
+Strata Sync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js applications. It gives your app an instant, offline-capable local replica of your data while keeping all clients consistent through a central server that assigns a global ordering to every change.
+
+Every read comes from a local store (so the UI is always fast), every write goes into an optimistic outbox (a queue of pending mutations, so mutations feel instant), and a monotonic sync log on the server ensures all clients converge to the same state.
+
+## Key features
+
+- **Local-first reads** -- All data is read from a local IndexedDB replica. No network round-trips for rendering.
+- **Server-sequenced consistency** -- The server assigns a monotonically increasing `syncId` to every committed change, providing a single global ordering that all clients follow.
+- **Observable models** -- MobX makes model instances observable. When a sync delta (a compact description of what changed) updates a field, every React component observing that field re-renders automatically.
+- **Offline support** -- The client queues mutations in a persistent outbox and replays them when connectivity resumes. The app works fully offline.
+- **Real-time collaboration** -- Yjs Conflict-free Replicated Data Type (CRDT) integration enables multi-user collaborative editing of rich-text and structured documents.
+- **Undo/redo** -- Transaction-based undo and redo with full history tracking.
+- **Conflict resolution** -- Field-level last-writer-wins rebase (replay local changes on top of the new server state) with configurable strategies (server-wins, client-wins, merge).
+- **Partial replication** -- Load strategies control which data is synced eagerly vs. on demand, reducing bandwidth and storage for large datasets.
+- **Type-safe** -- Full TypeScript support with decorators for schema definition and typed hooks for React.
+
+## How it works at a high level
+
+1. **Define models** with decorators (`@ClientModel`, `@Property`, `@ManyToOne`, `@OneToMany`) that declare your schema and relationships.
+2. **Create a sync client** by composing a storage adapter (IndexedDB), transport adapter (GraphQL + WebSocket), and reactivity adapter (MobX).
+3. **Wrap your React tree** with `SyncProvider`, which manages the client lifecycle.
+4. **Read data with hooks** like `useModel` and `useQuery` that return reactive, auto-updating data.
+5. **Write data** through the client's `create`, `update`, and `delete` methods. The client applies mutations optimistically and syncs them in the background.
+
+## How Strata Sync compares
+
+| Feature             | Strata Sync                   | TanStack DB            | InstantDB            | PowerSync            | Zero                 |
+| ------------------- | ----------------------------- | ---------------------- | -------------------- | -------------------- | -------------------- |
+| Architecture        | Server-sequenced log          | Normalised collections | Client-server sync   | SQLite + sync rules  | Server-authoritative |
+| Local storage       | IndexedDB                     | In-memory              | IndexedDB            | SQLite (WASM)        | SQLite (WASM)        |
+| Reactivity          | MobX observables              | TanStack collections   | React hooks          | React hooks          | React hooks          |
+| Conflict resolution | Field-level LWW rebase        | Custom per-collection  | Server-authoritative | Server-authoritative | Server-authoritative |
+| Rich-text collab    | Yjs CRDT integration          | Not built-in           | Not built-in         | Not built-in         | Not built-in         |
+| Offline writes      | Persistent outbox             | Optimistic mutations   | Pending mutations    | Write-ahead log      | Optimistic mutations |
+| Partial replication | Load strategies + sync groups | Custom sync adapters   | Permissions-based    | Sync rules           | Auth-based           |
+| Framework           | React + Next.js + MobX        | Framework-agnostic     | React                | React, React Native  | React                |
+| Undo/redo           | Built-in                      | Not built-in           | Not built-in         | Not built-in         | Not built-in         |
+
+Strata Sync is best suited for applications that need:
+
+- Instant UI with zero-latency reads from a local replica
+- Real-time collaboration on structured data and rich text
+- Robust offline support with persistent mutation queues
+- Fine-grained reactivity through MobX-powered observable models
+- Server-authoritative ordering with field-level conflict resolution
+
+## Packages
+
+Strata Sync is a modular system of focused packages. Install only what you need.
+
+| Package                         | Description                                                                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@stratasync/core`              | Model runtime, schema decorators, transactions, delta application, and rebase algorithm. Framework-agnostic core with zero React or MobX dependencies.   |
+| `@stratasync/client`            | Client orchestrator that composes storage, transport, and reactivity adapters. Provides CRUD operations, query engine, outbox management, and undo/redo. |
+| `@stratasync/react`             | React hooks (`useModel`, `useQuery`, `useConnectionState`) and `SyncProvider` component for binding the sync client to your React component tree.        |
+| `@stratasync/next`              | Next.js App Router integration with SSR bootstrap prefetching, serialization helpers, and a `NextSyncProvider` for server-rendered pages.                |
+| `@stratasync/yjs`               | Yjs CRDT document and presence management for real-time collaborative editing over WebSocket.                                                            |
+| `@stratasync/mobx`              | MobX reactivity adapter that makes model instances observable and enables fine-grained re-rendering.                                                     |
+| `@stratasync/storage-idb`       | IndexedDB storage adapter for persistent local data, outbox, metadata, and partial indexes.                                                              |
+| `@stratasync/transport-graphql` | GraphQL + WebSocket transport adapter for bootstrap streaming, delta subscriptions, and mutation batching.                                               |

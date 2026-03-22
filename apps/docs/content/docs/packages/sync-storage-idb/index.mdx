@@ -1,0 +1,343 @@
+---
+title: "@stratasync/storage-idb"
+description: IndexedDB storage adapter for offline-first client-side persistence in Strata Sync.
+---
+
+`@stratasync/storage-idb` provides the IndexedDB implementation of the `StorageAdapter` interface. It persists synced model data, transaction outbox, sync metadata, partial indexes, and sync actions to the browser's IndexedDB, enabling offline-first operation and instant startup from cached data.
+
+## What it provides
+
+- **`createIndexedDbStorage`** -- factory function that creates a configured `StorageAdapter` instance
+- **`IndexedDbStorageAdapter`** -- the class implementing the full `StorageAdapter` interface
+- **`DatabaseManager`** -- manages a registry of workspace databases for multi-user/multi-version support
+- **Store operations** -- typed functions for model rows, metadata, outbox transactions, partial indexes, and sync actions
+- **Schema migrations** -- automatic IndexedDB schema upgrades when the model schema changes
+- **Store name utilities** -- deterministic hashing for store and database names
+
+## Installation
+
+```bash
+npm install @stratasync/storage-idb
+```
+
+`@stratasync/storage-idb` has no peer dependencies. It uses the [`idb`](https://github.com/nicolo-ribaudo/idb) library (^8.0.0) internally for a promise-based IndexedDB wrapper.
+
+## Quick start
+
+```ts
+import { createSyncClient } from "@stratasync/client";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+
+const storage = createIndexedDbStorage();
+
+const client = createSyncClient({
+  storage,
+  // ... transport, reactivity
+});
+```
+
+The sync client opens the storage adapter automatically during initialization. You don't need to call `open()` manually unless you're using the adapter outside of the sync client.
+
+## StorageAdapter interface
+
+The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/client`:
+
+### Lifecycle
+
+| Method  | Signature                                    | Description                                                      |
+| ------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| `open`  | `(options: StorageOptions) => Promise<void>` | Opens the database, creates object stores, initializes metadata. |
+| `close` | `() => Promise<void>`                        | Closes all database connections.                                 |
+| `clear` | `() => Promise<void>`                        | Clears all data from all stores (for testing or logout).         |
+
+### Model row operations
+
+| Method       | Signature                                                                | Description                                                                 |
+| ------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `get`        | `<T>(modelName: string, id: string) => Promise<T \| null>`               | Gets a single row by primary key.                                           |
+| `getAll`     | `<T>(modelName: string) => Promise<T[]>`                                 | Gets all rows for a model.                                                  |
+| `put`        | `<T>(modelName: string, row: T) => Promise<void>`                        | Inserts or updates a row.                                                   |
+| `delete`     | `(modelName: string, id: string) => Promise<void>`                       | Deletes a row by primary key.                                               |
+| `getByIndex` | `<T>(modelName: string, indexName: string, key: string) => Promise<T[]>` | Gets rows by an indexed field value.                                        |
+| `count`      | `(modelName: string) => Promise<number>`                                 | Counts rows in a model store.                                               |
+| `writeBatch` | `(ops: BatchOperation[]) => Promise<void>`                               | Executes multiple put/delete operations atomically in a single transaction. |
+
+### Metadata operations
+
+| Method                | Signature                                                  | Description                                                |
+| --------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `getMeta`             | `() => Promise<StorageMeta>`                               | Gets the sync metadata (lastSyncId, schemaHash, and more). |
+| `setMeta`             | `(updates: Partial<StorageMeta>) => Promise<void>`         | Updates sync metadata fields.                              |
+| `getModelPersistence` | `(modelName: string) => Promise<ModelPersistenceMeta>`     | Gets persistence status for a model.                       |
+| `setModelPersistence` | `(modelName: string, persisted: boolean) => Promise<void>` | Sets whether a model's data is fully persisted locally.    |
+
+### Outbox operations
+
+| Method                    | Signature                                                              | Description                                     |
+| ------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
+| `getOutbox`               | `() => Promise<Transaction[]>`                                         | Gets all pending transactions from the outbox.  |
+| `addToOutbox`             | `(tx: Transaction) => Promise<void>`                                   | Adds a transaction to the outbox.               |
+| `removeFromOutbox`        | `(clientTxId: string) => Promise<void>`                                | Removes a transaction by client transaction ID. |
+| `updateOutboxTransaction` | `(clientTxId: string, updates: Partial<Transaction>) => Promise<void>` | Updates fields on an outbox transaction.        |
+
+### Partial index operations
+
+| Method            | Signature                                                                       | Description                                     |
+| ----------------- | ------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `hasPartialIndex` | `(modelName: string, indexedKey: string, keyValue: string) => Promise<boolean>` | Checks if a partial index key has been fetched. |
+| `setPartialIndex` | `(modelName: string, indexedKey: string, keyValue: string) => Promise<void>`    | Marks a partial index key as fetched.           |
+
+### Sync action operations
+
+| Method             | Signature                                                         | Description                                       |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------- |
+| `addSyncActions`   | `(actions: SyncAction[]) => Promise<void>`                        | Persists sync actions for local replay/debugging. |
+| `getSyncActions`   | `(afterSyncId?: number, limit?: number) => Promise<SyncAction[]>` | Reads stored sync actions after a given sync ID.  |
+| `clearSyncActions` | `() => Promise<void>`                                             | Clears all stored sync actions.                   |
+
+## Configuration
+
+### StorageOptions
+
+The sync client typically passes these options to the `open()` method:
+
+```ts
+interface StorageOptions {
+  /** Database name override (auto-generated if omitted) */
+  name?: string;
+  /** Client version used to derive the workspace database name */
+  version?: number;
+  /** Logged-in user ID (used to derive the workspace database name) */
+  userId?: string;
+  /** Per-user version used to derive the workspace database name */
+  userVersion?: number;
+  /** Schema definition or registry snapshot */
+  schema?: SchemaDefinition | ModelRegistrySnapshot;
+}
+```
+
+When you don't provide `name`, the adapter computes the database name deterministically from `userId`, `version`, and `userVersion` using a hash function (for example, `ss_<hash>`).
+
+## Types
+
+### StorageMeta
+
+Sync metadata stored in the `_meta` object store:
+
+```ts
+interface StorageMeta {
+  schemaHash?: string;
+  lastSyncId: number;
+  firstSyncId?: number;
+  subscribedSyncGroups?: string[];
+  clientId?: string;
+  bootstrapComplete?: boolean;
+  lastSyncAt?: number;
+  databaseVersion?: number;
+  updatedAt?: number;
+}
+```
+
+### ModelPersistenceMeta
+
+Per-model persistence tracking:
+
+```ts
+interface ModelPersistenceMeta {
+  modelName: string;
+  persisted: boolean;
+  updatedAt?: number;
+}
+```
+
+### BatchOperation
+
+Used with `writeBatch` for atomic multi-store writes:
+
+```ts
+type BatchOperationType = "put" | "delete";
+
+interface BatchOperation {
+  type: BatchOperationType;
+  modelName: string;
+  id?: string; // Required for "delete"
+  data?: Record<string, unknown>; // Required for "put"
+}
+```
+
+### PartialIndexEntry
+
+Tracks which partial index keys have been fetched from the server:
+
+```ts
+interface PartialIndexEntry {
+  modelName: string;
+  indexedKey: string;
+  keyValue: string;
+  updatedAt?: number;
+}
+```
+
+## Internal database structure
+
+The adapter manages multiple IndexedDB databases:
+
+### Workspace database
+
+The main database contains these object stores:
+
+| Store          | Key               | Description                                                                        |
+| -------------- | ----------------- | ---------------------------------------------------------------------------------- |
+| `_meta`        | `string`          | Sync metadata and per-model persistence flags.                                     |
+| `_transaction` | `clientTxId`      | Outbox of pending transactions. Indexes: `byState`, `byCreatedAt`, `byBatchIndex`. |
+| `_sync_action` | `id`              | Persisted sync actions for debugging.                                              |
+| `<model_hash>` | Model primary key | One store per registered model. Store names are deterministic hashes.              |
+
+### Partial databases
+
+For models with `"partial"` load strategy, a separate database stores partial index entries:
+
+| Store           | Key           | Description                                           |
+| --------------- | ------------- | ----------------------------------------------------- |
+| `partial_index` | Composite key | Tracks which index key/value pairs have been fetched. |
+
+### Database registry
+
+A top-level `stratasync_databases` database tracks all workspace databases:
+
+| Store       | Key    | Description                                                                    |
+| ----------- | ------ | ------------------------------------------------------------------------------ |
+| `databases` | `name` | Maps database names to `DatabaseInfo` (userId, version, schemaHash, and more). |
+
+## Schema migrations
+
+When the model schema changes (the adapter detects this via `computeSchemaHash` from `@stratasync/core`), the adapter automatically:
+
+1. Increments the IndexedDB version number
+2. Creates new object stores for changed models (using deterministic hash-based names)
+3. Creates indexes for `@Property({ indexed: true })` fields, group keys, and composite indexes
+4. Preserves existing stores for unchanged models
+
+This happens transparently during `open()`. The adapter doesn't delete old model stores -- they become unreachable but remain in the database until you clear it.
+
+## Multi-workspace support
+
+The adapter supports multiple users and versions through deterministic database naming:
+
+```ts
+import { computeWorkspaceDatabaseName } from "@stratasync/storage-idb";
+
+const dbName = computeWorkspaceDatabaseName({
+  userId: "user-abc",
+  version: 1,
+  userVersion: 1,
+});
+// Returns: "ss_<32-char-hash>"
+```
+
+Each user/version combination gets its own IndexedDB database, so switching accounts or versions doesn't require clearing data.
+
+## Utility exports
+
+### Store name functions
+
+```ts
+import {
+  computeModelStoreName,
+  computeWorkspaceDatabaseName,
+  computePartialDatabaseName,
+} from "@stratasync/storage-idb";
+```
+
+| Function                                                         | Description                                                |
+| ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| `computeModelStoreName(modelName, schemaVersion, registry)`      | Deterministic hash-based store name for a model.           |
+| `computeWorkspaceDatabaseName({ userId, version, userVersion })` | Deterministic database name for a workspace.               |
+| `computePartialDatabaseName(storeName)`                          | Derives the partial index database name from a store name. |
+
+### Granular store operations
+
+For advanced use cases, the package exports individual store operation functions:
+
+```ts
+import {
+  // Model rows
+  getAllModelRows,
+  putManyModelRows,
+  deleteManyModelRows,
+  countModelRows,
+  iterateModelRows,
+
+  // Metadata
+  getMetadata,
+  setMetadata,
+  updateMetadata,
+  getLastSyncId,
+  setLastSyncId,
+  getFirstSyncId,
+  setFirstSyncId,
+  getClientId,
+  setClientId,
+  isBootstrapComplete,
+  setBootstrapComplete,
+  checkSchemaHash,
+  getGroups,
+  setGroups,
+  addGroup,
+  removeGroup,
+  areModelsPersisted,
+  getModelPersistence,
+  setModelPersistence,
+  setModelsPersisted,
+
+  // Outbox
+  addTransaction,
+  getTransaction,
+  getAllTransactions,
+  getQueuedTransactions,
+  getSentTransactions,
+  getFailedTransactions,
+  getTransactionsByState,
+  getPendingCount,
+  markTransactionSent,
+  markTransactionCompleted,
+  markTransactionFailed,
+  requeueTransaction,
+  resetSentToQueued,
+  removeTransaction,
+  removeTransactions,
+  updateTransaction,
+  clearOutbox,
+
+  // Partial indexes
+  getPartialIndex,
+  setPartialIndex,
+  hasPartialIndex,
+  getAllPartialIndexes,
+  clearPartialIndexes,
+  createPartialIndexKey,
+  parsePartialIndexKey,
+
+  // Constants
+  META_STORE,
+  TRANSACTION_STORE,
+  PARTIAL_INDEX_STORE,
+  SYNC_META_KEY,
+  DEFAULT_META,
+  MAX_RETRY_COUNT,
+} from "@stratasync/storage-idb";
+```
+
+The sync client primarily uses these internally but exports them for testing and advanced customization.
+
+## Architecture role
+
+`@stratasync/storage-idb` is an adapter package that provides client-side persistence:
+
+```
+sync-core (defines Transaction, SyncAction types)
+  ^-- sync-storage-idb (implements StorageAdapter with IndexedDB)
+        ^-- sync-client (uses adapter for offline persistence)
+```
+
+The sync client depends on a `StorageAdapter` implementation at runtime. `@stratasync/storage-idb` is the IndexedDB implementation for browser environments. The same `StorageAdapter` interface could be implemented with other storage backends such as SQLite or in-memory stores.

@@ -1,0 +1,282 @@
+---
+title: YjsDocumentManager
+description: Manages Y.Doc instances, sync protocol, connection state, and content change tracking for collaborative editing.
+---
+
+`YjsDocumentManager` is the core class for managing Yjs CRDT documents. It creates and caches `Y.Doc` instances keyed by `DocumentKey`, handles the Yjs sync protocol over a pluggable transport, tracks per-document connection state, and notifies listeners when document content changes.
+
+## Creating an instance
+
+```ts
+import { YjsDocumentManager } from "@stratasync/yjs";
+import type { YjsDocumentManagerConfig } from "@stratasync/yjs";
+
+const config: YjsDocumentManagerConfig = {
+  clientId: "client-abc-123", // Logical client identity
+  connId: "conn-xyz-456", // Per-connection (tab/socket) identity
+};
+
+const documentManager = new YjsDocumentManager(config);
+```
+
+### YjsDocumentManagerConfig
+
+| Property   | Type     | Description                                                                            |
+| ---------- | -------- | -------------------------------------------------------------------------------------- |
+| `clientId` | `string` | Logical client identity used for attribution. This can be stable across tabs/sessions. |
+| `connId`   | `string` | Connection-scoped identity used for echo suppression of `yjs_update` messages.         |
+
+## Setting the transport
+
+Before connecting to documents, you must provide a `YjsTransport` implementation:
+
+```ts
+import { YjsTransportAdapter } from "@stratasync/transport-graphql";
+
+const yjsTransport = new YjsTransportAdapter(/* ... */);
+documentManager.setTransport(yjsTransport);
+```
+
+The transport is used to send sync messages (`yjs_sync_step1`, `yjs_update`) and receive server messages (`yjs_sync_step2`, remote updates, errors).
+
+## API reference
+
+### getDocument
+
+Returns the `Y.Doc` instance for a document key, creating one if it doesn't exist.
+
+```ts
+import type { DocumentKey } from "@stratasync/yjs";
+import type * as Y from "yjs";
+
+const docKey: DocumentKey = {
+  entityType: "Task",
+  entityId: "task-123",
+  fieldName: "description",
+};
+
+const doc: Y.Doc = documentManager.getDocument(docKey);
+const text = doc.getText("content");
+```
+
+**Signature:** `getDocument(docKey: DocumentKey): Y.Doc`
+
+The manager caches the Y.Doc per document key. Subsequent calls with the same key return the same instance. The document uses a shared text type named `"content"` for the collaborative text field.
+
+### connect
+
+Connects to a document for collaborative editing and initiates the Yjs sync protocol.
+
+```ts
+documentManager.connect(docKey);
+
+// With initial content
+documentManager.connect(docKey, {
+  initialContent: "Default description text",
+});
+```
+
+**Signature:** `connect(docKey: DocumentKey, options?: ConnectOptions): void`
+
+### ConnectOptions
+
+| Property         | Type      | Default | Description                                              |
+| ---------------- | --------- | ------- | -------------------------------------------------------- |
+| `initialContent` | `string`  | --      | Initial text content to insert if the document is empty. |
+| `editing`        | `boolean` | --      | Whether to start in editing mode.                        |
+
+When you provide `initialContent` and the document's text type is empty (length 0), the manager inserts the content at position 0. This is useful for seeding a new collaborative field with the current server value.
+
+### disconnect
+
+Disconnects from a document and stops sending local updates. Presence (`doc_view` / `doc_focus`) is handled by `YjsPresenceManager`.
+
+```ts
+documentManager.disconnect(docKey);
+```
+
+**Signature:** `disconnect(docKey: DocumentKey): void`
+
+### getConnectionState
+
+Returns the current connection state for a document.
+
+```ts
+import type { DocumentConnectionState } from "@stratasync/yjs";
+
+const state: DocumentConnectionState =
+  documentManager.getConnectionState(docKey);
+// "disconnected" | "connecting" | "syncing" | "connected"
+```
+
+**Signature:** `getConnectionState(docKey: DocumentKey): DocumentConnectionState`
+
+### DocumentConnectionState
+
+| State            | Description                              |
+| ---------------- | ---------------------------------------- |
+| `"disconnected"` | Not connected to the document.           |
+| `"connecting"`   | Connection initiated, waiting for sync.  |
+| `"syncing"`      | Sync step in progress.                   |
+| `"connected"`    | Fully synced and receiving live updates. |
+
+### onConnectionStateChange
+
+Subscribes to connection state changes for a document. The manager immediately invokes the callback with the current state and then calls it on each subsequent change.
+
+```ts
+const unsubscribe = documentManager.onConnectionStateChange(docKey, (state) => {
+  if (state === "connected") {
+    // Editor is ready for collaboration
+  }
+});
+
+// Later: clean up
+unsubscribe();
+```
+
+**Signature:** `onConnectionStateChange(docKey: DocumentKey, callback: (state: DocumentConnectionState) => void): () => void`
+
+Returns an unsubscribe function.
+
+### onContentChange
+
+Subscribes to content changes for a document. The manager immediately invokes the callback with the current content string and then calls it whenever the document content changes (from local or remote updates).
+
+```ts
+const unsubscribe = documentManager.onContentChange(docKey, (content) => {
+  // content is the current text string from the Y.Doc
+});
+
+// Later: clean up
+unsubscribe();
+```
+
+**Signature:** `onContentChange(docKey: DocumentKey, callback: (content: string) => void): () => void`
+
+Returns an unsubscribe function.
+
+### getDerivedContent
+
+Returns the current text content of a document as a plain string.
+
+```ts
+const content: string = documentManager.getDerivedContent(docKey);
+```
+
+**Signature:** `getDerivedContent(docKey: DocumentKey): string`
+
+Reads from `doc.getText("content").toString()`. Returns an empty string if the document doesn't exist.
+
+### applyRemoteUpdate
+
+Applies a remote Yjs update to a document. The manager applies the update with `"remote"` as the origin, which prevents it from being re-sent to the server.
+
+```ts
+documentManager.applyRemoteUpdate(docKey, updateBytes);
+```
+
+**Signature:** `applyRemoteUpdate(docKey: DocumentKey, update: Uint8Array): void`
+
+### applySnapshot
+
+Applies a full state snapshot to a document. The manager uses this for initial hydration from persisted state.
+
+```ts
+documentManager.applySnapshot(docKey, snapshotBytes);
+```
+
+**Signature:** `applySnapshot(docKey: DocumentKey, snapshot: Uint8Array): void`
+
+### getStateVector / getEncodedState / getUpdatesSince
+
+Low-level methods for advanced sync scenarios:
+
+```ts
+// Get the state vector (for sync step 1)
+const stateVector: Uint8Array = documentManager.getStateVector(docKey);
+
+// Get full encoded state
+const fullState: Uint8Array | null = documentManager.getEncodedState(docKey);
+
+// Get incremental updates since a given state vector
+const updates: Uint8Array | null = documentManager.getUpdatesSince(
+  docKey,
+  remoteStateVector
+);
+```
+
+### destroy / destroyAll
+
+Cleans up document resources. `destroy` disconnects and destroys a single document; `destroyAll` cleans up all managed documents.
+
+```ts
+documentManager.destroy(docKey);
+
+// Or clean up everything
+documentManager.destroyAll();
+```
+
+## Message types
+
+### Client messages (sent to server)
+
+| Type               | Message                    | Description                         |
+| ------------------ | -------------------------- | ----------------------------------- |
+| `"doc_view"`       | `DocViewMessage`           | Start or stop viewing a document.   |
+| `"doc_focus"`      | `DocFocusMessage`          | Signal editor focus or blur.        |
+| `"yjs_sync_step1"` | `YjsSyncStep1Message`      | Send state vector to initiate sync. |
+| `"yjs_update"`     | `YjsUpdateToServerMessage` | Send a local Yjs update.            |
+
+### Server messages (received from server)
+
+| Type                   | Message                   | Description                                                                  |
+| ---------------------- | ------------------------- | ---------------------------------------------------------------------------- |
+| `"yjs_sync_step2"`     | `YjsSyncStep2Message`     | Server response with missing updates.                                        |
+| `"yjs_update"`         | `YjsUpdateMessage`        | Remote update from another client.                                           |
+| `"session_state"`      | `SessionStateMessage`     | Session participants update.                                                 |
+| `"live_editing_error"` | `LiveEditingErrorMessage` | Error codes: `NOT_FOUND`, `UNAUTHORIZED`, `INVALID_PAYLOAD`, `RATE_LIMITED`. |
+
+## Full example
+
+```ts
+import { YjsDocumentManager } from "@stratasync/yjs";
+import type { DocumentKey } from "@stratasync/yjs";
+
+const manager = new YjsDocumentManager({
+  clientId: "client-123",
+  connId: "conn-456",
+});
+
+// Set transport (provided by sync-transport-graphql)
+manager.setTransport(yjsTransport);
+
+const docKey: DocumentKey = {
+  entityType: "Task",
+  entityId: "task-abc",
+  fieldName: "description",
+};
+
+// Subscribe to content changes
+const unsubContent = manager.onContentChange(docKey, (content) => {
+  renderPreview(content); // Your app-specific preview renderer
+});
+
+// Subscribe to connection state
+const unsubState = manager.onConnectionStateChange(docKey, (state) => {
+  updateConnectionIndicator(state); // Your app-specific connection UI
+});
+
+// Connect with initial content
+manager.connect(docKey, { initialContent: "Initial description" });
+
+// Get the Y.Doc for a rich text editor
+const doc = manager.getDocument(docKey);
+const text = doc.getText("content");
+
+// Later: clean up
+unsubContent();
+unsubState();
+manager.disconnect(docKey);
+manager.destroy(docKey);
+```

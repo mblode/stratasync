@@ -1,0 +1,279 @@
+---
+title: Query API
+description: Filter, sort, and paginate synced models with composable query operators.
+---
+
+The query API provides composable filter and sort operators for querying models from the identity map. All queries run in-memory against the locally cached data.
+
+## QueryOptions
+
+```ts
+interface QueryOptions<T> {
+  where?: (item: T) => boolean;
+  orderBy?: (a: T, b: T) => number;
+  limit?: number;
+  offset?: number;
+  includeArchived?: boolean;
+}
+```
+
+| Option            | Type                     | Default | Description                                                 |
+| ----------------- | ------------------------ | ------- | ----------------------------------------------------------- |
+| `where`           | `(item: T) => boolean`   | --      | Filter predicate. Only items returning `true` are included. |
+| `orderBy`         | `(a: T, b: T) => number` | --      | Sort comparator (same as `Array.sort`).                     |
+| `limit`           | `number`                 | --      | Maximum results to return.                                  |
+| `offset`          | `number`                 | --      | Number of results to skip.                                  |
+| `includeArchived` | `boolean`                | `false` | Include soft-deleted items (those with `archivedAt`).       |
+
+## QueryResult
+
+```ts
+interface QueryResult<T> {
+  data: T[];
+  hasMore: boolean;
+  totalCount?: number;
+}
+```
+
+| Field        | Description                                          |
+| ------------ | ---------------------------------------------------- |
+| `data`       | The filtered, sorted, paginated results.             |
+| `hasMore`    | `true` if there are more results beyond the `limit`. |
+| `totalCount` | Total count of matching items before pagination.     |
+
+## Basic usage
+
+```ts
+import { createSyncClient } from "@stratasync/client";
+
+// Simple filter
+const result = await client.query<Task>("Task", {
+  where: (task) => task.projectId === "proj-123",
+});
+
+// With sorting and pagination
+const result = await client.query<Task>("Task", {
+  where: (task) => task.status === "todo",
+  orderBy: (a, b) => b.priority - a.priority,
+  limit: 20,
+  offset: 0,
+});
+
+// Include archived
+const result = await client.query<Task>("Task", {
+  includeArchived: true,
+});
+```
+
+## Filter operators
+
+`@stratasync/client` exports composable filter functions that return predicates for the `where` option.
+
+### eq -- equality
+
+```ts
+import { eq } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: eq("status", "todo"),
+});
+```
+
+**Signature:** `eq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
+
+### neq -- not equal
+
+```ts
+import { neq } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: neq("status", "done"),
+});
+```
+
+**Signature:** `neq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
+
+### gt -- greater than
+
+```ts
+import { gt } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: gt("priority", 5),
+});
+```
+
+**Signature:** `gt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
+
+Works with numeric fields. The operator returns `false` for non-numeric comparisons.
+
+### lt -- less than
+
+```ts
+import { lt } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: lt("priority", 3),
+});
+```
+
+**Signature:** `lt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
+
+Works with numeric fields. The operator returns `false` for non-numeric comparisons.
+
+### isIn -- set membership
+
+```ts
+import { isIn } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: isIn("status", ["todo", "in_progress"]),
+});
+```
+
+**Signature:** `isIn<T, K extends keyof T>(field: K, values: T[K][]): (item: T) => boolean`
+
+Uses a `Set` internally for O(1) lookups.
+
+### contains -- substring match
+
+```ts
+import { contains } from "@stratasync/client";
+
+// Case-insensitive (default)
+const result = await client.query<Task>("Task", {
+  where: contains("title", "bug"),
+});
+
+// Case-sensitive
+const result = await client.query<Task>("Task", {
+  where: contains("title", "Bug", true),
+});
+```
+
+**Signature:** `contains<T>(field: keyof T, substring: string, caseSensitive?: boolean): (item: T) => boolean`
+
+The operator returns `false` for non-string fields.
+
+### matches -- regex match
+
+```ts
+import { matches } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: matches("title", /^URGENT:/i),
+});
+```
+
+**Signature:** `matches<T>(field: keyof T, pattern: RegExp): (item: T) => boolean`
+
+The operator returns `false` for non-string fields.
+
+## Logical combinators
+
+### and -- combine with AND
+
+```ts
+import { and, eq, gt } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: and(eq("status", "todo"), gt("priority", 3)),
+});
+```
+
+**Signature:** `and<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
+
+### or -- combine with OR
+
+```ts
+import { or, eq } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: or(eq("status", "todo"), eq("status", "in_progress")),
+});
+```
+
+**Signature:** `or<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
+
+### not -- negate a filter
+
+```ts
+import { not, eq } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: not(eq("status", "done")),
+});
+```
+
+**Signature:** `not<T>(filter: (item: T) => boolean): (item: T) => boolean`
+
+## Composing complex queries
+
+Combinators can be nested to build complex filters:
+
+```ts
+import { and, or, eq, gt, contains, not } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: and(
+    eq("projectId", "proj-123"),
+    not(eq("status", "done")),
+    or(gt("priority", 5), contains("title", "urgent"))
+  ),
+  orderBy: (a, b) => b.priority - a.priority,
+  limit: 50,
+});
+```
+
+## Sort utilities
+
+### sortBy
+
+Creates a comparator function for a single field.
+
+```ts
+import { sortBy } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  orderBy: sortBy("priority", "desc"),
+});
+```
+
+**Signature:** `sortBy<T>(field: keyof T, direction?: "asc" | "desc"): (a: T, b: T) => number`
+
+Supports string, number, and Date comparisons. The comparator sorts null/undefined values last.
+
+### combineSorts
+
+Chains multiple sort comparators. The first comparator defines the primary sort, and subsequent ones break ties.
+
+```ts
+import { sortBy, combineSorts } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  orderBy: combineSorts(sortBy("priority", "desc"), sortBy("title", "asc")),
+});
+```
+
+**Signature:** `combineSorts<T>(...sorts: Array<(a: T, b: T) => number>): (a: T, b: T) => number`
+
+## Archived items
+
+By default, queries exclude items with a truthy `archivedAt` field. To include archived items:
+
+```ts
+const result = await client.query<Task>("Task", {
+  includeArchived: true,
+});
+```
+
+To query only archived items:
+
+```ts
+import { and } from "@stratasync/client";
+
+const result = await client.query<Task>("Task", {
+  where: (task) => Boolean(task.archivedAt),
+  includeArchived: true,
+});
+```

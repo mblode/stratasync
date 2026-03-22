@@ -1,0 +1,363 @@
+:root {
+  color-scheme: light;
+  --bg: #f3ede3;
+  --bg-accent: #fff8f0;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --border: rgba(82, 58, 31, 0.16);
+  --ink: #201710;
+  --muted: #6b6157;
+  --accent: #0a7a63;
+  --accent-soft: #dff4ec;
+  --danger: #a14431;
+  --shadow: 0 24px 60px rgba(58, 39, 15, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(255, 219, 163, 0.55),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at top right,
+      rgba(133, 203, 186, 0.35),
+      transparent 28%
+    ),
+    linear-gradient(180deg, #fffaf4 0%, #efe5d6 100%);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  background: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(960px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.hero-card,
+.panel {
+  backdrop-filter: blur(18px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.hero-card {
+  overflow: hidden;
+  padding: 28px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.95),
+      rgba(255, 248, 240, 0.76)
+    ),
+    var(--panel);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(10, 122, 99, 0.14);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.95fr);
+  margin-top: 18px;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: clamp(2.5rem, 5vw, 4.4rem);
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+}
+
+.hero-copy p {
+  max-width: 38rem;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.65;
+}
+
+.hero-stats {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 28px;
+}
+
+.stat-card {
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(82, 58, 31, 0.12);
+}
+
+.stat-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.5rem;
+}
+
+.status-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.status-pill {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(82, 58, 31, 0.1);
+  background: var(--panel-strong);
+}
+
+.status-pill strong {
+  text-transform: capitalize;
+}
+
+.status-pill[data-tone="ok"] strong {
+  color: var(--accent);
+}
+
+.status-pill[data-tone="warning"] strong {
+  color: #9a6c16;
+}
+
+.status-pill[data-tone="error"] strong {
+  color: var(--danger);
+}
+
+.status-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.status-meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.panel {
+  margin-top: 22px;
+  padding: 24px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 2rem;
+  letter-spacing: -0.03em;
+}
+
+.panel-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.todo-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 20px;
+}
+
+.todo-input {
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid rgba(82, 58, 31, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+}
+
+.todo-input:focus {
+  outline: 2px solid rgba(10, 122, 99, 0.18);
+  outline-offset: 2px;
+}
+
+.primary-button,
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  border: 0;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    opacity 120ms ease,
+    background-color 120ms ease;
+}
+
+.primary-button {
+  min-height: 56px;
+  padding: 0 20px;
+  background: var(--ink);
+  color: white;
+  font-weight: 700;
+}
+
+.ghost-button {
+  min-height: 42px;
+  padding: 0 14px;
+  background: rgba(32, 23, 16, 0.08);
+  color: var(--ink);
+}
+
+.primary-button:hover,
+.ghost-button:hover {
+  transform: translateY(-1px);
+}
+
+.todo-list {
+  display: grid;
+  gap: 12px;
+}
+
+.todo-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(82, 58, 31, 0.12);
+}
+
+.todo-item[data-completed="true"] {
+  background: rgba(223, 244, 236, 0.92);
+}
+
+.todo-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.todo-copy {
+  min-width: 0;
+}
+
+.todo-title {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.todo-item[data-completed="true"] .todo-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.todo-subtitle {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.empty-state {
+  padding: 28px;
+  border: 1px dashed rgba(82, 58, 31, 0.24);
+  border-radius: 24px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.error-banner {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(161, 68, 49, 0.1);
+  color: var(--danger);
+}
+
+.loading-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+@media (max-width: 860px) {
+  .hero-grid,
+  .todo-form {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell {
+    width: min(100vw - 24px, 720px);
+    padding-top: 20px;
+  }
+
+  .hero-card,
+  .panel {
+    border-radius: 24px;
+    padding: 20px;
+  }
+}
