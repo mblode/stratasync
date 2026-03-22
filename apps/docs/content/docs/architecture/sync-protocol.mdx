@@ -5,6 +5,10 @@ description: How Strata Sync's server-sequenced sync protocol works, including t
 
 Strata Sync uses a **server-sequenced** sync model. The server assigns a monotonically increasing `syncId` to every committed change, creating a single global ordering that all clients follow.
 
+### Design lineage
+
+This protocol is based on the server-sequenced sync architecture Linear described but never open-sourced. Strata Sync is an independent implementation that adds Yjs CRDT integration, undo/redo, and pluggable adapters.
+
 ## The sync log
 
 The core abstraction is a monotonic append-only log of **sync actions**, where each action represents a single change to a single model row.

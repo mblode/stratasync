@@ -4,6 +4,10 @@ Sync that works offline.
 
 A local-first sync engine for TypeScript, React, and Next.js. Every read is instant. Every write works offline. Every client converges.
 
+## Why Strata Sync
+
+Linear described a sync architecture that became the gold standard for local-first apps but never open-sourced it. Strata Sync is an independent implementation of that protocol — monotonic sync log, bootstrap + delta streaming, optimistic outbox, field-level LWW rebase — extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
+
 ## Features
 
 - **Instant reads** — Local IndexedDB replica. No spinners, no round-trips.
