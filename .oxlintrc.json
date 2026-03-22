@@ -10,7 +10,8 @@
     "**/release/**",
     "**/store/generated/**",
     "**/store/screenshots/**",
-    "**/*.graphql"
+    "**/*.graphql",
+    "**/routeTree.gen.ts"
   ],
   "extends": [
     "./node_modules/ultracite/config/oxlint/core/.oxlintrc.json",
