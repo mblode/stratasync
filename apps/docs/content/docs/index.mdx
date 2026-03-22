@@ -5,7 +5,7 @@ description: Build instant, offline-capable apps that sync with Strata Sync.
 
 Build instant, offline-capable apps that sync. Strata Sync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Every read comes from a local store, so the UI stays fast. Every write enters an optimistic outbox, so mutations feel instant. A monotonic sync log on the server ensures all clients converge to the same state.
 
-Strata Sync implements the server-sequenced sync architecture that [Linear](https://linear.app) pioneered and described in their engineering blog posts and conference talks. The core protocol — monotonic sync IDs, bootstrap + delta streaming, an optimistic outbox with field-level LWW rebase — follows Linear's published design. Strata Sync extends it with Yjs CRDT collaboration, built-in undo/redo, pluggable adapters, and framework integrations.
+The sync protocol follows the server-sequenced architecture [Linear](https://linear.app) described but never open-sourced. Strata Sync is an independent implementation extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
 
 ## Key features
 

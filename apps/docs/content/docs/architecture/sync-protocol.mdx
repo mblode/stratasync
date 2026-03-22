@@ -7,7 +7,7 @@ Strata Sync uses a **server-sequenced** sync model. The server assigns a monoton
 
 ### Design lineage
 
-This protocol follows the server-sequenced sync architecture that Linear described in their engineering blog and conference talks. The core ideas — a monotonic append-only sync log, bootstrap + delta streaming, optimistic mutations with field-level last-writer-wins rebase — come from Linear's published design. Strata Sync's implementation is independent and adds capabilities not present in Linear's engine, including Yjs CRDT integration, built-in undo/redo, and pluggable adapters.
+This protocol is based on the server-sequenced sync architecture Linear described but never open-sourced. Strata Sync is an independent implementation that adds Yjs CRDT integration, undo/redo, and pluggable adapters.
 
 ## The sync log
 
