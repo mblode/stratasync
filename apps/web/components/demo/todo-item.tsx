@@ -45,7 +45,7 @@ export const TodoItem = ({
       </span>
       <button
         aria-label={`Delete "${todo.title}"`}
-        className="shrink-0 cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+        className="shrink-0 cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 dark:text-foreground/70 dark:hover:text-destructive"
         onClick={onDelete}
         type="button"
       >
