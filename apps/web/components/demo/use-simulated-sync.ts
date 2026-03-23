@@ -67,7 +67,25 @@ const SEED_ROWS = [
 // Create clients synchronously (no null state, no layout shift)
 // ---------------------------------------------------------------------------
 
+const clearDemoStorage = (prefix: string) => {
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(`${prefix}:`)) {
+      keysToRemove.push(key);
+    }
+  }
+  for (const key of keysToRemove) {
+    localStorage.removeItem(key);
+  }
+};
+
 const createDemoInfra = () => {
+  // Clear stale localStorage from previous sessions so the fresh
+  // in-memory DemoServer and localStorage stay in sync.
+  clearDemoStorage("demo-a");
+  clearDemoStorage("demo-b");
+
   const server = new DemoServer(SEED_ROWS);
   const transportA = new DemoTransport(server, "A");
   const transportB = new DemoTransport(server, "B");

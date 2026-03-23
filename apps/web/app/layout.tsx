@@ -1,6 +1,6 @@
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { GeistMono } from "geist/font/mono";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type React from "react";
 
@@ -16,6 +16,11 @@ const glide = localFont({
 });
 
 const siteTitle = `${siteConfig.name} - Local-first sync engine`;
+
+export const viewport: Viewport = {
+  userScalable: false,
+  width: "device-width",
+};
 
 export const metadata: Metadata = {
   alternates: {
