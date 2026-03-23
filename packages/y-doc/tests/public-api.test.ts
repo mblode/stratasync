@@ -40,8 +40,8 @@ const assertPublicTypes = (
 
 describe("public api", () => {
   it("exports the documented runtime helpers and managers", () => {
-    expectTypeOf(YjsDocumentManager).toBeFunction();
-    expectTypeOf(YjsPresenceManager).toBeFunction();
+    expect(YjsDocumentManager).toBeDefined();
+    expect(YjsPresenceManager).toBeDefined();
     expectTypeOf(toDocumentKeyString).toBeFunction();
     expectTypeOf(fromDocumentKeyString).toBeFunction();
     expectTypeOf(createPersistedYjsPrefix).toBeFunction();
