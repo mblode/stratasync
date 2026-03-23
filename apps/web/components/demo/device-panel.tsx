@@ -7,6 +7,7 @@ import { useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 import type { DemoTransport } from "./demo-transport";
 import { NetworkToggle } from "./network-toggle";
@@ -74,13 +75,13 @@ export const DevicePanel = ({
   return (
     <section
       aria-label={label}
-      className="flex flex-col overflow-hidden rounded-2xl bg-card shadow-xs"
+      className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card"
     >
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="font-medium text-xs">{label}</span>
-          <SyncIndicator status={state} />
+          <SyncIndicator isOnline={isOnline} status={state} />
         </div>
         <div className="ml-auto flex items-center gap-1">
           <AnimatePresence>
@@ -112,18 +113,20 @@ export const DevicePanel = ({
       </div>
 
       {/* Todo list */}
-      <ul className="min-h-[180px] flex-1 overflow-y-auto">
-        <AnimatePresence initial={false} mode="popLayout">
-          {todos.map((todo) => (
-            <TodoItem
-              key={todo.id}
-              onDelete={() => handleDelete(todo)}
-              onToggle={() => handleToggle(todo)}
-              todo={todo}
-            />
-          ))}
-        </AnimatePresence>
-      </ul>
+      <ScrollArea className="h-[300px]">
+        <ul>
+          <AnimatePresence initial={false} mode="popLayout">
+            {todos.map((todo) => (
+              <TodoItem
+                key={todo.id}
+                onDelete={() => handleDelete(todo)}
+                onToggle={() => handleToggle(todo)}
+                todo={todo}
+              />
+            ))}
+          </AnimatePresence>
+        </ul>
+      </ScrollArea>
 
       {/* Add input */}
       <div className="border-t p-2">

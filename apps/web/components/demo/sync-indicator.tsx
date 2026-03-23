@@ -16,9 +16,18 @@ const statusConfig: Record<
   syncing: { color: "bg-emerald-500", label: "Synced", pulse: false },
 };
 
-export const SyncIndicator = ({ status }: { status: SyncClientState }) => {
+export const SyncIndicator = ({
+  isOnline,
+  status,
+}: {
+  isOnline: boolean;
+  status: SyncClientState;
+}) => {
   const reduceMotion = useReducedMotion();
-  const config = statusConfig[status];
+  const config =
+    !isOnline && status !== "error"
+      ? statusConfig.disconnected
+      : statusConfig[status];
 
   return (
     <div
@@ -31,7 +40,7 @@ export const SyncIndicator = ({ status }: { status: SyncClientState }) => {
           config.pulse && !reduceMotion
             ? { opacity: [1, 0.7, 1], scale: [1, 1.2, 1] }
             : {
-                opacity: status === "disconnected" ? 0.5 : 1,
+                opacity: !isOnline || status === "disconnected" ? 0.5 : 1,
                 scale: 1,
               }
         }

@@ -3,21 +3,17 @@ title: "@stratasync/core"
 description: Core model runtime, schema metadata, transaction primitives, and delta processing for Strata Sync.
 ---
 
-`@stratasync/core` is the foundation of the Strata Sync stack. Every other package depends on it for model definitions, schema metadata, transaction formats, and delta processing.
-
 ## Installation
-
-Install the package with npm.
 
 ```bash
 npm install @stratasync/core
 ```
 
-`@stratasync/core` has no peer dependencies. It bundles `mobx` as a regular dependency for its internal observable property system.
+`@stratasync/core` has no peer dependencies. It bundles `mobx` as a regular dependency.
 
 ## Package exports
 
-You can import all public APIs (application programming interfaces) from the package entry point. The most commonly used exports are grouped below by category.
+Import all public APIs from the package entry point:
 
 ```ts
 import {
@@ -57,11 +53,11 @@ import {
 } from "@stratasync/core";
 ```
 
-Additional exports for serialization helpers (`serializeBatch`, `batchToJson`), ephemeral properties (`EphemeralProperty`), reference collections (`ReferenceArray`, `ReferenceCollection`), and internal utilities are available from the same entry point.
+Serialization helpers, ephemeral properties, reference collections, and internal utilities are also available from the same entry point.
 
 ## Architecture role
 
-`@stratasync/core` sits at the bottom of the dependency graph. It defines the data model, schema, and transaction format that all higher-level packages consume.
+Sits at the bottom of the dependency graph. Defines the data model, schema, and transaction format that all higher-level packages consume.
 
 ```
 core
@@ -71,11 +67,4 @@ core
               ^-- next
 ```
 
-The package is framework-agnostic with no React, Next.js, or browser-specific dependencies. You can use it in Node.js, Deno, or any JavaScript runtime that supports ES modules (ESM).
-
-## Pages in this section
-
-- [Model base class](/docs/packages/sync-core/models) -- Base class for synced entities with change tracking, hydration, and serialization.
-- [Decorators](/docs/packages/sync-core/decorators) -- Define synced models, properties, and relationships declaratively.
-- [Transactions](/docs/packages/sync-core/transactions) -- Create, serialize, and batch transactions for offline-first mutations.
-- [Schema and registry](/docs/packages/sync-core/schema) -- Runtime metadata, schema hashing, and load strategy configuration.
+Framework-agnostic: works in Node.js, Deno, or any ES module runtime.

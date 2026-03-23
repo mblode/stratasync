@@ -3,11 +3,11 @@ title: Server-side rendering and bootstrap
 description: Prefetch data on the server, serialize snapshots, and hydrate the client for instant first paint.
 ---
 
-Server-side rendering (SSR) bootstrap eliminates loading spinners on first paint. You prefetch data on the server, serialize it into the HTML response, and seed client storage on load. The client then starts its delta stream from where the server left off.
+Prefetch data on the server, embed it in the HTML, and seed client storage. The client starts its delta stream from where the server left off: no loading spinners.
 
 ## Why bootstrap matters
 
-Without SSR bootstrap, the browser receives an empty shell, mounts React, shows a spinner, and only then fetches data from the sync API. With bootstrap, the server embeds data directly in the HTML response, so users see content immediately with no layout shift.
+Without SSR bootstrap, the browser shows a spinner while fetching from the sync API. With bootstrap, data is embedded in the HTML response: users see content immediately.
 
 ### Without SSR bootstrap
 
@@ -44,7 +44,7 @@ sequenceDiagram
 
 ## Prefetching on the server
 
-`prefetchBootstrap` from `@stratasync/next/server` fetches a full bootstrap snapshot from your sync API. Call it in a Server Component or `generateMetadata` context.
+Call `prefetchBootstrap` in a Server Component or `generateMetadata`:
 
 ```ts
 import {
@@ -64,7 +64,7 @@ See [Server utilities](/docs/packages/next/server) for all `prefetchBootstrap` o
 
 ### Snapshot shape
 
-The returned `BootstrapSnapshot` contains every model instance the user can access, streamed as NDJSON from the sync API. The `lastSyncId` field tells the client where to start its delta stream.
+Contains all accessible model instances. `lastSyncId` tells the client where to start its delta stream.
 
 ```ts
 interface BootstrapSnapshot {
@@ -81,7 +81,7 @@ interface BootstrapSnapshot {
 
 ## Serializing and passing to the client
 
-Server Components can't pass complex objects directly to Client Components. Use `serializeBootstrapSnapshot` to encode the snapshot into a transferable payload. When `compress: true` is set, the payload is gzip-compressed and base64-encoded via `CompressionStream` when available, falling back to plain JSON otherwise.
+Encode the snapshot for transfer across the Server/Client Component boundary. With `compress: true`, data is gzip-compressed and base64-encoded.
 
 ```ts
 const payload = await serializeBootstrapSnapshot(snapshot, {
@@ -91,7 +91,7 @@ const payload = await serializeBootstrapSnapshot(snapshot, {
 
 ## Seeding storage from bootstrap
 
-`seedStorageFromBootstrap` populates IndexedDB with the server-prefetched snapshot. Call it before creating or starting the sync client so queries return data on the first render.
+Populate IndexedDB before starting the sync client so queries return data on first render.
 
 ```ts
 import { seedStorageFromBootstrap } from "@stratasync/next";
@@ -116,7 +116,7 @@ See [Client utilities](/docs/packages/next/client) for the full `seedStorageFrom
 
 ## Stale checking
 
-Detect whether a cached or delayed snapshot has gone stale before seeding.
+Check if a snapshot is too old before seeding:
 
 ```ts
 import { isBootstrapSnapshotStale } from "@stratasync/next/server";
@@ -128,11 +128,11 @@ if (isBootstrapSnapshotStale(snapshot, 30_000)) {
 }
 ```
 
-Staleness rarely causes problems in practice because the client's delta stream catches up immediately after hydration.
+Staleness rarely matters: the delta stream catches up immediately after hydration.
 
 ## Complete Next.js App Router example
 
-This example shows the server layout fetching data, the client provider seeding storage, and a page consuming synced data.
+Server layout fetches data, client provider seeds storage, page consumes synced data.
 
 ### Server layout
 
@@ -271,14 +271,8 @@ export const TaskList = observer(function TaskList() {
 });
 ```
 
-The key pattern: the server prefetches and serializes the snapshot, the client seeds IndexedDB before the sync client starts, and `NextSyncProvider` calls `client.start()` once ready. Because storage is pre-populated, `useQuery` and `useModel` hooks return data on the first render with no loading state.
+The server prefetches and serializes, the client seeds IndexedDB before start, and `NextSyncProvider` calls `client.start()`. Because storage is pre-populated, hooks return data on the first render.
 
 ## Incremental hydration
 
-After the initial bootstrap seed, the client opens a delta stream starting from `lastSyncId`. Any changes that occurred between the server render and client hydration arrive through this stream and update the stores automatically, making the transition from server-rendered to live data seamless.
-
-## Next steps
-
-- [Offline-First Patterns](/docs/guides/offline-first) -- How the client handles connectivity loss after bootstrap.
-- [Load Strategies](/docs/guides/load-strategies) -- Control which models you include in the bootstrap.
-- [Next.js package reference](/docs/packages/next) -- Full API docs for server and client exports.
+After seeding, the client opens a delta stream from `lastSyncId`. Changes between server render and client hydration arrive automatically, making the transition seamless.

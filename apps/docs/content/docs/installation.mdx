@@ -7,7 +7,7 @@ Install the packages for your stack, or scaffold a complete app with the Claude 
 
 ## Scaffold a full-stack app
 
-The fastest way to get started is to scaffold a complete Next.js + Fastify app:
+Scaffold a complete Next.js + Fastify app:
 
 ```bash
 npx skills add stratasync/stratasync
@@ -22,36 +22,34 @@ This installs a Claude Code skill that generates a working client and server wit
 - **React** 18 or 19
 - **Next.js** 14 or 15 (if using `@stratasync/next`)
 
-## Packages
+## Install
 
-Pick the row that matches your stack and run the install command.
+```bash
+# React app
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
 
-| Use case                   | Command                                                                                                                                                     |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sync client (no framework) | `npm install @stratasync/core @stratasync/client @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql`                                    |
-| React app                  | `npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql`                  |
-| Next.js app                | `npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/next @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql` |
-| Collaborative editing      | Add `@stratasync/y-doc` to any of the above commands                                                                                                        |
+# Next.js app
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/next @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+
+# Add collaborative editing
+npm install @stratasync/y-doc
+```
 
 ## Peer dependencies
-
-Three packages require peer dependencies that your application must provide.
-
-| Package             | Peer dependencies                         |
-| ------------------- | ----------------------------------------- |
-| `@stratasync/react` | `react ^18 \|\| ^19`, `yjs ^13.6`         |
-| `@stratasync/next`  | `next ^14 \|\| ^15`, `react ^18 \|\| ^19` |
-| `@stratasync/mobx`  | `mobx ^6.0`                               |
-
-Other packages bundle their dependencies.
 
 ```bash
 npm install react mobx yjs
 ```
 
+| Package             | Required versions                         |
+| ------------------- | ----------------------------------------- |
+| `@stratasync/react` | `react ^18 \|\| ^19`, `yjs ^13.6`         |
+| `@stratasync/next`  | `next ^14 \|\| ^15`, `react ^18 \|\| ^19` |
+| `@stratasync/mobx`  | `mobx ^6.0`                               |
+
 ## TypeScript configuration
 
-Enable experimental decorators so Strata Sync can use them for model schema definitions.
+Enable experimental decorators for model schema definitions.
 
 ```json
 {
@@ -66,4 +64,4 @@ Enable experimental decorators so Strata Sync can use them for model schema defi
 }
 ```
 
-You don't need `emitDecoratorMetadata` — Strata Sync decorators work through runtime registration with the `ModelRegistry`.
+`emitDecoratorMetadata` is not needed: decorators register with the `ModelRegistry` at runtime.

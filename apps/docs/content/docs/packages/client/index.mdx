@@ -3,8 +3,6 @@ title: "@stratasync/client"
 description: Client orchestration, outbox management, identity maps, query execution, and undo/redo for Strata Sync.
 ---
 
-`@stratasync/client` orchestrates the full sync lifecycle: bootstrapping, delta processing, optimistic mutations, outbox persistence, queries, and undo/redo.
-
 ## Installation
 
 ```bash
@@ -48,7 +46,7 @@ await client.stop();
 
 ## Architecture role
 
-`@stratasync/client` sits between the core primitives and framework bindings. It stays framework-agnostic and doesn't depend on React, Next.js, or any browser API beyond what the injected adapters provide.
+Sits between core primitives and framework bindings. Framework-agnostic: no React, Next.js, or browser API dependencies beyond injected adapters.
 
 ```
 sync-core, sync-y-doc
@@ -57,15 +55,15 @@ sync-core, sync-y-doc
               ^-- sync-next
 ```
 
-The React hooks in `@stratasync/react` are thin wrappers around the `SyncClient` interface. See the [React package docs](/docs/packages/react) for details.
+The React hooks in `@stratasync/react` are thin wrappers around `SyncClient`. See [React](/docs/packages/react) for details.
 
 ## SyncClient interface
 
-`createSyncClient` returns an object implementing the `SyncClient` interface. The methods and properties break down into five categories.
+`createSyncClient` returns a `SyncClient` with five categories of methods:
 
 ### Lifecycle
 
-These methods control the sync engine and manage connection state.
+Control the sync engine and connection state.
 
 | Property / Method   | Type              | Description                        |
 | ------------------- | ----------------- | ---------------------------------- |
@@ -82,7 +80,7 @@ These methods control the sync engine and manage connection state.
 
 ### Reading
 
-Use these methods to fetch models from local storage or the identity map.
+Fetch models from local storage or the identity map.
 
 | Method                          | Type                      | Description               |
 | ------------------------------- | ------------------------- | ------------------------- |
@@ -96,7 +94,7 @@ Use these methods to fetch models from local storage or the identity map.
 
 ### Writing
 
-These methods create and modify models. All writes go through the outbox for offline-first persistence.
+All writes go through the outbox for offline-first persistence.
 
 | Method                           | Type            | Description          |
 | -------------------------------- | --------------- | -------------------- |
@@ -108,7 +106,7 @@ These methods create and modify models. All writes go through the outbox for off
 
 ### Undo/Redo
 
-Client-side undo and redo with full transaction history. See [Undo and redo](/docs/packages/sync-client/undo-redo) for details.
+See [Undo and redo](/docs/packages/client/undo-redo) for details.
 
 | Method      | Type            | Description                 |
 | ----------- | --------------- | --------------------------- |
@@ -119,7 +117,7 @@ Client-side undo and redo with full transaction history. See [Undo and redo](/do
 
 ### Events
 
-Subscribe to sync lifecycle events for state management and UI updates. See [Event system](/docs/packages/sync-client/events) for the full event reference.
+See [Event system](/docs/packages/client/events) for the full reference.
 
 | Method                              | Type         | Description                               |
 | ----------------------------------- | ------------ | ----------------------------------------- |
@@ -131,7 +129,7 @@ The `yjs` property (`{ documentManager, presenceManager } | undefined`) provides
 
 ## Advanced exports
 
-These classes and functions support custom orchestration, testing, or direct identity map manipulation. Most applications don't need them directly.
+For custom orchestration, testing, or direct identity map manipulation. Most apps don't need these.
 
 | Export                | Description                                                              |
 | --------------------- | ------------------------------------------------------------------------ |
@@ -140,11 +138,3 @@ These classes and functions support custom orchestration, testing, or direct ide
 | `OutboxManager`       | Manages the pending transaction outbox for offline-first persistence.    |
 | `SyncOrchestrator`    | Coordinates the full sync lifecycle (bootstrap, deltas, reconnection).   |
 | `executeQuery`        | Runs a query against the identity map with filter operators and sorting. |
-
-## Pages in this section
-
-- [Configuration](/docs/packages/sync-client/configuration) -- SyncClientOptions reference for configuring storage, transport, and sync behavior.
-- [CRUD operations](/docs/packages/sync-client/crud) -- Create, read, update, delete, archive, and unarchive models through the sync client.
-- [Query API](/docs/packages/sync-client/queries) -- Filter, sort, and paginate synced models with composable query operators.
-- [Event system](/docs/packages/sync-client/events) -- Subscribe to sync lifecycle events for state management and UI updates.
-- [Undo and redo](/docs/packages/sync-client/undo-redo) -- Client-side undo and redo with full transaction history.

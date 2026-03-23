@@ -1,4 +1,4 @@
 {
   "title": "@stratasync/react",
-  "pages": ["index", "hooks", "connection", "client-hooks", "collaborative"]
+  "pages": ["index", "hooks", "collaborative"]
 }

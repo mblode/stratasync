@@ -139,7 +139,7 @@ const Home = async () => {
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
           {/* Hero */}
-          <div className="bg-[#3E521D] text-white">
+          <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
             <section className="py-16 text-center md:py-24">
               <div className="container-wrapper">
@@ -153,7 +153,7 @@ const Home = async () => {
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
                   <Button
                     asChild
-                    className="border-white bg-white text-[#3E521D] hover:bg-white/90 active:bg-white/95"
+                    className="border-white bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
                     size="lg"
                   >
                     <a href="https://stratasync.dev/docs">Get started</a>

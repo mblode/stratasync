@@ -3,9 +3,9 @@ title: Quick start
 description: Build a sync-enabled React app in five steps.
 ---
 
-Set up a local-first React app with real-time sync, offline support, and undo/redo.
+Build a local-first React app with real-time sync, offline support, and undo/redo.
 
-Want to skip the manual setup? Scaffold a complete app with the Claude Code skill:
+Skip the manual setup? Scaffold a complete app:
 
 ```bash
 npx skills add stratasync/stratasync
@@ -13,7 +13,7 @@ npx skills add stratasync/stratasync
 
 ## Step 1: Define your model
 
-A model is a TypeScript class decorated with schema metadata. `@ClientModel` registers the model, and `@Property` marks each synced field.
+`@ClientModel` registers a class with the sync engine. `@Property` marks each synced field.
 
 ```ts
 // models/task.ts
@@ -38,7 +38,7 @@ export class Task extends Model {
 
 ## Step 2: Create the sync client
 
-The sync client orchestrates storage (where data lives locally), transport (how data reaches the server), and reactivity (how changes propagate to the UI).
+Wire up storage, transport, and reactivity.
 
 ```ts
 // lib/sync-client.ts
@@ -75,7 +75,7 @@ export const client = createSyncClient({
 
 ## Step 3: Wrap your app with SyncProvider
 
-`SyncProvider` manages the client lifecycle: it starts sync on mount and stops it on unmount.
+`SyncProvider` starts sync on mount and stops on unmount.
 
 ```tsx
 // app/providers.tsx
@@ -114,11 +114,11 @@ export default function RootLayout({
 
 ## Step 4: Read data with hooks
 
-Strata Sync provides hooks for reading single records and filtered lists. Both accept a generic type parameter for type-safe access.
+Hooks read single records or filtered lists with full type safety.
 
-### useModel -- single record
+### useModel: single record
 
-`useModel` fetches one model instance by ID. It integrates with React Suspense, so wrap the component in a `<Suspense>` boundary.
+`useModel` fetches one model by ID. Wrap the component in a `<Suspense>` boundary.
 
 ```tsx
 "use client";
@@ -152,9 +152,9 @@ export default function TaskPage({ params }: { params: { id: string } }) {
 }
 ```
 
-### useQuery -- filtered lists
+### useQuery: filtered lists
 
-`useQuery` returns a reactive list of models matching a filter. It doesn't use Suspense; instead it returns `{ data, isLoading, error }`.
+`useQuery` returns a reactive list matching a filter. Returns `{ data, isLoading, error }` instead of using Suspense.
 
 ```tsx
 "use client";
@@ -186,7 +186,7 @@ For offline indicators and sync progress, see the [offline-first guide](/docs/gu
 
 ## Step 5: Mutate data
 
-Use the sync client to create, update, and delete records. The client applies mutations optimistically and queues them for sync.
+Mutations apply optimistically and queue for sync in the background.
 
 ```tsx
 "use client";
@@ -240,9 +240,3 @@ if (client.canRedo()) await client.redo();
 ```
 
 See [Data flow](/docs/architecture/data-flow) for how mutations move through the system.
-
-## Next steps
-
-- [Architecture overview](/docs/architecture/overview) -- the layered architecture and package dependency graph
-- [Sync protocol](/docs/architecture/sync-protocol) -- the server-sequenced sync model in depth
-- [Data flow](/docs/architecture/data-flow) -- how mutations and deltas flow through the system

@@ -3,15 +3,15 @@ title: Schema and registry
 description: ModelRegistry for runtime schema metadata, schema hashing, and load strategy configuration.
 ---
 
-`ModelRegistry` stores runtime metadata about your models, properties, and relationships. Decorators populate it at module load time, and the sync engine reads from it at runtime.
+Stores runtime metadata about models, properties, and relationships. Decorators populate it at import time; the sync engine reads from it at runtime.
 
 ## ModelRegistry
 
-`ModelRegistry` operates in two modes: a **static registry** that decorators write to at import time, and an **instance registry** constructed from a serialized snapshot for server-side use.
+Two modes: a **static registry** that decorators populate at import time, and an **instance registry** constructed from a serialized snapshot for server-side use.
 
 ### Static API
 
-Static methods read from the global registry that decorators populate.
+Read from the global registry that decorators populate.
 
 ```ts
 import { ModelRegistry } from "@stratasync/core";
@@ -51,7 +51,7 @@ const hash = ModelRegistry.getSchemaHash();
 
 ### Instance API
 
-Construct an instance from a `SchemaDefinition` when you don't have access to decorators (for example, on the server).
+Use when you don't have access to decorators (for example, on the server).
 
 ```ts
 import { ModelRegistry } from "@stratasync/core";
@@ -103,7 +103,7 @@ const model = registry.getModel("Task");
 
 ## computeSchemaHash
 
-`computeSchemaHash` produces a deterministic hash string for a schema, used to detect client/server mismatches.
+Produces a deterministic hash string for a schema, used to detect client/server mismatches.
 
 ```ts
 import { computeSchemaHash, ModelRegistry } from "@stratasync/core";
@@ -113,11 +113,11 @@ const hash = computeSchemaHash(ModelRegistry.snapshot());
 
 **Signature:** `computeSchemaHash(input: ModelRegistrySnapshot | SchemaDefinition): string`
 
-The function canonicalizes the snapshot (sorting model and property names, stripping `undefined` values), serializes it to JSON, applies a djb2 hash variant, and returns an 8-character hex string. The sync client compares hashes during bootstrap to decide whether local storage needs a full re-bootstrap.
+Canonicalizes the snapshot (sorting names, stripping `undefined`), serializes to JSON, and returns an 8-character djb2 hex hash. The sync client compares hashes at bootstrap to decide if a full re-bootstrap is needed.
 
 ## Load strategies
 
-Load strategies control when and how model data arrives from the server. Set the strategy in `@ClientModel`. For a full walkthrough, see [Load strategies](/docs/guides/load-strategies).
+Set via `@ClientModel`. See [Load strategies](/docs/guides/load-strategies) for a full walkthrough.
 
 | Strategy                                                     | Bootstrap | Best for                                 |
 | ------------------------------------------------------------ | --------- | ---------------------------------------- |
@@ -170,7 +170,7 @@ type PropertyType =
 
 ### SchemaDefinition
 
-`SchemaDefinition` is the programmatic alternative to decorator-based schema registration.
+Programmatic alternative to decorator-based schema registration.
 
 ```ts
 interface SchemaDefinition {

@@ -2,6 +2,7 @@
 
 import { motion, useReducedMotion } from "motion/react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 import type { Todo } from "./types";
@@ -28,12 +29,11 @@ export const TodoItem = ({
       layout={!reduceMotion}
       transition={{ type: "spring", ...SPRING }}
     >
-      <input
+      <Checkbox
         aria-label={`Mark "${todo.title}" as ${todo.completed ? "incomplete" : "complete"}`}
         checked={todo.completed}
-        className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded-sm border border-input accent-primary"
-        onChange={onToggle}
-        type="checkbox"
+        className="size-5"
+        onCheckedChange={onToggle}
       />
       <span
         className={cn(

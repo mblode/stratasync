@@ -3,11 +3,11 @@ title: Transactions
 description: Create, serialize, and batch transactions for offline-first mutations in Strata Sync.
 ---
 
-Transactions are the atomic unit of mutation in Strata Sync. Every local change becomes a `Transaction` object that flows through the outbox, travels to the server via the transport layer, and gets confirmed by the sync protocol.
+Every local change becomes a `Transaction` that flows through the outbox, travels to the server, and gets confirmed by the sync protocol.
 
 ## Transaction interface
 
-Every mutation in the system conforms to this structure.
+Every mutation conforms to this structure:
 
 ```ts
 interface Transaction {
@@ -51,7 +51,7 @@ interface Transaction {
 
 ### createTransaction
 
-All other factory functions delegate to this general-purpose factory.
+General-purpose factory; all other helpers delegate to it.
 
 ```ts
 import { createTransaction } from "@stratasync/core";
@@ -79,7 +79,7 @@ const tx = createTransaction({
 
 ### createInsertTransaction
 
-Creates an `"I"` (insert) transaction for a new model instance.
+Creates an insert (`"I"`) transaction.
 
 ```ts
 import { createInsertTransaction } from "@stratasync/core";
@@ -94,7 +94,7 @@ const tx = createInsertTransaction("client-abc", "Task", "task-123", {
 
 ### createUpdateTransaction
 
-Creates a `"U"` (update) transaction with changed fields and their original values.
+Creates an update (`"U"`) transaction with changed fields and originals.
 
 ```ts
 import { createUpdateTransaction } from "@stratasync/core";
@@ -110,7 +110,7 @@ const tx = createUpdateTransaction(
 
 ### createDeleteTransaction
 
-Creates a `"D"` (delete) transaction. You must pass the original data so undo can re-create the model.
+Creates a delete (`"D"`) transaction. Pass original data so undo can re-create the model.
 
 ```ts
 import { createDeleteTransaction } from "@stratasync/core";
@@ -150,7 +150,7 @@ const unarchiveTx = createUnarchiveTransaction(
 
 ### createUndoTransaction
 
-Creates the inverse transaction for a given transaction. Returns `null` if the transaction can't be undone (for example, a delete without original data).
+Creates the inverse transaction. Returns `null` if the transaction can't be undone (for example, a delete without original data).
 
 ```ts
 import { createUndoTransaction } from "@stratasync/core";
@@ -183,7 +183,7 @@ const undoTx = createUndoTransaction(originalTx);
 
 ### createTransactionBatch
 
-Groups multiple transactions into a single batch for atomic server submission.
+Groups transactions into a batch for atomic server submission.
 
 ```ts
 import {
@@ -219,7 +219,7 @@ interface TransactionBatch {
 
 ## Serialization
 
-You can serialize transactions to a compact format for storage (IndexedDB outbox) or transport (network payloads).
+Serialize transactions to a compact format for storage or transport.
 
 ### Single transactions
 
@@ -281,7 +281,7 @@ Short keys minimize payload size.
 
 ## Server result types
 
-The server returns these result objects after you submit transactions.
+Returned after submitting transactions:
 
 ### TransactionResult
 

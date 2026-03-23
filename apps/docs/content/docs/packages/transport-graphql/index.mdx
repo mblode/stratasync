@@ -3,20 +3,18 @@ title: "@stratasync/transport-graphql"
 description: GraphQL and REST transport adapter for sync communication, delta subscriptions, and Yjs collaborative editing in Strata Sync.
 ---
 
-`@stratasync/transport-graphql` implements the `TransportAdapter` interface with NDJSON bootstrap streaming, REST and GraphQL mutations, WebSocket delta subscriptions, and Yjs collaborative editing -- all with built-in retry logic and exponential backoff.
+Implements `TransportAdapter` with NDJSON bootstrap streaming, REST/GraphQL mutations, WebSocket delta subscriptions, and Yjs collaborative editing: all with built-in retry and exponential backoff.
 
 ## What it provides
 
-This package includes the transport adapter, WebSocket management, and streaming utilities.
-
-- **`createGraphQLTransport`** -- factory function that creates a configured `TransportAdapter` instance
-- **`GraphQLTransportAdapter`** -- the class implementing the full `TransportAdapter` interface
-- **`WebSocketManager`** -- manages WebSocket connections for delta subscriptions with automatic reconnection
-- **`YjsTransportAdapter`** -- bridges Yjs protocol messages over the WebSocket connection
-- **Bootstrap streams** -- `createBootstrapStream` and `createBatchLoadStream` for NDJSON streaming
-- **Delta fetching** -- `fetchDeltas` and `fetchAllDeltas` for REST-based catch-up
-- **Mutation sending** -- `sendMutations` (GraphQL) and `sendRestMutations` (REST)
-- **Retry utilities** -- `retryWithBackoff`, `calculateBackoff`, `fetchWithTimeout`, error classification helpers
+- **`createGraphQLTransport`**: factory function that creates a configured `TransportAdapter` instance
+- **`GraphQLTransportAdapter`**: the class implementing the full `TransportAdapter` interface
+- **`WebSocketManager`**: manages WebSocket connections for delta subscriptions with automatic reconnection
+- **`YjsTransportAdapter`**: bridges Yjs protocol messages over the WebSocket connection
+- **Bootstrap streams**: `createBootstrapStream` and `createBatchLoadStream` for NDJSON streaming
+- **Delta fetching**: `fetchDeltas` and `fetchAllDeltas` for REST-based catch-up
+- **Mutation sending**: `sendMutations` (GraphQL) and `sendRestMutations` (REST)
+- **Retry utilities**: `retryWithBackoff`, `calculateBackoff`, `fetchWithTimeout`, error classification helpers
 
 ## Installation
 
@@ -49,8 +47,6 @@ const client = createSyncClient({
 ```
 
 ## TransportAdapter interface
-
-The adapter implements the full `TransportAdapter` interface.
 
 | Method                    | Signature                                                                    | Description                                          |
 | ------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -92,7 +88,7 @@ interface TransportOptions {
 
 ### AuthProvider
 
-The transport calls the auth provider before each HTTP request and WebSocket subscription.
+Called before each HTTP request and WebSocket subscription:
 
 ```ts
 interface AuthProvider {
@@ -107,7 +103,7 @@ interface AuthProvider {
 
 ### RetryConfig
 
-Controls retry behavior for HTTP requests and WebSocket reconnection.
+Controls retry for HTTP requests and WebSocket reconnection:
 
 ```ts
 interface RetryConfig {
@@ -135,7 +131,7 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 
 ## Bootstrap streaming
 
-The `bootstrap` method streams initial data as NDJSON (Newline-Delimited JSON) from the server.
+Streams initial data as NDJSON from the server:
 
 ```ts
 const stream = transport.bootstrap({
@@ -153,7 +149,7 @@ for await (const row of stream) {
 const metadata = await stream.return(); // BootstrapMetadata
 ```
 
-The `batchLoad` method works the same way but fetches specific model instances.
+`batchLoad` fetches specific model instances:
 
 ```ts
 const stream = transport.batchLoad({
@@ -171,15 +167,15 @@ for await (const row of stream) {
 
 ## Mutations
 
-The adapter supports two mutation modes: REST (default) and GraphQL.
+Two modes: REST (default) and GraphQL.
 
 ### REST mutations (default)
 
-When you don't configure a `mutationBuilder`, the adapter sends mutations as JSON to `{syncEndpoint}/mutate`.
+Without a `mutationBuilder`, mutations are sent as JSON to `{syncEndpoint}/mutate`.
 
 ### GraphQL mutations
 
-When you provide a `mutationBuilder`, the adapter sends mutations as a GraphQL `mutation` document. The builder receives each transaction and its batch index, and returns a `GraphQLMutationSpec`.
+With a `mutationBuilder`, mutations are sent as a GraphQL document. The builder receives each transaction and returns a `GraphQLMutationSpec`.
 
 ```ts
 import type {
@@ -212,7 +208,7 @@ const transport = createGraphQLTransport({
 
 ## WebSocket subscriptions
 
-The adapter uses WebSocket for real-time delta streaming.
+Real-time delta streaming over WebSocket:
 
 ```ts
 const subscription = transport.subscribe({
@@ -233,13 +229,13 @@ subscription.unsubscribe();
 
 ### WebSocketManager
 
-The `WebSocketManager` handles connection lifecycle internally.
+Handles connection lifecycle internally:
 
-- Reconnects with exponential backoff on disconnect
-- Re-subscribes all active subscriptions after reconnection
-- Queues messages sent while disconnected and flushes them on reconnect
-- Routes Yjs/live-editing messages to the `YjsTransportAdapter`
-- Supports custom WebSocket implementations via `webSocketFactory`
+- Reconnects with exponential backoff
+- Re-subscribes after reconnection
+- Queues messages while disconnected, flushes on reconnect
+- Routes Yjs messages to `YjsTransportAdapter`
+- Supports custom WebSocket via `webSocketFactory`
 
 ### Connection states
 
@@ -253,7 +249,7 @@ The `WebSocketManager` handles connection lifecycle internally.
 
 ## Delta fetching
 
-You can fetch deltas via REST for catch-up after reconnection. Use `fetchDeltas` for a single page or `fetchAllDeltas` for automatic pagination.
+Fetch deltas via REST for catch-up. `fetchDeltas` for a single page, `fetchAllDeltas` for automatic pagination:
 
 ```ts
 // Single page
@@ -273,7 +269,7 @@ for await (const action of fetchAllDeltas(
 
 ## Yjs transport
 
-The adapter provides a `YjsTransportAdapter` for collaborative editing. It bridges Yjs protocol messages over the existing WebSocket connection that `WebSocketManager` manages, so you don't need a separate WebSocket.
+Bridges Yjs protocol messages over the existing WebSocket: no separate connection needed.
 
 ```ts
 const yjsTransport = transport.getYjsTransport();
@@ -296,8 +292,6 @@ class YjsTransportAdapter implements YjsTransport {
 
 ## Retry utilities
 
-The package exports utility functions for error handling and retry logic.
-
 | Function                                    | Description                                                             |
 | ------------------------------------------- | ----------------------------------------------------------------------- |
 | `retryWithBackoff(fn, config, shouldRetry)` | Retries an async function with exponential backoff.                     |
@@ -313,7 +307,7 @@ The package exports utility functions for error handling and retry logic.
 
 ## Architecture role
 
-`@stratasync/transport-graphql` connects the sync client to the server.
+Connects the sync client to the server.
 
 ```
 sync-core (defines TransactionBatch, DeltaPacket, and more)
@@ -322,4 +316,4 @@ sync-core (defines TransactionBatch, DeltaPacket, and more)
               ^-- sync-client (uses adapter for all server communication)
 ```
 
-The sync client depends on a `TransportAdapter` implementation at runtime. The same interface can be implemented with other protocols (gRPC, custom WebSocket).
+The same interface can be implemented with other protocols (gRPC, custom WebSocket).

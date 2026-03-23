@@ -3,7 +3,7 @@ title: Client utilities
 description: Client-side Next.js provider, bootstrap decoding, and re-exported React hooks.
 ---
 
-The client entry point of `@stratasync/next` provides the `NextSyncProvider` component, bootstrap decoding utilities, and re-exports all hooks from `@stratasync/react` with the `"use client"` directive.
+`NextSyncProvider`, bootstrap decoding utilities, and re-exported React hooks with `"use client"`.
 
 ```ts
 import {
@@ -32,7 +32,7 @@ import {
 
 ## NextSyncProvider
 
-A Next.js App Router compatible sync provider that handles client initialization, loading states, and error boundaries.
+App Router compatible sync provider with loading states and error handling.
 
 ```tsx
 "use client";
@@ -63,32 +63,28 @@ function Providers({ children }: { children: React.ReactNode }) {
 
 ### NextSyncProviderProps
 
-These props configure the sync provider behavior.
-
 | Prop       | Type                               | Default  | Description                                                                 |
 | ---------- | ---------------------------------- | -------- | --------------------------------------------------------------------------- |
 | `client`   | `SyncClient \| (() => SyncClient)` | Required | Sync client instance or lazy factory.                                       |
 | `children` | `ReactNode`                        | Required | Child components.                                                           |
 | `loading`  | `ReactNode`                        | `null`   | Shown while the client initializes.                                         |
-| `error`    | `(error: Error) => ReactNode`      | --       | Error renderer. If not provided, the error is thrown for an error boundary. |
-| `onReady`  | `() => void`                       | --       | Callback when the client is ready.                                          |
-| `onError`  | `(error: Error) => void`           | --       | Callback when initialization fails.                                         |
+| `error`    | `(error: Error) => ReactNode`      | -        | Error renderer. If not provided, the error is thrown for an error boundary. |
+| `onReady`  | `() => void`                       | -        | Callback when the client is ready.                                          |
+| `onError`  | `(error: Error) => void`           | -        | Callback when initialization fails.                                         |
 
 ### Initialization lifecycle
 
-The provider follows this sequence on mount.
+On mount:
 
-1. Resolves the client (calls the factory if a function is provided).
+1. Resolves the client (calls the factory if provided).
 2. Calls `client.start()`.
-3. Shows the `loading` component while starting.
-4. On success, renders children wrapped in a `SyncProvider` (from `@stratasync/react`).
-5. On failure, shows the `error` component or throws to an error boundary.
-
-The provider passes `autoStart={false}` and `autoStop={false}` to the inner `SyncProvider` because it manages the lifecycle itself.
+3. Shows `loading` while starting.
+4. On success, renders children in a `SyncProvider`.
+5. On failure, shows `error` or throws to an error boundary.
 
 ### Lazy client factory
 
-Pass a factory function to defer client creation until the component mounts.
+Defer client creation until mount:
 
 ```tsx
 <NextSyncProvider
@@ -103,11 +99,11 @@ Pass a factory function to defer client creation until the component mounts.
 </NextSyncProvider>
 ```
 
-This is useful when client configuration depends on values only available in the browser (cookies or localStorage).
+Useful when configuration depends on browser-only values (cookies, localStorage).
 
 ## Bootstrap decoding
 
-These utilities decode bootstrap snapshots serialized on the server. For server-side serialization functions, see [Server utilities](/docs/packages/sync-next/server).
+Decode snapshots serialized on the server. See [Server utilities](/docs/packages/next/server) for the serialization side.
 
 ### decodeBootstrapSnapshot
 
@@ -147,7 +143,7 @@ const isStale = isBootstrapSnapshotStale(snapshot, 30_000);
 
 ### seedStorageFromBootstrap
 
-Seeds the local storage adapter with data from a bootstrap snapshot. Pre-populates IndexedDB so the client can skip the network bootstrap.
+Pre-populates IndexedDB from a bootstrap snapshot so the client can skip network bootstrap.
 
 ```ts
 import { seedStorageFromBootstrap } from "@stratasync/next";
@@ -181,7 +177,7 @@ if (result.applied) {
 | `validateSchemaHash` | `boolean`                                                 | `true`      | Validate schema hash matches.   |
 | `batchSize`          | `number`                                                  | `500`       | Number of rows per write batch. |
 | `closeAfter`         | `boolean`                                                 | `true`      | Close storage after seeding.    |
-| `schema`             | `SchemaDefinition \| ModelRegistrySnapshot`               | --          | Schema for hash validation.     |
+| `schema`             | `SchemaDefinition \| ModelRegistrySnapshot`               | -           | Schema for hash validation.     |
 
 **SeedStorageResult:**
 
@@ -207,7 +203,7 @@ const isStale = isPrefetchStale(prefetchedData, 30_000);
 
 ## Re-exported hooks
 
-The package re-exports most hooks from `@stratasync/react` with the `"use client"` directive. You can import them directly from `@stratasync/next` in your client components.
+Import hooks directly from `@stratasync/next` in client components:
 
 ```tsx
 "use client";

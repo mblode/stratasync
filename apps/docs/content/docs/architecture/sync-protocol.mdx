@@ -3,26 +3,26 @@ title: Sync protocol
 description: How Strata Sync's server-sequenced sync protocol works, including the monotonic sync log, delta streaming, and bootstrap process.
 ---
 
-Strata Sync uses a **server-sequenced** sync model. The server assigns a monotonically increasing `syncId` to every committed change, creating a single global ordering that all clients follow.
+The server assigns a monotonically increasing `syncId` to every committed change, creating a single global ordering that all clients follow.
 
 ### Design lineage
 
-This protocol is based on the server-sequenced sync architecture Linear described but never open-sourced. Strata Sync is an independent implementation that adds Yjs CRDT integration, undo/redo, and pluggable adapters.
+Based on the server-sequenced sync architecture Linear described but never open-sourced. Extended with Yjs CRDT integration, undo/redo, and pluggable adapters.
 
 ## The sync log
 
-The core abstraction is a monotonic append-only log of **sync actions**, where each action represents a single change to a single model row.
+A monotonic append-only log of **sync actions**. Each action represents a single change to a single model row.
 
 | Field       | Description                                                                                          |
 | ----------- | ---------------------------------------------------------------------------------------------------- |
-| `id`        | The `syncId` -- a monotonically increasing integer assigned by the server.                           |
+| `id`        | The `syncId`: a monotonically increasing integer assigned by the server.                             |
 | `modelName` | Which model changed (for example, `"Task"` or `"User"`).                                             |
 | `modelId`   | The primary key of the affected row.                                                                 |
 | `action`    | The change type: `"I"` (insert), `"U"` (update), `"D"` (delete), `"A"` (archive), `"V"` (unarchive). |
 | `data`      | The changed fields (for inserts and updates) or `null` (for deletes).                                |
 | `groups`    | Optional sync group memberships for access control.                                                  |
 
-A **delta packet** bundles one or more sync actions with a `lastSyncId` watermark:
+A **delta packet** bundles sync actions with a `lastSyncId` watermark:
 
 ```ts
 interface DeltaPacket {
@@ -31,11 +31,11 @@ interface DeltaPacket {
 }
 ```
 
-The client tracks its own `lastSyncId` and advances it to `packet.lastSyncId` after applying each delta packet. This is the only mechanism by which confirmed state advances on the client.
+The client tracks its own `lastSyncId` and advances it after applying each delta packet. This is the only way confirmed state advances on the client.
 
 ## Client state machine
 
-The sync client follows five states: `"disconnected"`, `"connecting"`, `"bootstrapping"`, `"syncing"`, and `"error"`.
+Five states: `"disconnected"`, `"connecting"`, `"bootstrapping"`, `"syncing"`, and `"error"`.
 
 ```mermaid
 stateDiagram-v2
@@ -51,15 +51,15 @@ stateDiagram-v2
   syncing --> disconnected: stop()
 ```
 
-**Connecting** opens local storage (IndexedDB), reads the stored `schemaHash` and `lastSyncId`, and decides whether to do a full or local bootstrap. **Bootstrapping** loads the initial dataset into the local store and identity map (see [Bootstrap modes](#bootstrap-modes)). **Syncing** applies incoming delta packets from the WebSocket stream, persists them to IndexedDB, rebases pending local transactions, and advances `lastSyncId`. **Error** captures fatal failures; call `stop()` to return to `disconnected`.
+**Connecting** opens IndexedDB, reads `schemaHash` and `lastSyncId`, and decides on full or local bootstrap. **Bootstrapping** loads the initial dataset (see [Bootstrap modes](#bootstrap-modes)). **Syncing** applies delta packets, persists to IndexedDB, rebases pending transactions, and advances `lastSyncId`. **Error** captures fatal failures; call `stop()` to return to `disconnected`.
 
 ### Reconnecting and catch-up
 
-On WebSocket disconnect, the client returns to `connecting` and retries with exponential backoff. After reconnecting, it fetches all deltas after its stored `lastSyncId` via the HTTP catch-up endpoint, transitions back to `syncing`, and retries any pending outbox transactions.
+On disconnect, the client retries with exponential backoff. After reconnecting, it fetches deltas after `lastSyncId` via the HTTP catch-up endpoint, transitions to `syncing`, and retries pending outbox transactions.
 
 ## Bootstrap modes
 
-The `bootstrapMode` option on `SyncClientOptions` controls the initial load strategy.
+Set via `bootstrapMode` on `SyncClientOptions`.
 
 | Mode      | Behavior                                                                                                    |
 | --------- | ----------------------------------------------------------------------------------------------------------- |
@@ -67,11 +67,11 @@ The `bootstrapMode` option on `SyncClientOptions` controls the initial load stra
 | `"full"`  | Always performs a full bootstrap from the server, ignoring any local data.                                  |
 | `"local"` | Bootstraps from local data only. Useful offline or when displaying cached data before connecting.           |
 
-**Full bootstrap** streams an NDJSON (Newline-Delimited JSON) response of model rows from the server's bootstrap endpoint, writes each row to IndexedDB, hydrates the identity map, and sets `lastSyncId` from the final metadata line. **Local bootstrap** reads all model rows from IndexedDB into the identity map, then fetches and applies deltas from the server starting at the stored `lastSyncId`.
+**Full bootstrap** streams NDJSON model rows from the server, writes to IndexedDB, hydrates the identity map, and sets `lastSyncId`. **Local bootstrap** reads from IndexedDB into the identity map, then fetches deltas from the stored `lastSyncId`.
 
 ## Model load strategies
 
-Each model class declares a load strategy that controls when and how you sync it.
+Each model declares a load strategy that controls when it syncs.
 
 | Strategy                | Description                                                                                                                            |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -83,7 +83,7 @@ Each model class declares a load strategy that controls when and how you sync it
 
 ## Idempotency
 
-Every outgoing mutation carries an idempotency key composed of `clientId + clientTxId`. The server uses this key to deduplicate, so resending after a crash or network drop is safe.
+Every mutation carries an idempotency key (`clientId + clientTxId`). The server deduplicates, so resending after a crash or network drop is safe.
 
 ```ts
 {
@@ -94,11 +94,11 @@ Every outgoing mutation carries an idempotency key composed of `clientId + clien
 
 ## Schema hash and migrations
 
-`computeSchemaHash()` produces a deterministic 8-character hex hash from all model definitions. If the stored hash doesn't match the computed hash on startup, the client triggers a full re-bootstrap instead of applying deltas against an incompatible schema.
+`computeSchemaHash()` produces a deterministic 8-character hex hash from all model definitions. If the stored hash doesn't match on startup, the client triggers a full re-bootstrap.
 
 ## Wire primitives
 
-The transport layer uses three standard wire formats.
+Three wire formats:
 
 **Model row** (bootstrap and batch load):
 
@@ -138,4 +138,4 @@ The transport layer uses three standard wire formats.
 
 ## Sync groups and partial replication
 
-Sync groups control which data each client can see. Every model row can belong to one or more groups (workspace IDs, team IDs, user IDs), and the server filters bootstrap, batch, and delta responses by the client's subscribed groups. For setup details, see the [sync groups guide](/docs/guides/sync-groups).
+Sync groups control which data each client sees. Model rows belong to one or more groups (workspace IDs, team IDs, user IDs), and the server filters responses by the client's subscribed groups. See the [load strategies guide](/docs/guides/load-strategies).

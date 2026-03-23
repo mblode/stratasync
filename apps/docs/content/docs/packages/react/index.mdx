@@ -3,8 +3,6 @@ title: "@stratasync/react"
 description: React hooks and provider for connecting components to the Strata Sync engine.
 ---
 
-`@stratasync/react` provides React bindings for the Strata Sync engine, including a `SyncProvider` context component and hooks for reading models, querying data, monitoring connection state, and collaborating in real time.
-
 ## Installation
 
 ```bash
@@ -12,8 +10,6 @@ npm install @stratasync/react
 ```
 
 ### Peer dependencies
-
-Both packages must be installed alongside `@stratasync/react`.
 
 | Package | Required version       |
 | ------- | ---------------------- |
@@ -24,7 +20,7 @@ Both packages must be installed alongside `@stratasync/react`.
 
 ### 1. Set up the provider
 
-Wrap your component tree with `SyncProvider` and pass a configured sync client.
+Wrap your component tree with `SyncProvider`.
 
 ```tsx
 import { SyncProvider } from "@stratasync/react";
@@ -78,7 +74,7 @@ function TaskList() {
 
 ## SyncProvider
 
-`SyncProvider` creates a React context that holds the sync client and its reactive state. All sync hooks must be called within this provider.
+All sync hooks must be called within this provider.
 
 ```tsx
 <SyncProvider
@@ -101,7 +97,7 @@ function TaskList() {
 
 ### SyncContext
 
-The raw `SyncContext` object is exported for testing. You can provide a mock sync client directly.
+Exported for testing. Provide a mock sync client directly:
 
 ```tsx
 import { SyncContext } from "@stratasync/react";
@@ -114,24 +110,4 @@ import { SyncContext } from "@stratasync/react";
 
 ### Context value
 
-The provider exposes the following values via context, accessible through `useSyncClient`.
-
-| Field             | Type              | Description                                            |
-| ----------------- | ----------------- | ------------------------------------------------------ |
-| `client`          | `SyncClient`      | The sync client instance.                              |
-| `state`           | `SyncClientState` | Current sync state.                                    |
-| `connectionState` | `ConnectionState` | Current connection state.                              |
-| `lastSyncId`      | `number`          | Last sync ID from server.                              |
-| `backlog`         | `number`          | Pending transaction count.                             |
-| `error`           | `Error \| null`   | Last sync error.                                       |
-| `isReady`         | `boolean`         | `true` when state is `"syncing"`.                      |
-| `isSyncing`       | `boolean`         | `true` when state is `"syncing"` or `"bootstrapping"`. |
-| `isOffline`       | `boolean`         | `true` when connection state is `"disconnected"`.      |
-| `clientId`        | `string`          | Client instance identifier.                            |
-
-## Pages in this section
-
-- [Data hooks](/docs/packages/sync-react/hooks) -- React hooks for reading single models and querying collections from the sync engine.
-- [Connection hooks](/docs/packages/sync-react/connection) -- Monitor sync connection state, offline status, and pending transactions.
-- [Client access hooks](/docs/packages/sync-react/client-hooks) -- Access the sync client instance, readiness state, and sync lifecycle.
-- [Collaborative editing hooks](/docs/packages/sync-react/collaborative) -- Yjs collaborative document editing and presence management.
+Access via `useSyncClient()`. See [Hooks](/docs/packages/react/hooks) for all available hooks.

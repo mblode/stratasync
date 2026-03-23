@@ -3,7 +3,7 @@ title: YjsPresenceManager
 description: Manages presence signaling, view/edit tracking, and session state for collaborative editing.
 ---
 
-`YjsPresenceManager` handles presence signaling for collaborative editing. It tracks which documents you're viewing and editing, signals these states to the server, and receives session state updates with active participants.
+Tracks which documents you're viewing and editing, signals state to the server, and receives session updates with active participants.
 
 ## Creating an instance
 
@@ -27,19 +27,19 @@ const presenceManager = new YjsPresenceManager({
 
 ## Setting the transport
 
-Set a `YjsTransport` before signaling presence. See [YjsDocumentManager](/docs/packages/sync-y-doc/document-manager) for transport setup details.
+Set before signaling presence. See [YjsDocumentManager](/docs/packages/y-doc/document-manager) for transport setup.
 
 ```ts
 presenceManager.setTransport(yjsTransport);
 ```
 
-The presence manager listens for `session_state` messages and sends `doc_view` and `doc_focus` messages.
+Listens for `session_state` messages and sends `doc_view` and `doc_focus` messages.
 
 ## API reference
 
 ### startViewing
 
-Signals that you've opened a document. Sends a `doc_view` start message.
+Signals that you opened a document.
 
 ```ts
 import type { DocumentKey } from "@stratasync/y-doc";
@@ -59,7 +59,7 @@ Duplicate calls for the same document are ignored.
 
 ### stopViewing
 
-Signals that you've closed a document. Calls `blur` automatically if you're editing.
+Signals that you closed a document. Auto-calls `blur` if editing.
 
 ```ts
 presenceManager.stopViewing(docKey);
@@ -69,7 +69,7 @@ presenceManager.stopViewing(docKey);
 
 ### focus
 
-Signals that you've focused the editor for active editing. Calls `startViewing` automatically if you aren't viewing yet.
+Signals editor focus. Auto-calls `startViewing` if not already viewing.
 
 ```ts
 presenceManager.focus(docKey);
@@ -81,7 +81,7 @@ Sends a `doc_focus` message with state `"focus"`.
 
 ### blur
 
-Signals that you've blurred the editor and stopped editing.
+Signals editor blur.
 
 ```ts
 presenceManager.blur(docKey);
@@ -113,7 +113,7 @@ const editing: boolean = presenceManager.isEditing(docKey);
 
 ### getSessionState
 
-Returns the session state for a document, including active participants.
+Returns session state with active participants.
 
 ```ts
 import type { SessionState } from "@stratasync/y-doc";
@@ -159,7 +159,7 @@ interface SessionParticipant {
 
 ### onSessionStateChange
 
-Subscribes to session state changes for a document. The callback fires with the current state (if available), then on each change.
+Fires with current state, then on each change.
 
 ```ts
 const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
@@ -176,7 +176,7 @@ Returns an unsubscribe function.
 
 ### cleanup
 
-Stops viewing all documents, sends stop messages, and clears internal state.
+Stops viewing all documents and clears state.
 
 ```ts
 presenceManager.cleanup();
@@ -186,8 +186,6 @@ presenceManager.cleanup();
 
 ## Presence lifecycle
 
-A typical session follows this pattern.
-
 ```
 User opens document   --> startViewing()  --> doc_view "start" sent
 User clicks editor    --> focus()         --> doc_focus "focus" sent
@@ -195,7 +193,7 @@ User clicks elsewhere --> blur()          --> doc_focus "blur" sent
 User closes document  --> stopViewing()   --> doc_view "stop" sent
 ```
 
-The server aggregates these signals into `SessionState` updates and broadcasts them to all participants viewing the same document.
+The server aggregates signals into `SessionState` updates and broadcasts to all participants.
 
 ## Full example
 

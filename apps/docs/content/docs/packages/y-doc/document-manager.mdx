@@ -3,7 +3,7 @@ title: YjsDocumentManager
 description: Manages Y.Doc instances, sync protocol, connection state, and content change tracking for collaborative editing.
 ---
 
-`YjsDocumentManager` manages Yjs CRDT documents. It creates and caches `Y.Doc` instances keyed by `DocumentKey`, handles the Yjs sync protocol over a pluggable transport, tracks per-document connection state, and notifies listeners when content changes.
+Creates and caches `Y.Doc` instances by `DocumentKey`, handles the Yjs sync protocol, tracks connection state, and notifies on content changes.
 
 ## Creating an instance
 
@@ -30,7 +30,7 @@ const documentManager = new YjsDocumentManager(config);
 
 ## Setting the transport
 
-Set a `YjsTransport` before connecting to any documents.
+Set a transport before connecting to any documents.
 
 ```ts
 import { YjsTransportAdapter } from "@stratasync/transport-graphql";
@@ -39,13 +39,13 @@ const yjsTransport = new YjsTransportAdapter(/* ... */);
 documentManager.setTransport(yjsTransport);
 ```
 
-The transport sends sync messages (`yjs_sync_step1`, `yjs_update`) and receives server messages (`yjs_sync_step2`, remote updates, errors).
+Sends sync messages and receives updates and errors.
 
 ## API reference
 
 ### getDocument
 
-Returns the `Y.Doc` for a document key, creating one if needed.
+Returns the `Y.Doc` for a key, creating one if needed.
 
 ```ts
 import type { DocumentKey } from "@stratasync/y-doc";
@@ -63,7 +63,7 @@ const text = doc.getText("content");
 
 **Signature:** `getDocument(docKey: DocumentKey): Y.Doc`
 
-The manager caches Y.Doc instances per key -- subsequent calls return the same instance. Each document uses a shared text type named `"content"`.
+Cached per key: subsequent calls return the same instance. Each document uses a shared text type named `"content"`.
 
 ### connect
 
@@ -84,14 +84,14 @@ documentManager.connect(docKey, {
 
 | Property         | Type      | Default | Description                                              |
 | ---------------- | --------- | ------- | -------------------------------------------------------- |
-| `initialContent` | `string`  | --      | Initial text content to insert if the document is empty. |
-| `editing`        | `boolean` | --      | Whether to start in editing mode.                        |
+| `initialContent` | `string`  | -       | Initial text content to insert if the document is empty. |
+| `editing`        | `boolean` | -       | Whether to start in editing mode.                        |
 
-When you provide `initialContent` and the document's text type is empty (length 0), the manager inserts the content at position 0. This seeds a new collaborative field with the server value.
+If `initialContent` is provided and the text type is empty, it's inserted at position 0 to seed the field.
 
 ### disconnect
 
-Disconnects from a document and stops sending local updates. Presence is handled separately by `YjsPresenceManager`.
+Disconnects and stops sending updates. Presence is handled by `YjsPresenceManager`.
 
 ```ts
 documentManager.disconnect(docKey);
@@ -124,7 +124,7 @@ const state: DocumentConnectionState =
 
 ### onConnectionStateChange
 
-Subscribes to connection state changes for a document. The callback fires immediately with the current state, then on each change.
+Fires immediately with current state, then on each change.
 
 ```ts
 const unsubscribe = documentManager.onConnectionStateChange(docKey, (state) => {
@@ -142,7 +142,7 @@ Returns an unsubscribe function.
 
 ### onContentChange
 
-Subscribes to content changes for a document. The callback fires immediately with the current content, then on each local or remote update.
+Fires immediately with current content, then on each local or remote update.
 
 ```ts
 const unsubscribe = documentManager.onContentChange(docKey, (content) => {
@@ -170,7 +170,7 @@ Reads from `doc.getText("content").toString()`. Returns an empty string if the d
 
 ### applyRemoteUpdate
 
-Applies a remote Yjs update to a document. The update uses `"remote"` as the origin, which prevents re-sending to the server.
+Applies a remote update with `"remote"` origin to prevent re-sending.
 
 ```ts
 documentManager.applyRemoteUpdate(docKey, updateBytes);
@@ -180,7 +180,7 @@ documentManager.applyRemoteUpdate(docKey, updateBytes);
 
 ### applySnapshot
 
-Applies a full state snapshot to a document for initial hydration from persisted state.
+Applies a full state snapshot for initial hydration.
 
 ```ts
 documentManager.applySnapshot(docKey, snapshotBytes);
@@ -205,7 +205,7 @@ const updates: Uint8Array | null = documentManager.getUpdatesSince(
 
 ### destroy / destroyAll
 
-Cleans up document resources. `destroy` removes a single document; `destroyAll` removes all managed documents.
+`destroy` removes one document; `destroyAll` removes all.
 
 ```ts
 documentManager.destroy(docKey);
@@ -216,8 +216,6 @@ documentManager.destroyAll();
 
 ### Client messages (sent to server)
 
-These messages flow from the client to the server.
-
 | Type               | Message                    | Description                         |
 | ------------------ | -------------------------- | ----------------------------------- |
 | `"doc_view"`       | `DocViewMessage`           | Start or stop viewing a document.   |
@@ -226,8 +224,6 @@ These messages flow from the client to the server.
 | `"yjs_update"`     | `YjsUpdateToServerMessage` | Send a local Yjs update.            |
 
 ### Server messages (received from server)
-
-These messages flow from the server to the client.
 
 | Type                   | Message                   | Description                                                                  |
 | ---------------------- | ------------------------- | ---------------------------------------------------------------------------- |

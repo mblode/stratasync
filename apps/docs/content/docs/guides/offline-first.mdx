@@ -98,7 +98,7 @@ export function SyncIndicator() {
 }
 ```
 
-See [Connection hooks](/docs/packages/react/connection) for the full state reference.
+See [Hooks](/docs/packages/react/hooks) for the full state reference.
 
 ## Pending mutation tracking
 
@@ -185,7 +185,7 @@ Key behaviors:
 Follow these guidelines to build a polished offline experience.
 
 - Show sync status in your app shell so users know when they're offline and how many changes are pending.
-- Assume every mutation succeeds and show the result immediately -- handle failures as exceptions, not expected outcomes.
+- Assume every mutation succeeds and show the result immediately: handle failures as exceptions, not expected outcomes.
 - Structure mutations to be idempotent so replaying them after reconnection produces the same result.
 - Register a listener for `rebaseConflict` events to handle cases where an optimistic update conflicts with a server change. See [Conflict resolution](/docs/guides/conflict-resolution).
 - Use the `PendingGuard` pattern (shown above) to prevent data loss when the user closes the tab with unsynced mutations.
@@ -285,9 +285,3 @@ export default function TaskManager() {
   );
 }
 ```
-
-## Next steps
-
-- [Conflict resolution](/docs/guides/conflict-resolution) -- How the rebase algorithm handles concurrent edits.
-- [Collaborative editing](/docs/guides/collaborative-editing) -- Add real-time multi-user editing with Yjs.
-- [SSR bootstrap](/docs/guides/ssr-bootstrap) -- Pre-load data on the server for instant first paint.

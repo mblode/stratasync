@@ -3,15 +3,13 @@ title: "@stratasync/mobx"
 description: MobX reactivity adapter for observable model properties and automatic UI updates in Strata Sync.
 ---
 
-`@stratasync/mobx` implements the `ReactivityAdapter` interface from `@stratasync/core` using MobX. It makes synced model properties observable so MobX-powered React components re-render when data changes.
+Implements `ReactivityAdapter` using MobX. Makes synced model properties observable so components re-render when data changes.
 
 ## What it provides
 
-This package exports the adapter, a factory function, and re-exported core APIs.
-
-- **`mobxReactivityAdapter`** -- a pre-configured singleton implementing `ReactivityAdapter` with MobX observables, computed values, reactions, and batched updates
-- **`createMobXReactivity`** -- a factory function returning the same adapter (useful for explicit instantiation)
-- **Core re-exports** -- model decorators and base classes from `@stratasync/core` (see [Re-exported core APIs](#re-exported-core-apis))
+- **`mobxReactivityAdapter`**: a pre-configured singleton implementing `ReactivityAdapter` with MobX observables, computed values, reactions, and batched updates
+- **`createMobXReactivity`**: a factory function returning the same adapter (useful for explicit instantiation)
+- **Core re-exports**: model decorators and base classes from `@stratasync/core` (see [Re-exported core APIs](#re-exported-core-apis))
 
 ## Installation
 
@@ -39,17 +37,17 @@ const client = createSyncClient({
 });
 ```
 
-With this adapter installed, all model properties decorated with `@Property`, `@Reference`, `@ReferenceArray`, and others become MobX observables.
+All decorated model properties become MobX observables:
 
-- MobX `autorun`, `reaction`, and `when` track reads and re-execute on changes
-- React components wrapped with `observer()` from `mobx-react-lite` re-render when observed properties change
-- Batch updates from the sync engine run inside `runInAction` to avoid unnecessary intermediate renders
+- `autorun`, `reaction`, `when` track reads and re-execute on changes
+- Components wrapped with `observer()` re-render on observed changes
+- Sync engine batch updates run inside `runInAction`
 
 ## API reference
 
 ### mobxReactivityAdapter
 
-A singleton object implementing `ReactivityAdapter` from `@stratasync/core`.
+Singleton `ReactivityAdapter` implementation.
 
 ```ts
 import { mobxReactivityAdapter } from "@stratasync/mobx";
@@ -70,7 +68,7 @@ The adapter implements these methods:
 
 ### createMobXReactivity
 
-A factory function that returns the `mobxReactivityAdapter` singleton. Both approaches are equivalent.
+Factory that returns the `mobxReactivityAdapter` singleton. Both approaches are equivalent:
 
 ```ts
 import { createMobXReactivity, mobxReactivityAdapter } from "@stratasync/mobx";
@@ -85,7 +83,7 @@ const adapter2 = createMobXReactivity();
 
 ### ReactivityAdapter interface
 
-The adapter conforms to this interface from `@stratasync/core`.
+From `@stratasync/core`:
 
 ```ts
 interface ReactivityAdapter {
@@ -109,7 +107,7 @@ interface ReactivityAdapter {
 
 ## Re-exported core APIs
 
-For convenience, you can import model base classes and decorators directly from `@stratasync/mobx` instead of `@stratasync/core`.
+Import decorators and base classes directly from `@stratasync/mobx`:
 
 ```ts
 import {
@@ -123,7 +121,7 @@ import {
 } from "@stratasync/mobx";
 ```
 
-This lets you define models and configure reactivity from a single import.
+Define models and configure reactivity from a single import:
 
 ```ts
 import {
@@ -143,11 +141,11 @@ class Task extends Model {
 
 ## How it works
 
-The adapter wraps all model property storage in MobX observables, so any `autorun`, `reaction`, `computed`, or `observer` component that reads a property receives notification on change. Incoming sync updates (deltas, bootstrap data) are wrapped in `runInAction` to batch multiple field updates into a single reaction cycle.
+All model property storage uses MobX observables, so any `autorun`, `reaction`, `computed`, or `observer` that reads a property gets notified on change. Sync updates are wrapped in `runInAction` for batching.
 
 ## Architecture role
 
-`@stratasync/mobx` bridges `@stratasync/core` with MobX.
+Bridges `@stratasync/core` with MobX.
 
 ```
 sync-core (defines ReactivityAdapter interface)
@@ -155,4 +153,4 @@ sync-core (defines ReactivityAdapter interface)
         ^-- sync-client (uses adapter for observable state)
 ```
 
-The sync system is reactivity-agnostic. The same `ReactivityAdapter` interface can be implemented with other state management libraries.
+The sync system is reactivity-agnostic: the same interface works with other state libraries.

@@ -9,12 +9,12 @@
   --color-fd-muted-foreground: hsl(0, 0%, 45.1%);
   --color-fd-popover: hsl(0, 0%, 98%);
   --color-fd-popover-foreground: hsl(0, 0%, 15.1%);
-  --color-fd-card: hsl(0, 0%, 94.7%);
+  --color-fd-card: #f8f8f8;
   --color-fd-card-foreground: hsl(0, 0%, 3.9%);
   --color-fd-border: hsla(0, 0%, 80%, 50%);
   --color-fd-primary: hsl(0, 0%, 9%);
   --color-fd-primary-foreground: hsl(0, 0%, 98%);
-  --color-fd-secondary: hsl(0, 0%, 93.1%);
+  --color-fd-secondary: hsl(0, 0%, 100%);
   --color-fd-secondary-foreground: hsl(0, 0%, 9%);
   --color-fd-accent: hsla(0, 0%, 82%, 50%);
   --color-fd-accent-foreground: hsl(0, 0%, 9%);
@@ -42,4 +42,9 @@
 
 figure[class*="shiki"] {
   box-shadow: none;
+  --color-fd-card: hsl(0, 0%, 100%);
+}
+
+:where(table):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  --color-fd-card: hsl(0, 0%, 100%);
 }

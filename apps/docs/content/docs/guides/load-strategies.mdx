@@ -3,11 +3,9 @@ title: Load strategies
 description: Control when and how model data is fetched from the server with instant, lazy, partial, and other strategies.
 ---
 
-Load strategies control when each model's data arrives on the client. You set them per model via the `@ClientModel` decorator, and they determine bootstrap timing, transfer volume, and offline availability.
+Set per model via `@ClientModel`. Controls bootstrap timing, transfer volume, and offline availability.
 
 ## Decision tree
-
-Pick a strategy by walking this flowchart from top to bottom.
 
 ```mermaid
 flowchart TD
@@ -23,8 +21,6 @@ flowchart TD
 ```
 
 ## Strategy reference
-
-Each strategy offers a different balance between availability, bandwidth, and control.
 
 | Strategy              | Behavior                                                                               | Best for                                                                   | Trade-off                                                                   |
 | --------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -96,8 +92,6 @@ export class DraftMessage extends Model {
 
 ## Quick reference table
 
-Use this table to map common model types to strategies.
-
 | Model type         | Example             | Strategy               | Reasoning                    |
 | ------------------ | ------------------- | ---------------------- | ---------------------------- |
 | Core entities      | User, Team, Project | `instant`              | Always needed, small dataset |
@@ -109,15 +103,13 @@ Use this table to map common model types to strategies.
 
 ## Performance implications
 
-Three areas deserve attention when you assign strategies across your schema.
-
-- **Bootstrap payload size** -- The bootstrap includes all `instant` models and the relevant subset of `partial` models. If it's slow, move large models to `partial` or `lazy`, limit models via the `models` option in `prefetchBootstrap`, or enable compression in `serializeBootstrapSnapshot`.
-- **Identity map memory** -- Every loaded instance lives in the in-memory identity map. Use `partial` instead of `instant` for high-volume models, and set `usedForPartialIndexes` on models that serve only as foreign key targets.
-- **Delta stream filtering** -- The delta stream delivers updates for all accessible models, but the client applies deltas only for instances already in the identity map. `instant` models apply all deltas immediately; `lazy`, `partial`, and `explicitlyRequested` models apply deltas only for loaded instances; `local` models never receive deltas.
+- **Bootstrap payload size**: Includes all `instant` models and `partial` subsets. If slow, move large models to `partial`/`lazy`, limit via `prefetchBootstrap`, or enable compression.
+- **Identity map memory**: Every loaded instance stays in memory. Use `partial` for high-volume models.
+- **Delta stream filtering**: Deltas arrive for all accessible models but apply only for loaded instances. `local` models never receive deltas.
 
 ## Complete example
 
-This configuration shows all five strategies working together in a task management app.
+All five strategies in a task management app:
 
 ```ts
 // Always loaded -- small dataset
@@ -157,7 +149,7 @@ export class CommentDraft extends Model {
 
 ### Bootstrap flow for mixed strategies
 
-The server streams `instant` models first, then `partial` subsets, and skips `explicitlyRequested` and `local` models entirely. After seeding IndexedDB, the client opens a delta stream and fetches additional data on demand.
+The server streams `instant` models first, then `partial` subsets, skipping `explicitlyRequested` and `local`. The client then opens a delta stream and fetches more on demand.
 
 ```mermaid
 sequenceDiagram
@@ -181,9 +173,3 @@ sequenceDiagram
     Server-->>Client: Comment rows for task X
     Note over Client: Update partial index coverage
 ```
-
-## Next steps
-
-- [Model relationships](/docs/guides/model-relationships) -- How load strategies interact with relationship decorators.
-- [SSR bootstrap](/docs/guides/ssr-bootstrap) -- Prefetch bootstrap data on the server for instant first paint.
-- [sync-core models API](/docs/packages/sync-core/models) -- Full API reference for model decorators and options.

@@ -3,11 +3,9 @@ title: Query API
 description: Filter, sort, and paginate synced models with composable query operators.
 ---
 
-The query API filters, sorts, and paginates models from the identity map. All queries run in-memory against locally cached data.
+Filter, sort, and paginate models from the identity map. All queries run in-memory against locally cached data.
 
 ## QueryOptions
-
-Each query accepts an options object that controls filtering, sorting, and pagination.
 
 ```ts
 interface QueryOptions<T> {
@@ -21,15 +19,13 @@ interface QueryOptions<T> {
 
 | Option            | Type                     | Default | Description                                                 |
 | ----------------- | ------------------------ | ------- | ----------------------------------------------------------- |
-| `where`           | `(item: T) => boolean`   | --      | Filter predicate. Only items returning `true` are included. |
-| `orderBy`         | `(a: T, b: T) => number` | --      | Sort comparator (same as `Array.sort`).                     |
-| `limit`           | `number`                 | --      | Maximum results to return.                                  |
-| `offset`          | `number`                 | --      | Number of results to skip.                                  |
+| `where`           | `(item: T) => boolean`   | -       | Filter predicate. Only items returning `true` are included. |
+| `orderBy`         | `(a: T, b: T) => number` | -       | Sort comparator (same as `Array.sort`).                     |
+| `limit`           | `number`                 | -       | Maximum results to return.                                  |
+| `offset`          | `number`                 | -       | Number of results to skip.                                  |
 | `includeArchived` | `boolean`                | `false` | Include soft-deleted items (those with `archivedAt`).       |
 
 ## QueryResult
-
-Every query returns a `QueryResult` containing the matched items and pagination metadata.
 
 ```ts
 interface QueryResult<T> {
@@ -46,8 +42,6 @@ interface QueryResult<T> {
 | `totalCount` | Total count of matching items before pagination. |
 
 ## Basic usage
-
-Pass a model name and options to `client.query()`.
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -73,11 +67,11 @@ const result = await client.query<Task>("Task", {
 
 ## Filter operators
 
-`@stratasync/client` exports composable filter functions that return predicates for the `where` option.
+Composable filter functions that return predicates for `where`.
 
-### eq -- equality
+### eq: equality
 
-Matches items where a field strictly equals a value.
+Matches items where a field equals a value.
 
 ```ts
 import { eq } from "@stratasync/client";
@@ -89,7 +83,7 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `eq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-### neq -- not equal
+### neq: not equal
 
 Matches items where a field doesn't equal a value.
 
@@ -105,9 +99,9 @@ const result = await client.query<Task>("Task", {
 
 ### Comparison operators
 
-The `gt` and `lt` operators work with numeric fields. They return `false` for non-numeric comparisons.
+Work with numeric fields. Return `false` for non-numeric values.
 
-#### gt -- greater than
+#### gt: greater than
 
 ```ts
 import { gt } from "@stratasync/client";
@@ -119,7 +113,7 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `gt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-#### lt -- less than
+#### lt: less than
 
 ```ts
 import { lt } from "@stratasync/client";
@@ -131,9 +125,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `lt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
 
-### isIn -- set membership
+### isIn: set membership
 
-Matches items where a field's value exists in a given array. Uses a `Set` internally for O(1) lookups.
+Matches items where a field's value is in the given array. Uses a `Set` for O(1) lookups.
 
 ```ts
 import { isIn } from "@stratasync/client";
@@ -145,9 +139,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `isIn<T, K extends keyof T>(field: K, values: T[K][]): (item: T) => boolean`
 
-### contains -- substring match
+### contains: substring match
 
-Checks whether a string field includes a substring. Returns `false` for non-string fields.
+Checks if a string field includes a substring.
 
 ```ts
 import { contains } from "@stratasync/client";
@@ -165,9 +159,9 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `contains<T>(field: keyof T, substring: string, caseSensitive?: boolean): (item: T) => boolean`
 
-### matches -- regex match
+### matches: regex match
 
-Tests a string field against a regular expression. Returns `false` for non-string fields.
+Tests a string field against a regular expression.
 
 ```ts
 import { matches } from "@stratasync/client";
@@ -181,9 +175,9 @@ const result = await client.query<Task>("Task", {
 
 ## Logical combinators
 
-Combine filter operators with `and`, `or`, and `not` to build compound predicates.
+Build compound predicates with `and`, `or`, and `not`.
 
-### and -- combine with AND
+### and: combine with AND
 
 ```ts
 import { and, eq, gt } from "@stratasync/client";
@@ -195,7 +189,7 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `and<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
 
-### or -- combine with OR
+### or: combine with OR
 
 ```ts
 import { or, eq } from "@stratasync/client";
@@ -207,7 +201,7 @@ const result = await client.query<Task>("Task", {
 
 **Signature:** `or<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
 
-### not -- negate a filter
+### not: negate a filter
 
 ```ts
 import { not, eq } from "@stratasync/client";
@@ -221,7 +215,7 @@ const result = await client.query<Task>("Task", {
 
 ## Composing complex queries
 
-Nest combinators to build complex filters.
+Nest combinators freely:
 
 ```ts
 import { and, or, eq, gt, contains, not } from "@stratasync/client";
@@ -239,11 +233,9 @@ const result = await client.query<Task>("Task", {
 
 ## Sort utilities
 
-Use `sortBy` and `combineSorts` to build comparator functions for `orderBy`.
-
 ### sortBy
 
-Creates a comparator for a single field. Supports string, number, and Date comparisons. Sorts null/undefined values last.
+Comparator for a single field. Supports string, number, and Date. Sorts null/undefined last.
 
 ```ts
 import { sortBy } from "@stratasync/client";
@@ -257,7 +249,7 @@ const result = await client.query<Task>("Task", {
 
 ### combineSorts
 
-Chains multiple comparators. The first comparator defines the primary sort; subsequent ones break ties.
+Chains comparators. First defines the primary sort; subsequent ones break ties.
 
 ```ts
 import { sortBy, combineSorts } from "@stratasync/client";
@@ -271,7 +263,7 @@ const result = await client.query<Task>("Task", {
 
 ## Archived items
 
-Queries exclude items with a truthy `archivedAt` field by default. Set `includeArchived: true` to override this behavior.
+Queries exclude items with `archivedAt` by default. Set `includeArchived: true` to include them.
 
 ```ts
 const result = await client.query<Task>("Task", {

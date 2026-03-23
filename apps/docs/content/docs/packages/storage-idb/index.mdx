@@ -3,18 +3,16 @@ title: "@stratasync/storage-idb"
 description: IndexedDB storage adapter for offline-first client-side persistence in Strata Sync.
 ---
 
-`@stratasync/storage-idb` implements the `StorageAdapter` interface using IndexedDB. It persists synced model data, the transaction outbox, sync metadata, partial indexes, and sync actions to the browser, enabling offline-first operation and instant startup from cached data.
+Implements `StorageAdapter` using IndexedDB. Persists model data, the outbox, sync metadata, partial indexes, and sync actions for offline-first operation and instant startup.
 
 ## What it provides
 
-This package includes the adapter, a database manager, and granular store operations.
-
-- **`createIndexedDbStorage`** -- factory function that creates a configured `StorageAdapter` instance
-- **`IndexedDbStorageAdapter`** -- the class implementing the full `StorageAdapter` interface
-- **`DatabaseManager`** -- manages a registry of workspace databases for multi-user/multi-version support
-- **Store operations** -- typed functions for model rows, metadata, outbox transactions, partial indexes, and sync actions
-- **Schema migrations** -- automatic IndexedDB schema upgrades when the model schema changes
-- **Store name utilities** -- deterministic hashing for store and database names
+- **`createIndexedDbStorage`**: factory function that creates a configured `StorageAdapter` instance
+- **`IndexedDbStorageAdapter`**: the class implementing the full `StorageAdapter` interface
+- **`DatabaseManager`**: manages a registry of workspace databases for multi-user/multi-version support
+- **Store operations**: typed functions for model rows, metadata, outbox transactions, partial indexes, and sync actions
+- **Schema migrations**: automatic IndexedDB schema upgrades when the model schema changes
+- **Store name utilities**: deterministic hashing for store and database names
 
 ## Installation
 
@@ -38,11 +36,9 @@ const client = createSyncClient({
 });
 ```
 
-The sync client opens the storage adapter during initialization. You don't need to call `open()` manually unless you're using the adapter outside of the sync client.
+The sync client opens the adapter during initialization. Call `open()` manually only when using the adapter outside the sync client.
 
 ## StorageAdapter interface
-
-The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/client`.
 
 ### Lifecycle
 
@@ -101,7 +97,7 @@ The adapter satisfies the `StorageAdapter` contract expected by `@stratasync/cli
 
 ### StorageOptions
 
-The sync client passes these options to the `open()` method.
+Passed to `open()` by the sync client:
 
 ```ts
 interface StorageOptions {
@@ -218,13 +214,11 @@ A top-level `stratasync_databases` database tracks all workspace databases:
 
 ## Schema migrations
 
-When the model schema changes (detected via `computeSchemaHash` from `@stratasync/core`), the adapter automatically increments the IndexedDB version, creates new object stores for changed models, creates indexes for `@Property({ indexed: true })` fields, and preserves existing stores for unchanged models.
-
-This happens transparently during `open()`. The adapter doesn't delete old model stores -- they become unreachable but remain in the database until you clear it.
+When the schema changes (via `computeSchemaHash`), the adapter increments the IndexedDB version, creates new object stores, adds indexes for `@Property({ indexed: true })` fields, and preserves unchanged stores. This happens transparently during `open()`.
 
 ## Multi-workspace support
 
-The adapter supports multiple users and versions through deterministic database naming.
+Deterministic database naming supports multiple users and versions.
 
 ```ts
 import { computeWorkspaceDatabaseName } from "@stratasync/storage-idb";
@@ -237,13 +231,13 @@ const dbName = computeWorkspaceDatabaseName({
 // Returns: "ss_<32-char-hash>"
 ```
 
-Each user/version combination gets its own IndexedDB database, so switching accounts or versions doesn't require clearing data.
+Each user/version combination gets its own database, so switching accounts doesn't require clearing data.
 
 ## Utility exports
 
 ### Store name functions
 
-These functions generate deterministic names for stores and databases.
+Deterministic names for stores and databases:
 
 ```ts
 import {
@@ -261,7 +255,7 @@ import {
 
 ### Granular store operations
 
-For testing and advanced use, the package exports individual store operation functions.
+For testing and advanced use:
 
 ```ts
 import {
@@ -298,11 +292,11 @@ import {
 } from "@stratasync/storage-idb";
 ```
 
-The package exports additional granular operations for metadata fields, outbox management, and partial index utilities beyond those shown here.
+Additional granular operations for metadata, outbox, and partial indexes are also available.
 
 ## Architecture role
 
-`@stratasync/storage-idb` provides client-side persistence for the sync client.
+Provides client-side persistence.
 
 ```
 sync-core (defines Transaction, SyncAction types)
@@ -310,4 +304,4 @@ sync-core (defines Transaction, SyncAction types)
         ^-- sync-client (uses adapter for offline persistence)
 ```
 
-The sync client depends on a `StorageAdapter` implementation at runtime. The same interface can be implemented with other storage backends (SQLite, in-memory stores).
+The same interface can be implemented with other backends (SQLite, in-memory).

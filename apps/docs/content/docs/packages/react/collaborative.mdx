@@ -3,15 +3,13 @@ title: Collaborative editing hooks
 description: React hooks for Yjs collaborative document editing and presence management.
 ---
 
-The collaborative editing hooks integrate Yjs CRDT documents with React components. They require the `yjs` peer dependency and a configured Yjs transport on the sync client.
+Integrate Yjs CRDT documents with React components. Requires the `yjs` peer dependency and a configured Yjs transport.
 
 ## Prerequisites
 
-Both hooks require three things to function.
-
-1. The `yjs` peer dependency installed in your project
-2. A Yjs transport configured on the sync client via `yjsTransport`
-3. The sync client accessible via `SyncProvider`
+1. `yjs` peer dependency installed
+2. Yjs transport configured via `yjsTransport`
+3. Sync client accessible via `SyncProvider`
 
 ```ts
 import { createSyncClient } from "@stratasync/client";
@@ -28,7 +26,7 @@ If `client.yjs` is `undefined` (no Yjs transport configured), `useYjsDocument` s
 
 ## useYjsDocument
 
-Manages a Yjs collaborative document lifecycle, including connection, content tracking, and session awareness.
+Manages a Yjs document lifecycle: connection, content tracking, and session awareness.
 
 ```tsx
 import { useYjsDocument } from "@stratasync/react";
@@ -73,7 +71,7 @@ function DescriptionEditor({ taskId }: { taskId: string }) {
 
 ### DocumentKey
 
-Identifies a collaborative field on a model instance.
+Identifies a collaborative field on a model.
 
 ```ts
 interface DocumentKey {
@@ -87,9 +85,9 @@ interface DocumentKey {
 
 | Option           | Type      | Default | Description                                      |
 | ---------------- | --------- | ------- | ------------------------------------------------ |
-| `initialContent` | `string`  | --      | Initial content if the document is empty.        |
+| `initialContent` | `string`  | -       | Initial content if the document is empty.        |
 | `autoConnect`    | `boolean` | `false` | Automatically connect when the component mounts. |
-| `editing`        | `boolean` | --      | Start in editing mode (signals presence).        |
+| `editing`        | `boolean` | -       | Start in editing mode (signals presence).        |
 | `skip`           | `boolean` | `false` | Skip connecting entirely.                        |
 
 ### UseYjsDocumentResult
@@ -129,7 +127,7 @@ type YjsConnectionState =
 
 ## useYjsPresence
 
-Manages presence signaling for collaborative editing, including focus tracking and visibility detection.
+Presence signaling with focus tracking and visibility detection.
 
 ```tsx
 import { useYjsPresence } from "@stratasync/react";
@@ -174,7 +172,7 @@ function TaskEditor({ taskId }: { taskId: string }) {
 
 ### Auto-tracking with getRef
 
-The `getRef` callback attaches event listeners and an `IntersectionObserver` to the referenced element.
+Attaches event listeners and an `IntersectionObserver` to the element.
 
 ```tsx
 function AutoTrackedEditor({ taskId }: { taskId: string }) {
@@ -191,4 +189,4 @@ function AutoTrackedEditor({ taskId }: { taskId: string }) {
 }
 ```
 
-With `trackVisibility` enabled, viewing starts when the element becomes visible (intersection ratio > 0.1) and stops when it leaves the viewport. With `trackFocus` enabled, editing starts on `focusin` inside the container and stops on `focusout` when focus leaves the container.
+`trackVisibility`: viewing starts when visible (intersection ratio > 0.1) and stops when leaving the viewport. `trackFocus`: editing starts on `focusin` and stops on `focusout`.

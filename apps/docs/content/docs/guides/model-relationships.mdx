@@ -3,11 +3,9 @@ title: Model relationships
 description: Define references, collections, and back-references between models with lazy and eager loading.
 ---
 
-Strata Sync models support rich relationships through decorators. You define foreign keys, inverse collections, and ordered lists using six relationship decorators.
+Define foreign keys, inverse collections, and ordered lists with six relationship decorators.
 
 ## Relationship decorators at a glance
-
-This table summarizes every relationship decorator, its direction, and whether it creates a foreign key.
 
 | Decorator              | Direction            | Cardinality  | Creates foreign key?      |
 | ---------------------- | -------------------- | ------------ | ------------------------- |
@@ -18,9 +16,9 @@ This table summarizes every relationship decorator, its direction, and whether i
 | `@ReferenceArray`      | Model A -> Model B[] | Ordered list | Yes (array field on A)    |
 | `@ReferenceCollection` | Alias for @OneToMany | One-to-many  | No                        |
 
-## @Reference -- belongs to
+## @Reference: belongs to
 
-`@Reference` creates a one-to-one relationship where the current model holds the foreign key.
+One-to-one relationship where the current model holds the foreign key.
 
 ```ts
 import { Model, ClientModel, Property, Reference } from "@stratasync/core";
@@ -58,15 +56,15 @@ declare creatorId: string | null;
 | Option       | Type      | Default     | Description                       |
 | ------------ | --------- | ----------- | --------------------------------- |
 | `foreignKey` | `string`  | `${name}Id` | Name of the foreign key property  |
-| `nullable`   | `boolean` | --          | Whether the reference can be null |
+| `nullable`   | `boolean` | -           | Whether the reference can be null |
 | `indexed`    | `boolean` | auto        | Whether to index the foreign key  |
-| `lazy`       | `boolean` | --          | Whether to lazily hydrate         |
+| `lazy`       | `boolean` | -           | Whether to lazily hydrate         |
 
 See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
-## @ManyToOne -- explicit many-to-one
+## @ManyToOne: explicit many-to-one
 
-`@ManyToOne` works like `@Reference` but accepts a model name string instead of a factory function.
+Like `@Reference` but accepts a model name string.
 
 ```ts
 import { Model, ClientModel, Property, ManyToOne } from "@stratasync/core";
@@ -95,13 +93,13 @@ export class Comment extends Model {
 }
 ```
 
-Use `@ManyToOne` when you want to reference a model by string name. Use `@Reference` when you prefer the factory function pattern, which helps with circular imports. Both decorators produce identical metadata and runtime behavior.
+Use `@ManyToOne` for string-based references, `@Reference` for factory functions (helps with circular imports). Both produce identical metadata.
 
 See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
-## @OneToMany -- inverse collection
+## @OneToMany: inverse collection
 
-`@OneToMany` defines the inverse side of a many-to-one relationship. It creates a `LazyCollection` that resolves all models pointing to the current instance via their foreign key.
+The inverse side of a many-to-one. Creates a `LazyCollection` of models pointing to the current instance via foreign key.
 
 ```ts
 import { Model, ClientModel, Property, OneToMany } from "@stratasync/core";
@@ -124,15 +122,15 @@ export class Project extends Model {
 
 | Option       | Type      | Default | Description                        |
 | ------------ | --------- | ------- | ---------------------------------- |
-| `foreignKey` | `string`  | --      | Foreign key on the child model     |
-| `indexed`    | `boolean` | --      | Whether to use index for lookups   |
-| `nullable`   | `boolean` | --      | Whether the collection can be null |
+| `foreignKey` | `string`  | -       | Foreign key on the child model     |
+| `indexed`    | `boolean` | -       | Whether to use index for lookups   |
+| `nullable`   | `boolean` | -       | Whether the collection can be null |
 
 See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
-## @BackReference -- computed inverse
+## @BackReference: computed inverse
 
-`@BackReference` creates a computed inverse of a reference relationship. Unlike `@OneToMany`, it doesn't create a collection -- it represents the inverse lookup for documentation and tooling.
+A computed inverse of a reference. Unlike `@OneToMany`, doesn't create a collection: it represents the inverse lookup.
 
 ```ts
 import { Model, ClientModel, Property, BackReference } from "@stratasync/core";
@@ -159,13 +157,13 @@ export class User extends Model {
 
 | Option       | Type     | Default | Description                          |
 | ------------ | -------- | ------- | ------------------------------------ |
-| `foreignKey` | `string` | --      | Foreign key on the referencing model |
+| `foreignKey` | `string` | -       | Foreign key on the referencing model |
 
 See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
-## @ReferenceArray -- ordered list of references
+## @ReferenceArray: ordered list of references
 
-`@ReferenceArray` stores an ordered list of references to other models. The array field on the model preserves insertion order.
+An ordered list of references. Preserves insertion order.
 
 ```ts
 import { Model, ClientModel, Property, ReferenceArray } from "@stratasync/core";
@@ -198,13 +196,13 @@ declare members: unknown[];
 
 | Option    | Type     | Default | Description                      |
 | --------- | -------- | ------- | -------------------------------- |
-| `through` | `string` | --      | Join model name for many-to-many |
+| `through` | `string` | -       | Join model name for many-to-many |
 
 See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
-## @ReferenceCollection -- unordered set
+## @ReferenceCollection: unordered set
 
-`@ReferenceCollection` is an alias for `@OneToMany`. Use it when you want to emphasize that the collection is unordered.
+Alias for `@OneToMany`. Use when the collection is unordered.
 
 ```ts
 import {
@@ -232,7 +230,7 @@ See [Decorators](/docs/packages/core/decorators) for the full API reference.
 
 ## Lazy loading vs. eager loading
 
-By default, the client resolves references eagerly from the identity map on access. Use the `lazy` option to defer hydration until you explicitly need the referenced model.
+By default, references resolve eagerly from the identity map. Use `lazy` to defer hydration.
 
 ```ts
 // Eager (default): resolved from identity map on access
@@ -292,9 +290,3 @@ const userTeam = assignee.team; // Same team object (referential equality)
 ```
 
 See [Decorators](/docs/packages/core/decorators) for a complete domain model example.
-
-## Next steps
-
-- [Load Strategies](/docs/guides/load-strategies) -- Control when relationship targets load.
-- [Decorators](/docs/packages/core/decorators) -- Full API reference for all decorators.
-- [Quick Start](/docs/quick-start) -- Build a working app with model relationships.

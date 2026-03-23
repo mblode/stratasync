@@ -1,8 +1,0 @@
-{
-  "name": "docs-old",
-  "private": true,
-  "type": "module",
-  "devDependencies": {
-    "ultracite": "^7.3.2"
-  }
-}

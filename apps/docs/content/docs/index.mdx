@@ -3,37 +3,31 @@ title: Introduction
 description: Build instant, offline-capable apps that sync with Strata Sync.
 ---
 
-Build instant, offline-capable apps that sync. Strata Sync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Every read comes from a local store, so the UI stays fast. Every write enters an optimistic outbox, so mutations feel instant. A monotonic sync log on the server ensures all clients converge to the same state.
+A local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Reads come from a local store, so the UI stays fast. Writes enter an optimistic outbox, so mutations feel instant. A monotonic sync log on the server ensures all clients converge.
 
-The sync protocol follows the server-sequenced architecture [Linear](https://linear.app) described but never open-sourced. Strata Sync is an independent implementation extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
+Based on the server-sequenced architecture [Linear](https://linear.app) described but never open-sourced. Extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
 
 ## Key features
 
-Strata Sync provides a focused set of capabilities for building collaborative, offline-ready applications.
-
-- **Local-first reads** -- render from IndexedDB with zero network round-trips
-- **Server-sequenced consistency** -- a monotonic `syncId` orders all changes globally
-- **MobX reactivity** -- field changes re-render only the observing components
-- **Offline writes** -- a persistent outbox replays mutations on reconnect
-- **Rich-text collaboration** -- Yjs CRDT (Conflict-free Replicated Data Type) integration for multi-user editing
-- **Undo/redo** -- transaction-based history tracking
-- **Field-level conflict resolution** -- LWW (Last-Writer-Wins) rebase with configurable strategies
-- **Partial replication** -- load strategies control eager vs. on-demand sync
-- **Type-safe schema** -- decorators define models; typed hooks bind them to React
+- **Local-first reads**: render from IndexedDB, no network round-trips
+- **Server-sequenced consistency**: a monotonic `syncId` orders all changes globally
+- **MobX reactivity**: only re-renders components that read changed fields
+- **Offline writes**: a persistent outbox replays mutations on reconnect
+- **Rich-text collaboration**: Yjs CRDT for multi-user editing
+- **Undo/redo**: transaction-based history tracking
+- **Field-level conflict resolution**: LWW rebase with configurable strategies
+- **Partial replication**: load strategies control eager vs. on-demand sync
+- **Type-safe schema**: decorators define models, typed hooks bind them to React
 
 ## How it works
 
-Strata Sync follows a five-step workflow from schema to sync.
-
 1. Define models with decorators (`@ClientModel`, `@Property`, `@ManyToOne`, `@OneToMany`).
-2. Create a sync client by composing storage, transport, and reactivity adapters.
-3. Wrap your React tree with `SyncProvider` to manage the client lifecycle.
-4. Read data with hooks (`useModel`, `useQuery`) that return reactive, auto-updating results.
-5. Write data through `create`, `update`, and `delete` -- applied optimistically and synced in the background.
+2. Create a sync client with storage, transport, and reactivity adapters.
+3. Wrap your React tree with `SyncProvider`.
+4. Read data with hooks (`useModel`, `useQuery`) that auto-update.
+5. Write data with `create`, `update`, and `delete`: applied optimistically, synced in the background.
 
 ## How Strata Sync compares
-
-The table below highlights the most-differentiated aspects of each solution.
 
 | Feature             | Strata Sync            | Linear (proprietary)   | TanStack DB           | InstantDB            | PowerSync            | Zero                 |
 | ------------------- | ---------------------- | ---------------------- | --------------------- | -------------------- | -------------------- | -------------------- |

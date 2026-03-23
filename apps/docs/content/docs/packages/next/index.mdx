@@ -3,36 +3,30 @@ title: "@stratasync/next"
 description: Next.js App Router integration with server-side bootstrap prefetching and client-side sync provider.
 ---
 
-`@stratasync/next` integrates Strata Sync with the Next.js App Router. It provides server-side bootstrap prefetching for fast page loads, a client-side `NextSyncProvider` that manages initialization, and re-exports all hooks from `@stratasync/react`.
+Server-side bootstrap prefetching for fast page loads, a client-side `NextSyncProvider`, and re-exported hooks from `@stratasync/react`.
 
 ## What it provides
 
-Each entry point exposes a distinct set of utilities.
-
 **Client-side (default import / `@stratasync/next/client`):**
 
-- `NextSyncProvider` -- App Router compatible provider with loading and error states
-- Most hooks from `@stratasync/react` (re-exported with `"use client"` directive). `useModelState` is **not** re-exported -- import it directly from `@stratasync/react` if needed.
+- `NextSyncProvider`: App Router compatible provider with loading and error states
+- Most hooks from `@stratasync/react` (re-exported with `"use client"` directive). `useModelState` is **not** re-exported: import it directly from `@stratasync/react` if needed.
 - Bootstrap decoding and seeding utilities
 - Stale checking for prefetched data
 
 **Server-side (`@stratasync/next/server`):**
 
-- `prefetchBootstrap` -- fetch initial data on the server
-- `prefetchModels` -- selective model prefetching
-- `serializeBootstrapSnapshot` / `encodeBootstrapSnapshot` -- serialize for transfer to client
+- `prefetchBootstrap`: fetch initial data on the server
+- `prefetchModels`: selective model prefetching
+- `serializeBootstrapSnapshot` / `encodeBootstrapSnapshot`: serialize for transfer to client
 
 ## Installation
-
-Install the package with npm.
 
 ```bash
 npm install @stratasync/next
 ```
 
 ### Peer dependencies
-
-You need these peer dependencies installed alongside `@stratasync/next`.
 
 | Package | Required version       |
 | ------- | ---------------------- |
@@ -41,7 +35,7 @@ You need these peer dependencies installed alongside `@stratasync/next`.
 
 ## Package exports
 
-The package uses separate entry points for server and client code.
+Separate entry points for server and client:
 
 ```ts
 // Client-side (default) -- includes "use client" directive
@@ -57,14 +51,14 @@ import {
 } from "@stratasync/next/server";
 ```
 
-The conditional export in `package.json` resolves automatically:
+The `package.json` export resolves automatically:
 
 - **Browser:** resolves to `./dist/client.js`
 - **Node.js:** resolves to `./dist/server.js`
 
 ## Quick start
 
-Set up the provider and start using hooks. For SSR bootstrap prefetching, see [SSR and bootstrap](/docs/guides/ssr-bootstrap).
+For SSR bootstrap prefetching, see [SSR and bootstrap](/docs/guides/ssr-bootstrap).
 
 ```tsx
 // app/providers.tsx
@@ -86,7 +80,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-Then wrap your layout and use hooks in client components.
+Use hooks in client components:
 
 ```tsx
 // app/tasks/page.tsx
@@ -113,7 +107,7 @@ export default function TasksPage() {
 
 ## Architecture role
 
-`@stratasync/next` sits at the top of the dependency graph.
+Sits at the top of the dependency graph.
 
 ```
 sync-core
@@ -122,9 +116,4 @@ sync-core
               ^-- sync-next (client + server entry points)
 ```
 
-The server entry point imports only from `@stratasync/core` and `@stratasync/client` (no React). The client entry point re-exports everything from `@stratasync/react` with the `"use client"` directive.
-
-## Pages in this section
-
-- [Server utilities](/docs/packages/sync-next/server) -- Server-side bootstrap prefetching and serialization for Next.js Server Components.
-- [Client utilities](/docs/packages/sync-next/client) -- Client-side Next.js provider, bootstrap decoding, and re-exported React hooks.
+Server entry point imports from `@stratasync/core` and `@stratasync/client` only (no React). Client entry point re-exports `@stratasync/react` with `"use client"`.

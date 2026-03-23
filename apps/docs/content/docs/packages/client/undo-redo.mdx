@@ -3,7 +3,7 @@ title: Undo and redo
 description: Client-side undo and redo with full transaction history.
 ---
 
-The sync client tracks an undo/redo stack so you can reverse and replay local mutations. Every create, update, delete, archive, and unarchive operation records a history entry.
+Every mutation records a history entry. Undo reverses it; redo replays it.
 
 ## Basic usage
 
@@ -24,8 +24,6 @@ if (client.canRedo()) {
 
 ## API reference
 
-These methods are available on the sync client instance.
-
 ### canUndo()
 
 Returns `true` if the undo stack has entries.
@@ -44,17 +42,17 @@ const canRedo: boolean = client.canRedo();
 
 ### undo()
 
-Pops the last entry from the undo stack, applies the inverse operation, and pushes the entry to the redo stack.
+Applies the inverse of the last mutation and moves it to the redo stack.
 
 ```ts
 await client.undo();
 ```
 
-If the undo operation fails (due to a conflict, for example), the client pushes the entry back onto the undo stack and throws the error.
+On failure, the entry stays on the undo stack and the error is thrown.
 
 ### redo()
 
-Pops the last entry from the redo stack, re-applies the original operation, and pushes the entry back to the undo stack.
+Re-applies the last undone mutation and moves it back to the undo stack.
 
 ```ts
 await client.redo();
@@ -62,25 +60,23 @@ await client.redo();
 
 ## How it works
 
-Each mutation creates a history entry containing both the inverse (undo) and original (redo) operations. Calling `undo()` executes the inverse as a new transaction through the outbox, with history recording suppressed so it doesn't create its own entry. `redo()` follows the same process in reverse.
+Each mutation creates a history entry with inverse and original operations. `undo()` executes the inverse as a new outbox transaction (with history recording suppressed). `redo()` works the same way in reverse.
 
 See [Transactions](/docs/packages/core/transactions) for the complete action-to-inverse mapping.
 
 ## History and the outbox
 
-Undo/redo operations create real transactions that flow through the outbox to the server — they aren't client-only rollbacks.
+Undo/redo operations create real transactions that sync to the server: not client-only rollbacks.
 
-- The client persists and syncs undo operations like regular mutations
-- Other connected clients see the undo effect as a normal update, delete, or insert
-- If the server rejects a transaction, the client removes the corresponding history entry from both stacks
+- Undo operations persist and sync like regular mutations
+- Other clients see the undo as a normal update, delete, or insert
+- Server rejection removes the history entry from both stacks
 
 ## Stack behavior
 
-The stacks follow standard undo/redo semantics.
-
-- Making a new mutation clears the redo stack
-- Calling `clearAll()` clears both stacks
-- The client removes history entries if the server rejects their associated transaction
+- New mutations clear the redo stack
+- `clearAll()` clears both stacks
+- Server rejection removes the associated history entry
 
 ## React integration
 

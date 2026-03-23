@@ -3,7 +3,7 @@ title: Server utilities
 description: Server-side bootstrap prefetching and serialization for Next.js Server Components.
 ---
 
-The server utilities in `@stratasync/next/server` prefetch sync data on the server and pass it to client components. This eliminates the client-side bootstrap network request and reduces time-to-interactive.
+Prefetch sync data on the server and pass it to client components, eliminating the client-side bootstrap request.
 
 ```ts
 import {
@@ -16,7 +16,7 @@ import {
 
 ## prefetchBootstrap
 
-Fetches the full bootstrap dataset from the sync server. Returns a `BootstrapSnapshot` containing all model rows, sync metadata, and schema information.
+Fetches the full bootstrap dataset from the sync server.
 
 ```tsx
 // app/dashboard/page.tsx (Server Component)
@@ -43,21 +43,17 @@ export default async function DashboardPage() {
 
 ### PrefetchBootstrapOptions
 
-These options configure the bootstrap prefetch request.
-
 | Option          | Type                     | Default  | Description                                            |
 | --------------- | ------------------------ | -------- | ------------------------------------------------------ |
 | `endpoint`      | `string`                 | Required | Sync server endpoint URL.                              |
-| `authorization` | `string`                 | --       | Authorization header value (such as `"Bearer token"`). |
-| `headers`       | `Record<string, string>` | --       | Additional request headers.                            |
-| `models`        | `string[]`               | --       | Specific models to fetch (all if omitted).             |
-| `groups`        | `string[]`               | --       | Sync groups to include.                                |
-| `schemaHash`    | `string`                 | --       | Expected schema hash for validation.                   |
+| `authorization` | `string`                 | -        | Authorization header value (such as `"Bearer token"`). |
+| `headers`       | `Record<string, string>` | -        | Additional request headers.                            |
+| `models`        | `string[]`               | -        | Specific models to fetch (all if omitted).             |
+| `groups`        | `string[]`               | -        | Sync groups to include.                                |
+| `schemaHash`    | `string`                 | -        | Expected schema hash for validation.                   |
 | `timeout`       | `number`                 | `10000`  | Request timeout in milliseconds.                       |
 
 ### BootstrapSnapshot
-
-The snapshot contains the complete bootstrap response: all model rows, sync cursor positions, and metadata for staleness checking.
 
 ```ts
 interface BootstrapSnapshot {
@@ -74,7 +70,7 @@ interface BootstrapSnapshot {
 
 ## serializeBootstrapSnapshot
 
-Serializes a bootstrap snapshot for transfer across the Server Component boundary. Supports optional gzip compression.
+Serializes a snapshot for transfer across the Server Component boundary. Supports gzip compression.
 
 ```ts
 const payload = await serializeBootstrapSnapshot(snapshot);
@@ -87,15 +83,11 @@ const payload = await serializeBootstrapSnapshot(snapshot);
 
 ### SerializeBootstrapOptions
 
-These options control snapshot serialization behavior.
-
 | Option     | Type      | Default                                   | Description                        |
 | ---------- | --------- | ----------------------------------------- | ---------------------------------- |
 | `compress` | `boolean` | `true` (if `CompressionStream` available) | Whether to gzip-compress the data. |
 
 ### BootstrapSnapshotPayload
-
-The payload wraps the serialized data with encoding metadata.
 
 ```ts
 interface BootstrapSnapshotPayload {
@@ -105,11 +97,11 @@ interface BootstrapSnapshotPayload {
 }
 ```
 
-When compression is available (Node.js 18+ / modern browsers), the function gzip-compresses and base64-encodes the data. This reduces the size of the serialized prop passed through the component boundary.
+When compression is available (Node.js 18+), data is gzip-compressed and base64-encoded to reduce prop size.
 
 ## encodeBootstrapSnapshot
 
-Encodes a bootstrap snapshot to a single JSON string. Wraps `serializeBootstrapSnapshot` and `JSON.stringify`.
+Wraps `serializeBootstrapSnapshot` + `JSON.stringify` into a single JSON string.
 
 ```ts
 const encoded = await encodeBootstrapSnapshot(snapshot);
@@ -120,7 +112,7 @@ const encoded = await encodeBootstrapSnapshot(snapshot);
 
 ## prefetchModels
 
-Prefetches specific model data from a server endpoint. Use this when you need only a subset of models for a particular page.
+Prefetch a subset of models for a specific page.
 
 ```tsx
 // app/dashboard/page.tsx (Server Component)
@@ -145,18 +137,16 @@ export default async function DashboardPage() {
 
 ### PrefetchOptions
 
-These options configure selective model prefetching.
-
 | Option          | Type                               | Default  | Description                               |
 | --------------- | ---------------------------------- | -------- | ----------------------------------------- |
 | `endpoint`      | `string`                           | Required | Prefetch API endpoint.                    |
-| `authorization` | `string`                           | --       | Authorization header.                     |
+| `authorization` | `string`                           | -        | Authorization header.                     |
 | `models`        | `Array<{ name, filter?, limit? }>` | Required | Models to prefetch with optional filters. |
 | `timeout`       | `number`                           | `5000`   | Request timeout in milliseconds.          |
 
 ### PrefetchResult
 
-`PrefetchResult` is a plain object you can pass directly through the Server Component boundary via props without additional serialization.
+Pass directly through the Server Component boundary as props:
 
 ```ts
 interface PrefetchResult {

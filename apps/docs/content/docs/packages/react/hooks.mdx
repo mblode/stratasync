@@ -1,13 +1,13 @@
 ---
-title: Data hooks
-description: React hooks for reading single models and querying collections from the sync engine.
+title: Hooks
+description: React hooks for data, connection state, and client access in the sync engine.
 ---
 
-Data hooks give your components reactive access to synced models. They re-render automatically when the underlying data changes through server deltas or local mutations.
+All hooks require a `SyncProvider`. They re-render automatically when data changes.
 
 ## useModel
 
-Reads a single model by ID using React Suspense. The component suspends while the sync client bootstraps or while a lazy model loads.
+Reads a single model by ID. Suspends while bootstrapping or loading a lazy model.
 
 ```tsx
 import { Suspense } from "react";
@@ -40,11 +40,11 @@ function TaskPage({ taskId }: { taskId: string }) {
 | `modelName` | `string`                      | Registered model name.                                         |
 | `id`        | `string \| null \| undefined` | Model ID. Returns `null` immediately if `null` or `undefined`. |
 
-**Return value:** `T | null` -- the model instance or `null` if not found.
+**Return value:** `T | null`: the model instance or `null` if not found.
 
 ## useModelState
 
-Non-Suspense alternative to `useModel`. Returns a result object with explicit loading and error states instead of suspending.
+Non-Suspense alternative to `useModel`. Returns explicit loading and error states.
 
 ```tsx
 import { useModelState } from "@stratasync/react";
@@ -91,7 +91,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
 
 ## useModelSuspense
 
-Alias for `useModel`. Use it when you want to make the Suspense dependency explicit in your code.
+Alias for `useModel` that makes the Suspense dependency explicit.
 
 ```tsx
 import { useModelSuspense } from "@stratasync/react";
@@ -106,7 +106,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
 
 ## useQuery
 
-Queries models with filtering, sorting, and pagination. Returns loading states explicitly instead of using Suspense.
+Queries models with filtering, sorting, and pagination. Returns loading states explicitly.
 
 ```tsx
 import { useQuery } from "@stratasync/react";
@@ -150,10 +150,10 @@ function TaskList({ projectId }: { projectId: string }) {
 
 | Option            | Type                     | Default | Description              |
 | ----------------- | ------------------------ | ------- | ------------------------ |
-| `where`           | `(item: T) => boolean`   | --      | Filter predicate.        |
-| `orderBy`         | `(a: T, b: T) => number` | --      | Sort comparator.         |
-| `limit`           | `number`                 | --      | Maximum results.         |
-| `offset`          | `number`                 | --      | Results to skip.         |
+| `where`           | `(item: T) => boolean`   | -       | Filter predicate.        |
+| `orderBy`         | `(a: T, b: T) => number` | -       | Sort comparator.         |
+| `limit`           | `number`                 | -       | Maximum results.         |
+| `offset`          | `number`                 | -       | Results to skip.         |
 | `includeArchived` | `boolean`                | `false` | Include archived items.  |
 | `skip`            | `boolean`                | `false` | Skip the query entirely. |
 
@@ -170,7 +170,7 @@ function TaskList({ projectId }: { projectId: string }) {
 
 ## useQueryAll
 
-Queries all models of a type without pagination. This is a convenience wrapper around `useQuery` that omits `limit` and `offset`.
+Convenience wrapper around `useQuery` without pagination (`limit`/`offset`).
 
 ```tsx
 import { useQueryAll } from "@stratasync/react";
@@ -193,7 +193,7 @@ function AllTasks() {
 
 ## useQueryCount
 
-Returns the count of models matching a filter, without fetching the models themselves.
+Returns the count of matching models without fetching them.
 
 ```tsx
 import { useQueryCount } from "@stratasync/react";
@@ -219,3 +219,245 @@ function TaskCounter({ projectId }: { projectId: string }) {
 | `count`     | `number`        | Number of matching models.           |
 | `isLoading` | `boolean`       | Whether the count is being computed. |
 | `error`     | `Error \| null` | Any error that occurred.             |
+
+## useConnectionState
+
+Returns sync status, last sync ID, pending count, and error state.
+
+```tsx
+import { useConnectionState } from "@stratasync/react";
+
+function SyncStatusBadge() {
+  const { status, lastSyncId, backlog, error } = useConnectionState();
+
+  if (error) {
+    return <Badge color="red">Error: {error.message}</Badge>;
+  }
+
+  if (status === "bootstrapping") {
+    return <Badge color="yellow">Bootstrapping...</Badge>;
+  }
+
+  if (status === "syncing") {
+    return (
+      <Badge color="green">
+        Synced (ID: {lastSyncId}) {backlog > 0 && `- ${backlog} pending`}
+      </Badge>
+    );
+  }
+
+  return <Badge color="gray">{status}</Badge>;
+}
+```
+
+**Signature:** `useConnectionState(): UseConnectionStateResult`
+
+**UseConnectionStateResult:**
+
+| Field        | Type              | Description                                                                                         |
+| ------------ | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `status`     | `SyncClientState` | Current sync state: `"disconnected"`, `"connecting"`, `"bootstrapping"`, `"syncing"`, or `"error"`. |
+| `lastSyncId` | `number`          | Last sync ID received from the server.                                                              |
+| `backlog`    | `number`          | Number of pending (unsynced) transactions in the outbox.                                            |
+| `error`      | `Error \| null`   | Last sync error, or `null` if no error.                                                             |
+
+## useIsOffline
+
+Returns `true` when the sync client's connection state is `"disconnected"`.
+
+```tsx
+import { useIsOffline } from "@stratasync/react";
+
+function OfflineBanner() {
+  const isOffline = useIsOffline();
+
+  if (!isOffline) {
+    return null;
+  }
+
+  return <div>You're offline. Changes will sync when you reconnect.</div>;
+}
+```
+
+**Signature:** `useIsOffline(): boolean`
+
+## usePendingCount
+
+Returns the count of unsynced transactions.
+
+```tsx
+import { usePendingCount } from "@stratasync/react";
+
+function PendingIndicator() {
+  const { count, hasPending } = usePendingCount();
+
+  if (!hasPending) {
+    return <span>All changes saved</span>;
+  }
+
+  return <span>{count} changes pending sync</span>;
+}
+```
+
+**Signature:** `usePendingCount(): UsePendingCountResult`
+
+**UsePendingCountResult:**
+
+| Field        | Type      | Description                     |
+| ------------ | --------- | ------------------------------- |
+| `count`      | `number`  | Number of pending transactions. |
+| `hasPending` | `boolean` | `true` when `count > 0`.        |
+
+## useSync
+
+Trigger a manual sync cycle.
+
+```tsx
+import { useSync } from "@stratasync/react";
+
+function SyncButton() {
+  const { sync, isSyncing } = useSync();
+
+  return (
+    <button onClick={sync} disabled={isSyncing}>
+      {isSyncing ? "Syncing..." : "Sync Now"}
+    </button>
+  );
+}
+```
+
+**Signature:** `useSync(): { sync: () => Promise<void>; isSyncing: boolean }`
+
+| Field       | Type                  | Description                                                   |
+| ----------- | --------------------- | ------------------------------------------------------------- |
+| `sync`      | `() => Promise<void>` | Triggers `client.syncNow()`. Guards against concurrent calls. |
+| `isSyncing` | `boolean`             | `true` while a manual sync is in progress.                    |
+
+## useSyncClient
+
+Returns the full sync context: client instance, connection state, and derived flags.
+
+```tsx
+import { useSyncClient } from "@stratasync/react";
+
+function SyncDebugPanel() {
+  const {
+    client,
+    state,
+    connectionState,
+    lastSyncId,
+    backlog,
+    error,
+    isReady,
+    isSyncing,
+    isOffline,
+    clientId,
+  } = useSyncClient();
+
+  return (
+    <pre>
+      {JSON.stringify(
+        {
+          state,
+          connectionState,
+          lastSyncId,
+          backlog,
+          isReady,
+          isOffline,
+          clientId,
+        },
+        null,
+        2
+      )}
+    </pre>
+  );
+}
+```
+
+**Signature:** `useSyncClient(): SyncContextValue`
+
+**SyncContextValue:**
+
+| Field             | Type              | Description                                            |
+| ----------------- | ----------------- | ------------------------------------------------------ |
+| `client`          | `SyncClient`      | The sync client instance.                              |
+| `state`           | `SyncClientState` | Current sync state.                                    |
+| `connectionState` | `ConnectionState` | Current connection state.                              |
+| `lastSyncId`      | `number`          | Last sync ID from server.                              |
+| `backlog`         | `number`          | Pending transaction count.                             |
+| `error`           | `Error \| null`   | Last sync error.                                       |
+| `isReady`         | `boolean`         | `true` when state is `"syncing"`.                      |
+| `isSyncing`       | `boolean`         | `true` when state is `"syncing"` or `"bootstrapping"`. |
+| `isOffline`       | `boolean`         | `true` when connection is `"disconnected"`.            |
+| `clientId`        | `string`          | Client instance identifier.                            |
+
+Throws an error if called outside of a `SyncProvider`.
+
+## useSyncClientInstance
+
+Returns the `SyncClient` instance for calling client methods directly.
+
+```tsx
+import { useSyncClientInstance } from "@stratasync/react";
+
+function CreateTaskButton() {
+  const client = useSyncClientInstance();
+
+  const handleCreate = async () => {
+    await client.create("Task", {
+      title: "New task",
+      status: "todo",
+    });
+  };
+
+  return <button onClick={handleCreate}>Create Task</button>;
+}
+```
+
+**Signature:** `useSyncClientInstance(): SyncClient`
+
+## useSyncReady
+
+`true` when bootstrapping is complete and the client is in `"syncing"` state. Gate UI rendering until data is available.
+
+```tsx
+import { useSyncReady } from "@stratasync/react";
+
+function AppContent() {
+  const isReady = useSyncReady();
+
+  if (!isReady) {
+    return <FullPageLoader />;
+  }
+
+  return <Dashboard />;
+}
+```
+
+**Signature:** `useSyncReady(): boolean`
+
+## useSyncState
+
+Returns the current `SyncClientState` string value.
+
+```tsx
+import { useSyncState } from "@stratasync/react";
+
+function StateIndicator() {
+  const state = useSyncState();
+
+  const labels: Record<string, string> = {
+    disconnected: "Disconnected",
+    connecting: "Connecting...",
+    bootstrapping: "Loading data...",
+    syncing: "Ready",
+    error: "Error",
+  };
+
+  return <span>{labels[state] ?? state}</span>;
+}
+```
+
+**Signature:** `useSyncState(): SyncClientState`
+
+Returns one of: `"disconnected"`, `"connecting"`, `"bootstrapping"`, `"syncing"`, `"error"`.

@@ -3,9 +3,9 @@ title: Decorators
 description: Decorator reference for defining synced models, properties, and relations in Strata Sync.
 ---
 
-Decorators define your model schemas declaratively. They register metadata with the `ModelRegistry` at class definition time, which the sync engine uses for change tracking, serialization, delta processing, and schema hashing.
+Register metadata with the `ModelRegistry` at class definition time. The sync engine uses this for change tracking, serialization, delta processing, and schema hashing.
 
-Enable decorators in your `tsconfig.json`:
+Enable decorators in `tsconfig.json`:
 
 ```json
 {
@@ -17,16 +17,16 @@ Enable decorators in your `tsconfig.json`:
 
 ## Common options
 
-Several decorators share these options. Individual decorator sections reference this table instead of repeating it.
+Shared by several decorators. Individual sections reference this table.
 
 | Option       | Type                 | Default | Description                                                                                                                     |
 | ------------ | -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `lazy`       | `boolean`            | `false` | Defers hydration until first access.                                                                                            |
-| `serializer` | `PropertySerializer` | --      | Custom serializer for converting values to and from their stored representation. See [Custom serializers](#custom-serializers). |
+| `serializer` | `PropertySerializer` | -       | Custom serializer for converting values to and from their stored representation. See [Custom serializers](#custom-serializers). |
 
 ## @ClientModel
 
-Registers a class as a synced model with the `ModelRegistry`.
+Registers a synced model.
 
 ```ts
 import { Model, ClientModel } from "@stratasync/core";
@@ -44,11 +44,11 @@ class Task extends Model {
 | Option                  | Type              | Default     | Description                                                |
 | ----------------------- | ----------------- | ----------- | ---------------------------------------------------------- |
 | `loadStrategy`          | `LoadStrategy`    | `"instant"` | How and when the model data is fetched.                    |
-| `partialLoadMode`       | `PartialLoadMode` | --          | Hydration priority for partial models.                     |
-| `usedForPartialIndexes` | `boolean`         | --          | Whether this model is used for partial index dependencies. |
-| `schemaVersion`         | `number`          | --          | Schema version for migration tracking.                     |
-| `tableName`             | `string`          | --          | Database table name override.                              |
-| `groupKey`              | `string`          | --          | Sync-group key field for multi-tenancy.                    |
+| `partialLoadMode`       | `PartialLoadMode` | -           | Hydration priority for partial models.                     |
+| `usedForPartialIndexes` | `boolean`         | -           | Whether this model is used for partial index dependencies. |
+| `schemaVersion`         | `number`          | -           | Schema version for migration tracking.                     |
+| `tableName`             | `string`          | -           | Database table name override.                              |
+| `groupKey`              | `string`          | -           | Sync-group key field for multi-tenancy.                    |
 
 ### Load strategies
 
@@ -79,7 +79,7 @@ class Comment extends Model {
 
 ## @Property
 
-Registers a synced property that participates in change tracking and delta processing.
+Marks a synced property for change tracking and delta processing.
 
 ```ts
 import { Model, ClientModel, Property } from "@stratasync/core";
@@ -108,7 +108,7 @@ Supports [common options](#common-options) (`lazy`, `serializer`). No additional
 
 ### Custom serializers
 
-Implement the `PropertySerializer` interface to handle types that need conversion for storage.
+Handle types that need conversion for storage:
 
 ```ts
 import type { PropertySerializer } from "@stratasync/core";
@@ -131,7 +131,7 @@ class Event extends Model {
 
 ## @EphemeralProperty
 
-Registers a property that's observable but **not persisted** to the server. Use it for local UI state that should be reactive but not synced.
+Observable but **not persisted** to the server. Use for reactive local UI state.
 
 ```ts
 @ClientModel("Task")
@@ -149,11 +149,11 @@ class Task extends Model {
 
 **Signature:** `EphemeralProperty(options?: PropertyOptions)`
 
-Accepts the same [common options](#common-options) as `@Property`. Ephemeral properties participate in MobX observability but are excluded from transactions and delta processing.
+Same [common options](#common-options) as `@Property`. Participates in MobX observability but excluded from transactions and deltas.
 
 ## @Reference
 
-Registers a foreign-key reference to another model. Creates both the foreign key field and a lazy-resolved model accessor.
+Creates a foreign-key reference to another model with a lazy-resolved accessor.
 
 ```ts
 @ClientModel("Task")
@@ -178,7 +178,7 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 | Option       | Type      | Default                                | Description                          |
 | ------------ | --------- | -------------------------------------- | ------------------------------------ |
 | `foreignKey` | `string`  | `"<propertyName>Id"`                   | Override the foreign key field name. |
-| `nullable`   | `boolean` | --                                     | Whether the reference can be null.   |
+| `nullable`   | `boolean` | -                                      | Whether the reference can be null.   |
 | `indexed`    | `boolean` | `true` (when `inverseProperty` is set) | Whether to index this foreign key.   |
 
 ### Custom foreign key
@@ -194,7 +194,7 @@ class Task extends Model {
 
 ## @ManyToOne
 
-Alias for `@Reference` with a more explicit relationship name. Accepts a model name string or factory function.
+Alias for `@Reference`. Accepts a model name string or factory function.
 
 ```ts
 @ClientModel("Task")
@@ -209,11 +209,11 @@ class Task extends Model {
 
 **Signature:** `ManyToOne(modelNameOrFactory: string | (() => ModelConstructor), inverseProperty?: string, options?: ReferenceOptions)`
 
-A string argument uses the registered model name directly. A factory argument extracts the constructor name. Options are the same as [`@Reference`](#referenceoptions).
+Options are the same as [`@Reference`](#referenceoptions).
 
 ## @OneToMany
 
-Registers a one-to-many collection on the parent side of a relationship. Returns a `LazyCollection` that resolves child models through the sync client.
+Defines the parent side of a one-to-many relationship. Returns a `LazyCollection` of child models.
 
 ```ts
 @ClientModel("Project")
@@ -234,13 +234,13 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 
 | Option       | Type      | Default | Description                                              |
 | ------------ | --------- | ------- | -------------------------------------------------------- |
-| `foreignKey` | `string`  | --      | Override the foreign key used for the collection lookup. |
-| `indexed`    | `boolean` | --      | Whether the collection uses an index.                    |
-| `nullable`   | `boolean` | --      | Whether the collection can be null.                      |
+| `foreignKey` | `string`  | -       | Override the foreign key used for the collection lookup. |
+| `indexed`    | `boolean` | -       | Whether the collection uses an index.                    |
+| `nullable`   | `boolean` | -       | Whether the collection can be null.                      |
 
 ### Inverse side pairing
 
-`@ManyToOne` on the child creates the foreign key, while `@OneToMany` on the parent creates the collection.
+`@ManyToOne` on the child creates the foreign key; `@OneToMany` on the parent creates the collection.
 
 ```ts
 @ClientModel("Project")
@@ -265,7 +265,7 @@ class Task extends Model {
 
 ## @BackReference
 
-Registers a back-reference to the parent model for inverse lookups when you define the relationship on the other side.
+Defines an inverse lookup for relationships declared on the other side.
 
 ```ts
 @ClientModel("Comment")
@@ -286,11 +286,11 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 
 | Option       | Type     | Default | Description                                 |
 | ------------ | -------- | ------- | ------------------------------------------- |
-| `foreignKey` | `string` | --      | The foreign key field on the related model. |
+| `foreignKey` | `string` | -       | The foreign key field on the related model. |
 
 ## @ReferenceArray
 
-Registers an array of references for many-to-many relationships through a join model.
+An ordered array of references, typically for many-to-many relationships through a join model.
 
 ```ts
 @ClientModel("Task")
@@ -311,7 +311,7 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 
 | Option    | Type     | Default | Description                                             |
 | --------- | -------- | ------- | ------------------------------------------------------- |
-| `through` | `string` | --      | Join/through model name for many-to-many relationships. |
+| `through` | `string` | -       | Join/through model name for many-to-many relationships. |
 
 ## @ReferenceCollection
 
@@ -319,7 +319,7 @@ Alias for `@OneToMany`. Use whichever name reads better in your domain model. Se
 
 ## Complete example
 
-This example shows each decorator type in a minimal project management domain.
+Every decorator in a minimal project management domain:
 
 ```ts
 import {

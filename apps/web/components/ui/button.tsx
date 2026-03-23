@@ -44,7 +44,7 @@ const buttonVariants = cva(
           "border-input bg-card font-normal font-sans text-base text-foreground leading-snug shadow-input hover:border-input-hover focus-visible:ring-2 focus-visible:ring-ring/15 focus-visible:ring-offset-1 focus-visible:ring-offset-background active:border-input-hover/80 aria-pressed:border-input-hover aria-invalid:border-destructive-foreground data-[placeholder]:text-placeholder-foreground",
         link: "text-primary underline-offset-4 hover:underline active:opacity-80 aria-pressed:underline aria-pressed:opacity-80",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground active:bg-muted/80 aria-expanded:bg-muted aria-pressed:bg-muted/80 dark:border-input dark:bg-input/30 dark:aria-pressed:bg-input/60 dark:active:bg-input/60 dark:hover:bg-input/50",
+          "border-border bg-background hover:bg-muted active:bg-muted/80 aria-expanded:bg-muted aria-pressed:bg-muted/80 dark:border-input dark:bg-input/30 dark:aria-pressed:bg-input/60 dark:active:bg-input/60 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/85 active:bg-secondary/75 aria-expanded:bg-secondary aria-pressed:bg-secondary/75",
         success:
