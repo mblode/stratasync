@@ -1,6 +1,6 @@
 export const siteConfig = {
   description:
-    "StrataSync is a local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration.",
+    "A local-first sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration. Powers Done Bear.",
   links: {
     author: "https://matthewblode.com",
     docs: "https://stratasync.dev/docs",

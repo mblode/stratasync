@@ -260,7 +260,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  description: "{{PROJECT_NAME}} powered by StrataSync.",
+  description: "{{PROJECT_NAME}} powered by Strata Sync.",
   title: "{{PROJECT_NAME}}",
 };
 
@@ -436,7 +436,7 @@ const ExamplePage = observer(function ExamplePage() {
     <main>
       <h1>{{PROJECT_NAME}}</h1>
       <p>
-        Offline-first sync powered by StrataSync. Open in two tabs to see
+        Offline-first sync powered by Strata Sync. Open in two tabs to see
         real-time sync.
       </p>
 

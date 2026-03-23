@@ -135,7 +135,7 @@ export default defineConfig({
 
 `server/src/db/schema.ts`
 
-The model table matches the client model fields. `syncActions` and `syncGroupMemberships` are required by StrataSync.
+The model table matches the client model fields. `syncActions` and `syncGroupMemberships` are required by Strata Sync.
 
 ```ts
 import {

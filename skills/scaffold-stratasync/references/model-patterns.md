@@ -1,6 +1,6 @@
 # Model Patterns Reference
 
-Guide for adding models beyond the initial scaffold and working with StrataSync's model system.
+Guide for adding models beyond the initial scaffold and working with Strata Sync's model system.
 
 ---
 

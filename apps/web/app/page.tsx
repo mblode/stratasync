@@ -69,7 +69,7 @@ const features = [
   },
   {
     description:
-      "Mutations queue in a persistent outbox. Changes sync when you reconnect.",
+      "Writes queue offline and sync when you reconnect. Nothing is lost.",
     icon: OfflineIcon,
     title: "Offline support",
   },
@@ -81,7 +81,7 @@ const features = [
   },
   {
     description:
-      "Yjs CRDT integration for multi-user editing of rich text and structured data.",
+      "Multiple users can edit the same document at the same time with Yjs.",
     icon: PeopleIcon,
     title: "Real-time collaboration",
   },
@@ -147,7 +147,16 @@ const Home = async () => {
                   Sync that works offline.
                 </h1>
                 <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Inspired by Linear&apos;s sync engine. Open-source.
+                  Inspired by Linear&apos;s sync engine. Open-source. Powers{" "}
+                  <a
+                    className="underline underline-offset-2 transition-colors hover:text-white"
+                    href="https://donebear.com"
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    Done Bear
+                  </a>
+                  .
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">

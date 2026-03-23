@@ -3,9 +3,9 @@ title: Introduction
 description: Build instant, offline-capable apps that sync with Strata Sync.
 ---
 
-A local-first, server-sequenced sync engine for TypeScript, React, and Next.js. Reads come from a local store, so the UI stays fast. Writes enter an optimistic outbox, so mutations feel instant. A monotonic sync log on the server ensures all clients converge.
+A local-first sync engine for TypeScript, React, and Next.js. Reads come from a local store, so the UI stays fast. Writes queue offline and sync when you reconnect. A server-sequenced log ensures every client converges.
 
-Based on the server-sequenced architecture [Linear](https://linear.app) described but never open-sourced. Extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
+Built on the sync architecture [Linear](https://linear.app) described but never open-sourced, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters. Powers [Done Bear](https://donebear.com).
 
 ## Key features
 

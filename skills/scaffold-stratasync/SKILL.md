@@ -1,6 +1,6 @@
 ---
 name: scaffold-stratasync
-description: Scaffold a complete StrataSync app with Next.js client and Fastify server — models, sync, IndexedDB, WebSocket, PostgreSQL
+description: Scaffold a complete Strata Sync app with Next.js client and Fastify server — models, sync, IndexedDB, WebSocket, PostgreSQL
 triggers:
   - scaffold stratasync
   - create stratasync app
@@ -10,9 +10,9 @@ triggers:
   - scaffold sync app
 ---
 
-# Scaffold StrataSync App
+# Scaffold Strata Sync App
 
-Scaffolds a complete local-first, server-sequenced sync app using StrataSync. Produces a Next.js client and a standalone Fastify API server with PostgreSQL, ready to run in minutes.
+Scaffolds a complete local-first, server-sequenced sync app using Strata Sync. Produces a Next.js client and a standalone Fastify API server with PostgreSQL, ready to run in minutes.
 
 ## Reference files
 
@@ -112,6 +112,6 @@ Write all client sync files per `references/client-setup.md`:
 | When                                  | Hand off to                                                   |
 | ------------------------------------- | ------------------------------------------------------------- |
 | User wants to add more models         | Refer to `references/model-patterns.md`                       |
-| User wants authentication             | Beyond scaffold scope — point to StrataSync server auth docs  |
+| User wants authentication             | Beyond scaffold scope — point to Strata Sync server auth docs |
 | User wants deployment                 | Beyond scaffold scope — standard Next.js + Node.js deployment |
 | User wants collaborative text editing | Point to `@stratasync/y-doc` package                          |
