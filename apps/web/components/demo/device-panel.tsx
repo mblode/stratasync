@@ -113,7 +113,7 @@ export const DevicePanel = ({
       </div>
 
       {/* Todo list */}
-      <ScrollArea className="h-[300px]">
+      <ScrollArea className="h-[250px]">
         <ul>
           <AnimatePresence initial={false} mode="popLayout">
             {todos.map((todo) => (
