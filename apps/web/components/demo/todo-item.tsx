@@ -1,5 +1,6 @@
 "use client";
 
+import { CrossSmallIcon } from "blode-icons-react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { Checkbox } from "@/components/ui/checkbox";
@@ -45,23 +46,11 @@ export const TodoItem = ({
       </span>
       <button
         aria-label={`Delete "${todo.title}"`}
-        className="shrink-0 cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 dark:text-foreground/70 dark:hover:text-destructive"
+        className="shrink-0 cursor-pointer text-muted-foreground opacity-100 transition-opacity hover:text-destructive md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 dark:text-foreground/70 dark:hover:text-destructive"
         onClick={onDelete}
         type="button"
       >
-        <svg
-          aria-hidden="true"
-          className="h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
-        >
-          <line x1={18} x2={6} y1={6} y2={18} />
-          <line x1={6} x2={18} y1={6} y2={18} />
-        </svg>
+        <CrossSmallIcon aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
     </motion.li>
   );
