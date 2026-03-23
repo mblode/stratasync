@@ -1,5 +1,11 @@
 # @stratasync/core
 
+## 0.2.3
+
+### Patch Changes
+
+- 3f7626e: Bug fixes and improvements across all packages
+
 ## 0.2.2
 
 ### Patch Changes
