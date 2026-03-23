@@ -16,7 +16,7 @@ npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mo
 
 ## tsconfig.json
 
-Merge these into the existing `compilerOptions`. **`experimentalDecorators` is CRITICAL — decorators fail silently without it.**
+Merge these into the existing `compilerOptions`. **`experimentalDecorators` is CRITICAL; decorators fail silently without it.**
 
 ```jsonc
 {
@@ -61,7 +61,7 @@ Merge these into the existing `compilerOptions`. **`experimentalDecorators` is C
 
 ## next.config.ts
 
-**`transpilePackages` is CRITICAL — ESM imports break without it.**
+**`transpilePackages` is CRITICAL; ESM imports break without it.**
 
 ```ts
 import type { NextConfig } from "next";
@@ -333,7 +333,7 @@ const {{MODEL_NAME}}Item = observer(
         <div>
           <span>{item.title}</span>
           <span>
-            Group <code>{item.groupId}</code> — Created{" "}
+            Group <code>{item.groupId}</code>, created{" "}
             {formatTimestamp(item.createdAt)}
           </span>
         </div>

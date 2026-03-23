@@ -467,7 +467,7 @@ export class YjsDocumentManager {
 
   /**
    * Apply a snapshot (full state) to a document.
-   * Semantically identical to applyRemoteUpdate — a Yjs snapshot
+   * Semantically identical to applyRemoteUpdate. A Yjs snapshot
    * is applied using the same Y.applyUpdate mechanism.
    */
   applySnapshot(docKey: DocumentKey, snapshot: Uint8Array): void {

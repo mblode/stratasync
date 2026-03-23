@@ -6,10 +6,10 @@ Yjs CRDT utilities and integration for collaborative editing.
 
 sync-y-doc provides Yjs document management and protocol utilities:
 
-- **Document management** — create and manage Yjs documents for collaborative fields
-- **Awareness protocol** — presence and cursor tracking across clients
-- **Delta serialization** — encode/decode Yjs updates for transport
-- **Sync protocol** — state vector exchange and update application
+- **Document management**: Create and manage Yjs documents for collaborative fields
+- **Awareness protocol**: Presence and cursor tracking across clients
+- **Delta serialization**: Encode/decode Yjs updates for transport
+- **Sync protocol**: State vector exchange and update application
 
 ## Installation
 
@@ -38,7 +38,7 @@ Y.applyUpdate(doc, remoteUpdate);
 
 ## Concepts
 
-- **One Yjs document per collaborative field** — e.g., `Task.description` gets its own doc
-- **Awareness** — separate protocol for presence (cursors, selections, user info)
-- **Binary encoding** — Yjs uses efficient binary encoding, not JSON
-- **Conflict-free** — CRDT guarantees eventual consistency without server coordination
+- **One Yjs document per collaborative field** (e.g., `Task.description` gets its own doc)
+- **Awareness**: Separate protocol for presence (cursors, selections, user info)
+- **Binary encoding**: Yjs uses efficient binary encoding, not JSON
+- **Conflict-free**: CRDT guarantees eventual consistency without server coordination

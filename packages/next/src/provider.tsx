@@ -58,7 +58,7 @@ export const NextSyncProvider = ({
   onReadyRef.current = onReady;
   onErrorRef.current = onError;
 
-  // Resolve client synchronously — don't await start().
+  // Resolve client synchronously. Don't await start().
   // BaseSyncProvider handles start() in the background via autoStart.
   useEffect(() => {
     let mounted = true;

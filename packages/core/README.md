@@ -14,7 +14,7 @@ sync-core provides the foundation for the stratasync stack:
 - **Schema registry** with deterministic hashing for bootstrap validation
 - **Identity map** and change tracking
 
-Zero external dependencies — pure TypeScript.
+Zero external dependencies. Pure TypeScript.
 
 ## Installation
 
@@ -53,31 +53,31 @@ class Task {
 
 The schema registry normalizes decorator metadata into a queryable format:
 
-- `@ClientModel` — registers the model class with load strategy and table mapping
-- `@Property` — defines a field with its type (`string`, `number`, `boolean`, `json`)
-- `@ManyToOne` / `@Reference` — defines a foreign key relation with lazy loading
-- `@OneToMany` / `@ReferenceCollection` — defines a reverse relation as a lazy collection
-- `@BackReference` — back-reference without storage
-- `@ReferenceArray` — many-to-many via through model
-- `@EphemeralProperty` — non-persisted property
+- `@ClientModel`: Registers the model class with load strategy and table mapping
+- `@Property`: Defines a field with its type (`string`, `number`, `boolean`, `json`)
+- `@ManyToOne` / `@Reference`: Defines a foreign key relation with lazy loading
+- `@OneToMany` / `@ReferenceCollection`: Defines a reverse relation as a lazy collection
+- `@BackReference`: Back-reference without storage
+- `@ReferenceArray`: Many-to-many via through model
+- `@EphemeralProperty`: Non-persisted property
 
 ## Sync Primitives
 
-- **Delta applier** — applies server deltas to local model instances using last-writer-wins
-- **Rebase logic** — reconciles local optimistic changes with server-confirmed state
-- **Transaction helpers** — `createInsertTransaction`, `createUpdateTransaction`, `createDeleteTransaction`, `createArchiveTransaction`, `createUnarchiveTransaction`, `createUndoTransaction`
-- **Serialization** — compact format with abbreviated field names for storage and transport
-- **Schema hash** — deterministic, order-independent hash for detecting schema changes
+- **Delta applier**: Applies server deltas to local model instances using last-writer-wins
+- **Rebase logic**: Reconciles local optimistic changes with server-confirmed state
+- **Transaction helpers**: `createInsertTransaction`, `createUpdateTransaction`, `createDeleteTransaction`, `createArchiveTransaction`, `createUnarchiveTransaction`, `createUndoTransaction`
+- **Serialization**: Compact format with abbreviated field names for storage and transport
+- **Schema hash**: Deterministic, order-independent hash for detecting schema changes
 
 ## Package Structure
 
 ```
 src/
-├── model/       — Model base class, hydration, cached promises, collections
-├── schema/      — Decorators, type definitions, normalization, registry, hashing
-├── transaction/ — Creation helpers, serialization, archive utilities, types
-├── sync/        — Delta applier, rebase logic, sync IDs, sync types
-├── store/       — SyncStore interface (implemented by sync-client)
-├── reactivity/  — ReactivityAdapter interface (implemented by sync-mobx)
-└── utils/       — ID generation, assignment helpers
+├── model/       Model base class, hydration, cached promises, collections
+├── schema/      Decorators, type definitions, normalization, registry, hashing
+├── transaction/ Creation helpers, serialization, archive utilities, types
+├── sync/        Delta applier, rebase logic, sync IDs, sync types
+├── store/       SyncStore interface (implemented by sync-client)
+├── reactivity/  ReactivityAdapter interface (implemented by sync-mobx)
+└── utils/       ID generation, assignment helpers
 ```

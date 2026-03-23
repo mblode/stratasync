@@ -228,7 +228,7 @@ export const rebaseTransactions = (
       ) {
         result.confirmed.push(tx);
         processed.add(tx.clientTxId);
-        // Our own echo — don't conflict-check remaining pending txs against it.
+        // Our own echo. Don't conflict-check remaining pending txs against it.
         // Subsequent pending mutations (e.g. undo) were created on top of this
         // change and should not be rolled back by its server confirmation.
         break;

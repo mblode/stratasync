@@ -9,7 +9,7 @@ describe(createCompositeSyncId, () => {
     expectTypeOf(result).toBeString();
   });
 
-  it("is deterministic — same inputs produce same output", () => {
+  it("is deterministic: same inputs produce same output", () => {
     const a = createCompositeSyncId("TaskLabel", ["task-1", "label-1"]);
     const b = createCompositeSyncId("TaskLabel", ["task-1", "label-1"]);
     expect(a).toBe(b);

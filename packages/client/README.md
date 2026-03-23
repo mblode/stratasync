@@ -6,12 +6,12 @@ Offline-first sync orchestration: identity maps, outbox batching, delta reconcil
 
 sync-client coordinates the client-side sync lifecycle:
 
-- **SyncClient** — main orchestrator for the sync lifecycle
-- **Outbox manager** — batches mutations for offline-first support
-- **Identity map** — canonical in-memory object instances (deduplication via MobX reactivity)
-- **Sync orchestrator** — state machine for bootstrap, delta subscription, and conflict resolution
-- **History manager** — undo/redo with inverse operation tracking
-- **Query execution** — predicate builders, sorting, and pagination against identity maps
+- **SyncClient**: Main orchestrator for the sync lifecycle
+- **Outbox manager**: Batches mutations for offline-first support
+- **Identity map**: Canonical in-memory object instances (deduplication via MobX reactivity)
+- **Sync orchestrator**: State machine for bootstrap, delta subscription, and conflict resolution
+- **History manager**: Undo/redo with inverse operation tracking
+- **Query execution**: Predicate builders, sorting, and pagination against identity maps
 
 ## Installation
 
@@ -64,13 +64,13 @@ const result = await client.query("Task", {
 
 ```
 src/
-  index.ts             — public API barrel export
-  client.ts            — SyncClient factory and mutation coordination
-  sync-orchestrator.ts — state machine: bootstrap, delta application, rebase
-  outbox-manager.ts    — offline mutation queue with batching and retry
-  identity-map.ts      — per-model ObservableMap with MobX reactivity
-  history-manager.ts   — undo/redo stack with inverse operation tracking
-  query.ts             — predicate builders and executeQuery
-  types.ts             — StorageAdapter, TransportAdapter, SyncClientOptions
-  utils.ts             — getModelKey, getModelData, pickOriginal helpers
+  index.ts             public API barrel export
+  client.ts            SyncClient factory and mutation coordination
+  sync-orchestrator.ts state machine: bootstrap, delta application, rebase
+  outbox-manager.ts    offline mutation queue with batching and retry
+  identity-map.ts      per-model ObservableMap with MobX reactivity
+  history-manager.ts   undo/redo stack with inverse operation tracking
+  query.ts             predicate builders and executeQuery
+  types.ts             StorageAdapter, TransportAdapter, SyncClientOptions
+  utils.ts             getModelKey, getModelData, pickOriginal helpers
 ```

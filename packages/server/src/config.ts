@@ -39,7 +39,7 @@ export interface SyncLogger {
 }
 
 const noop = (): void => {
-  // Intentionally empty — used as a no-op stub for the optional logger
+  // Intentionally empty. Used as a no-op stub for the optional logger.
 };
 
 export const noopLogger: SyncLogger = {

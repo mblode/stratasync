@@ -1,5 +1,5 @@
 /**
- * Sync ID type — string on the wire, represents a monotonically increasing integer.
+ * Sync ID type: string on the wire, represents a monotonically increasing integer.
  * Using string avoids precision loss for values exceeding Number.MAX_SAFE_INTEGER.
  */
 export type SyncId = string;

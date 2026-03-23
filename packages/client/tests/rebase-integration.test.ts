@@ -924,7 +924,7 @@ describe("rebase integration", () => {
       transport.emitDelta(delta);
       await syncWaiter;
 
-      // No conflict events — this is a confirmation, not a conflict
+      // No conflict events: this is a confirmation, not a conflict
       const conflictEvents = events.filter((e) => e.type === "rebaseConflict");
       expect(conflictEvents).toHaveLength(0);
 

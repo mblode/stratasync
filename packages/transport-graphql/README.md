@@ -6,10 +6,10 @@ GraphQL transport adapter for sync communication and mutations.
 
 sync-transport-graphql handles communication between the sync client and server:
 
-- **GraphQL client initialization** for sync endpoints
-- **Delta subscriptions** via GraphQL subscriptions over WebSocket
-- **Mutation document generation** from model metadata
-- **Message serialization** for sync payloads including Yjs binary deltas
+- **GraphQL client initialization**: Sync endpoint configuration
+- **Delta subscriptions**: GraphQL subscriptions over WebSocket
+- **Mutation document generation**: Built from model metadata
+- **Message serialization**: Sync payloads including Yjs binary deltas
 
 ## Installation
 
@@ -37,9 +37,9 @@ const client = new SyncClient({
 
 ## How It Works
 
-1. **Bootstrap** — fetches initial state via GraphQL query
-2. **Subscribe** — opens a WebSocket subscription for real-time deltas
-3. **Mutate** — sends client mutations as GraphQL mutations
-4. **Reconnect** — handles connection drops with automatic retry and resubscription
+1. **Bootstrap**: Fetches initial state via GraphQL query
+2. **Subscribe**: Opens a WebSocket subscription for real-time deltas
+3. **Mutate**: Sends client mutations as GraphQL mutations
+4. **Reconnect**: Handles connection drops with automatic retry and resubscription
 
 Yjs collaborative editing deltas are encoded as binary (Uint8Array) within GraphQL payloads.

@@ -6,9 +6,9 @@ MobX reactivity adapter for the sync engine.
 
 sync-mobx implements the reactivity adapter interface defined in `@stratasync/core` using MobX observables:
 
-- **Observable model instances** — model properties become MobX observables
-- **Computed values** — derived state from observable model properties
-- **Reaction-based updates** — automatic re-rendering when synced data changes
+- **Observable model instances**: Model properties become MobX observables
+- **Computed values**: Derived state from observable model properties
+- **Reaction-based updates**: Automatic re-rendering when synced data changes
 
 ## Installation
 

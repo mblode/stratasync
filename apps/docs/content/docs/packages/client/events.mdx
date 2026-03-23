@@ -62,7 +62,7 @@ Every event has a `type` discriminant.
 
 | Event Name         | Key Fields                                                                           | Description                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `syncStart`        | —                                                                                    | A sync cycle has begun.                                                            |
+| `syncStart`        | -                                                                                    | A sync cycle has begun.                                                            |
 | `syncComplete`     | `lastSyncId: number`                                                                 | A sync cycle finished. `lastSyncId` is the highest sync ID received.               |
 | `syncError`        | `error: Error`                                                                       | A sync cycle failed.                                                               |
 | `stateChange`      | `state: SyncClientState`                                                             | The client transitioned to a new sync state.                                       |

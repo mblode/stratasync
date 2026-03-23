@@ -363,8 +363,8 @@ export class IdentityMapRegistry {
 
   /**
    * Executes a callback inside a single reactivity action.
-   * All identity map mutations within the callback are batched —
-   * observers only see the final state after the callback returns.
+   * All identity map mutations within the callback are batched,
+   * so observers only see the final state after the callback returns.
    */
   batch<T>(fn: () => T): T {
     return this.reactivity.runInAction(fn);

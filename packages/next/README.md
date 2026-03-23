@@ -6,9 +6,9 @@ Next.js App Router integration helpers.
 
 sync-next bridges the sync engine with Next.js App Router patterns:
 
-- **Server utilities** — server-side setup and initialization
-- **Client utilities** — hooks and providers for client components
-- **Metadata helpers** — integration with Next.js metadata API
+- **Server utilities**: Server-side setup and initialization
+- **Client utilities**: Hooks and providers for client components
+- **Metadata helpers**: Integration with Next.js metadata API
 
 ## Installation
 
@@ -38,7 +38,7 @@ import {} from /* default exports */ "@stratasync/next";
 Use Server Components for initial data loading and Client Components for interactive sync features:
 
 ```tsx
-// Server Component — fetch initial data
+// Server Component: fetch initial data
 import { initSync } from "@stratasync/next/server";
 
 export default async function Page() {
@@ -46,7 +46,7 @@ export default async function Page() {
   return <ClientApp initialData={initialData} />;
 }
 
-// Client Component — use sync hooks
+// Client Component: use sync hooks
 ("use client");
 import { useSyncClient } from "@stratasync/next/client";
 

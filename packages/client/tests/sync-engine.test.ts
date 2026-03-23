@@ -2117,7 +2117,7 @@ describe("reverse-done alignment", () => {
         title: "Updated by Tab A",
       });
 
-      // Tab B must also have the update — NOT suppressed as an own echo.
+      // Tab B must also have the update, NOT suppressed as an own echo.
       const taskMapB = clientB.getIdentityMap<Record<string, unknown>>("Task");
       expect(taskMapB.get("task-1")).toMatchObject({
         id: "task-1",

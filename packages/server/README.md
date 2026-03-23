@@ -74,23 +74,23 @@ Client                          Server (@stratasync/server)
 
 ### Sync Protocol
 
-1. **Bootstrap** — Client sends `GET /sync/bootstrap`. Server streams all model rows as NDJSON (first line = metadata with `lastSyncId`, subsequent lines = model rows with `__class` tag).
+1. **Bootstrap**: Client sends `GET /sync/bootstrap`. Server streams all model rows as NDJSON (first line = metadata with `lastSyncId`, subsequent lines = model rows with `__class` tag).
 
-2. **Mutations** — Client sends `POST /sync/mutate` with a batch of transactions. Each transaction specifies `modelName`, `modelId`, `action` (INSERT/UPDATE/DELETE/ARCHIVE/UNARCHIVE), and `payload`. Server deduplicates via `(clientId, clientTxId)` unique constraint, applies the mutation, creates a `sync_action` row, and publishes a delta.
+2. **Mutations**: Client sends `POST /sync/mutate` with a batch of transactions. Each transaction specifies `modelName`, `modelId`, `action` (INSERT/UPDATE/DELETE/ARCHIVE/UNARCHIVE), and `payload`. Server deduplicates via `(clientId, clientTxId)` unique constraint, applies the mutation, creates a `sync_action` row, and publishes a delta.
 
-3. **Deltas** — Client polls `GET /sync/deltas?after={lastSyncId}` for incremental updates. Returns actions with `hasMore` flag for pagination.
+3. **Deltas**: Client polls `GET /sync/deltas?after={lastSyncId}` for incremental updates. Returns actions with `hasMore` flag for pagination.
 
-4. **WebSocket** — Client connects to `/sync/ws` and sends a `subscribe` message with `afterSyncId`. Server replays missed actions, then streams live deltas. Buffers actions during replay to prevent gaps.
+4. **WebSocket**: Client connects to `/sync/ws` and sends a `subscribe` message with `afterSyncId`. Server replays missed actions, then streams live deltas. Buffers actions during replay to prevent gaps.
 
 ### Key Concepts
 
-**Sync Groups** — Every model declares a `groupKey` (e.g., `"workspaceId"`) that determines which sync group it belongs to. Users can only see models in their groups. The special value `"__modelId__"` means the model's own ID is its group (used for User/Workspace models). `null` means globally visible.
+**Sync Groups**: Every model declares a `groupKey` (e.g., `"workspaceId"`) that determines which sync group it belongs to. Users can only see models in their groups. The special value `"__modelId__"` means the model's own ID is its group (used for User/Workspace models). `null` means globally visible.
 
-**Field Codecs** — Field types (`string`, `stringNull`, `number`, `date`, `dateNow`, `dateOnly`) control how payload values are coerced on insert/update and serialized for sync. `dateOnly` fields use day-aligned UTC epochs (multiples of 86400000ms). `date`/`dateNow` fields use millisecond epochs.
+**Field Codecs**: Field types (`string`, `stringNull`, `number`, `date`, `dateNow`, `dateOnly`) control how payload values are coerced on insert/update and serialized for sync. `dateOnly` fields use day-aligned UTC epochs (multiples of 86400000ms). `date`/`dateNow` fields use millisecond epochs.
 
-**Cursor Pagination** — Bootstrap uses cursor-based pagination. Simple cursors use `id > cursor`. Composite cursors (for join tables like TaskLabel) use multi-level OR conditions.
+**Cursor Pagination**: Bootstrap uses cursor-based pagination. Simple cursors use `id > cursor`. Composite cursors (for join tables like TaskLabel) use multi-level OR conditions.
 
-**Deduplication** — Mutations include `clientId` + `clientTxId`. A unique constraint on `sync_actions(client_id, client_tx_id)` prevents duplicate processing. If a duplicate is detected, the existing `syncId` is returned.
+**Deduplication**: Mutations include `clientId` + `clientTxId`. A unique constraint on `sync_actions(client_id, client_tx_id)` prevents duplicate processing. If a duplicate is detected, the existing `syncId` is returned.
 
 ## Model Config
 
@@ -166,17 +166,17 @@ websocketHooks: {
 
 The package requires two Drizzle tables passed via `config.tables`:
 
-**`syncActions`** — columns: `id` (bigserial PK), `model` (varchar), `modelId` (uuid), `action` (char 1), `data` (jsonb), `groupId` (uuid nullable), `clientId` (varchar nullable), `clientTxId` (uuid nullable), `createdAt` (timestamp). Unique constraint on `(clientId, clientTxId)`.
+**`syncActions`**: Columns are `id` (bigserial PK), `model` (varchar), `modelId` (uuid), `action` (char 1), `data` (jsonb), `groupId` (uuid nullable), `clientId` (varchar nullable), `clientTxId` (uuid nullable), `createdAt` (timestamp). Unique constraint on `(clientId, clientTxId)`.
 
-**`syncGroupMemberships`** — columns: `id` (uuid PK), `userId` (uuid), `groupId` (uuid), `groupType` (varchar), `createdAt` (timestamp).
+**`syncGroupMemberships`**: Columns are `id` (uuid PK), `userId` (uuid), `groupId` (uuid), `groupType` (varchar), `createdAt` (timestamp).
 
 ## Exports
 
 ```typescript
-// Main entry — import from "@stratasync/server"
+// Main entry: import from "@stratasync/server"
 import { createSyncServer, SyncDao, BootstrapService, ... } from "@stratasync/server";
 
-// Fastify-specific — import from "@stratasync/server/fastify"
+// Fastify-specific: import from "@stratasync/server/fastify"
 import { registerSyncRoutes, createSyncAuthMiddleware, ... } from "@stratasync/server/fastify";
 ```
 

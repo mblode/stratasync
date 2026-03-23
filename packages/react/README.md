@@ -6,10 +6,10 @@ React bindings and hooks for the sync engine.
 
 sync-react provides React hooks for data fetching, real-time updates, and collaborative editing:
 
-- **SyncProvider** — context provider for the sync client
-- **useModel / useQuery** — data fetching with Suspense or loading states
-- **useConnectionState** — monitor sync connection status
-- **useYjsDocument / useYjsPresence** — collaborative editing and presence
+- **SyncProvider**: Context provider for the sync client
+- **useModel / useQuery**: Data fetching with Suspense or loading states
+- **useConnectionState**: Monitor sync connection status
+- **useYjsDocument / useYjsPresence**: Collaborative editing and presence
 
 ## Installation
 
@@ -79,13 +79,13 @@ const { doc, isConnected, participants, content } = useYjsDocument(
 ```
 src/
 ├── hooks/
-│   ├── use-sync-client.ts       — Access SyncClient instance
-│   ├── use-model.ts             — Single model (Suspense)
-│   ├── use-query.ts             — Filtered queries
-│   ├── use-connection-state.ts  — Connection monitoring
-│   ├── use-yjs-document.ts      — Collaborative editing
-│   └── use-yjs-presence.ts      — Presence tracking
-├── provider.tsx                 — SyncProvider component
-├── context.ts                   — React context
-└── types.ts                     — Type definitions
+│   ├── use-sync-client.ts       Access SyncClient instance
+│   ├── use-model.ts             Single model (Suspense)
+│   ├── use-query.ts             Filtered queries
+│   ├── use-connection-state.ts  Connection monitoring
+│   ├── use-yjs-document.ts      Collaborative editing
+│   └── use-yjs-presence.ts      Presence tracking
+├── provider.tsx                 SyncProvider component
+├── context.ts                   React context
+└── types.ts                     Type definitions
 ```

@@ -6,16 +6,16 @@ A local-first sync engine for TypeScript, React, and Next.js. Every read is inst
 
 ## Why Strata Sync
 
-Linear built a sync architecture that became the gold standard for local-first apps — but never open-sourced it. Strata Sync is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters. Powers [Done Bear](https://donebear.com).
+Linear built a sync architecture that became the gold standard for local-first apps, but never open-sourced it. [Strata Sync](https://stratasync.dev) is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters. Powers [Done Bear](https://donebear.com).
 
 ## Features
 
-- **Instant reads** — Local IndexedDB replica. No spinners, no round-trips.
-- **Offline support** — Writes queue offline and sync when you reconnect.
-- **Fine-grained reactivity** — MobX observables. Only affected components re-render.
-- **Real-time collaboration** — Multiple users edit the same document with Yjs.
-- **Undo and redo** — Transaction-based history tracking.
-- **Modular** — Swap storage, transport, or reactivity adapters.
+- **Instant reads**: Local IndexedDB replica. No spinners, no round-trips.
+- **Offline support**: Writes queue offline and sync when you reconnect.
+- **Fine-grained reactivity**: MobX observables. Only affected components re-render.
+- **Real-time collaboration**: Multiple users edit the same document with Yjs.
+- **Undo and redo**: Transaction-based history tracking.
+- **Modular**: Swap storage, transport, or reactivity adapters.
 
 ## Quick Start
 
@@ -69,6 +69,10 @@ function TodoList() {
   );
 }
 ```
+
+### Documentation
+
+Full documentation at [stratasync.dev/docs](https://stratasync.dev/docs).
 
 ## Packages
 

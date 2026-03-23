@@ -21,7 +21,7 @@ beforeAll(() => {
  *   - setter writes to box.set() (triggers MobX reactions)
  *
  * `_applyUpdate()` writes through the property setter with
- * change tracking suppressed — but the MobX box still fires.
+ * change tracking suppressed, but the MobX box still fires.
  */
 class TestModel {
   _mobx: Record<string, { get(): unknown; set(value: unknown): void }> = {};
@@ -210,7 +210,7 @@ describe("observer() reactivity with Model property changes", () => {
     expect(titleRenderCount).toHaveBeenCalledOnce();
     expect(completedRenderCount).toHaveBeenCalledOnce();
 
-    // Only change completedAt — title component should NOT re-render
+    // Only change completedAt. Title component should NOT re-render.
     act(() => {
       item._applyUpdate({ completedAt: Date.now() });
     });
@@ -224,7 +224,7 @@ describe("observer() reactivity with Model property changes", () => {
   it("_applyUpdate suppresses change tracking but still fires MobX boxes", () => {
     const item = createTestItem({ title: "Start" });
 
-    // Direct property write — should track changes
+    // Direct property write: should track changes
     item.title = "Direct";
     expect(item.changes).toHaveLength(1);
     expect(item.changes[0]).toEqual({
@@ -233,7 +233,7 @@ describe("observer() reactivity with Model property changes", () => {
       oldValue: "Start",
     });
 
-    // _applyUpdate — should NOT track changes (suppressTracking)
+    // _applyUpdate: should NOT track changes (suppressTracking)
     item._applyUpdate({ title: "Applied" });
     expect(item.changes).toHaveLength(1);
 

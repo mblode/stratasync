@@ -160,7 +160,7 @@ describe(YjsDocumentManager, () => {
     it("should seed initial content immediately for instant rendering", () => {
       manager.connect(testDocKey, { initialContent: "Hello, world!" });
 
-      // Content is available immediately — no need to wait for sync step 2.
+      // Content is available immediately. No need to wait for sync step 2.
       expect(manager.getDerivedContent(testDocKey)).toBe("Hello, world!");
 
       // Content survives an empty sync step 2 from the server.

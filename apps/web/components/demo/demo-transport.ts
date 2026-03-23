@@ -15,7 +15,7 @@ import type {
 } from "@stratasync/core";
 
 // ---------------------------------------------------------------------------
-// AsyncQueue — buffered async iterable for delta subscription
+// AsyncQueue: buffered async iterable for delta subscription
 // ---------------------------------------------------------------------------
 
 class AsyncQueue<T> implements AsyncIterable<T> {
@@ -65,7 +65,7 @@ class AsyncQueue<T> implements AsyncIterable<T> {
 }
 
 // ---------------------------------------------------------------------------
-// DemoServer — shared state that both transports connect to
+// DemoServer: shared state that both transports connect to
 // ---------------------------------------------------------------------------
 
 export type SyncFlowCallback = (direction: "left" | "right") => void;
@@ -146,7 +146,7 @@ export class DemoServer {
           this.onSyncFlow?.(direction);
         }
 
-        // Deliver to ALL transports (including source) — the sync engine
+        // Deliver to ALL transports (including source). The sync engine
         // uses the echo to confirm outbox transactions via clientTxId matching
         transport.deliverDelta(deltaPacket);
       }
@@ -190,7 +190,7 @@ export class DemoServer {
 }
 
 // ---------------------------------------------------------------------------
-// DemoTransport — per-client transport wired to the DemoServer
+// DemoTransport: per-client transport wired to the DemoServer
 // ---------------------------------------------------------------------------
 
 export class DemoTransport implements TransportAdapter {
@@ -264,12 +264,12 @@ export class DemoTransport implements TransportAdapter {
   async *batchLoad(
     _options: BatchLoadOptions
   ): AsyncGenerator<ModelRow, void, unknown> {
-    // No-op for demo — batch loading not needed
+    // No-op for demo. Batch loading not needed.
   }
 
   mutate(batch: TransactionBatch): Promise<MutateResult> {
     if (!this.isOnline) {
-      // Buffer while offline — resolves when we come back online
+      // Buffer while offline. Resolves when we come back online.
       return new Promise((resolve) => {
         this.pendingMutations.push({ batch, resolve });
       });

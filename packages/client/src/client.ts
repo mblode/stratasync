@@ -416,7 +416,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       documentManager?.destroyAll();
       documentManager?.clearPersistedDocuments?.();
     } catch {
-      // Best-effort cleanup — don't abort clearAll if Yjs teardown fails
+      // Best-effort cleanup. Don't abort clearAll if Yjs teardown fails.
     }
   };
 

@@ -6,7 +6,7 @@ Guide for adding models beyond the initial scaffold and working with Strata Sync
 
 ## Adding a new model (5-step checklist)
 
-1. **Create client model** — `src/lib/sync/models/<model_name>.ts`
+1. **Create client model**: `src/lib/sync/models/<model_name>.ts`
 
 ```ts
 import { ClientModel, Model, Property } from "@stratasync/core";
@@ -19,7 +19,7 @@ export class <ModelName> extends Model {
 }
 ```
 
-2. **Add side-effect import** — `src/lib/sync/models.ts`
+2. **Add side-effect import**: `src/lib/sync/models.ts`
 
 ```ts
 import "./models/todo";
@@ -28,7 +28,7 @@ import "./models/<model_name>"; // Add this line
 
 This registers the decorators at module load. Without it, the model won't exist in the schema.
 
-3. **Add Drizzle table** — `server/src/db/schema.ts`
+3. **Add Drizzle table**: `server/src/db/schema.ts`
 
 ```ts
 export const <model_table> = pgTable("<model_table>", {
@@ -38,7 +38,7 @@ export const <model_table> = pgTable("<model_table>", {
 });
 ```
 
-4. **Add SyncModelConfig** — `server/src/server.ts`
+4. **Add SyncModelConfig**: `server/src/server.ts`
 
 ```ts
 const <modelName>Config: SyncModelConfig = {
@@ -74,7 +74,7 @@ const sync = await createSyncServer({
 });
 ```
 
-5. **Push schema** — `cd server && npm run db:push`
+5. **Push schema**: `cd server && npm run db:push`
 
 ---
 
@@ -111,7 +111,7 @@ Set via the `@ClientModel` decorator's second argument:
 
 ## Relations
 
-### @Reference — belongs-to (foreign key on this model)
+### @Reference: belongs-to (foreign key on this model)
 
 ```ts
 import { ClientModel, Model, Property, Reference } from "@stratasync/core";
@@ -125,7 +125,7 @@ export class Comment extends Model {
 }
 ```
 
-### @BackReference — has-many (inverse of @Reference)
+### @BackReference: has-many (inverse of @Reference)
 
 ```ts
 import { BackReference, ClientModel, Model, Property } from "@stratasync/core";
@@ -138,7 +138,7 @@ export class Todo extends Model {
 }
 ```
 
-### @ReferenceArray — many-to-many via ID array
+### @ReferenceArray: many-to-many via ID array
 
 ```ts
 import { ClientModel, Model, Property, ReferenceArray } from "@stratasync/core";
@@ -194,7 +194,7 @@ bootstrap: {
 // Drizzle column
 archivedAt: timestamp("archived_at", { withTimezone: true }),
 
-// Server config — add to updateFields
+// Server config: add to updateFields
 updateFields: new Set(["title", "completed", "archivedAt"]),
 
 // Query non-archived items

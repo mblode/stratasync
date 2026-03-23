@@ -6,7 +6,7 @@ import type {
 } from "../../src/mutate/model-handlers.js";
 import { createModelHandler } from "../../src/mutate/model-handlers.js";
 
-// dummy db — delegates are fully mocked
+// dummy db: delegates are fully mocked
 const mockDb = {};
 
 const createMockDelegate = (
@@ -28,7 +28,7 @@ const baseInsertFields: Record<string, FieldSpec> = {
 // Insert
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — insert", () => {
+describe("createModelHandler: insert", () => {
   let delegate: MutationDelegate;
   let handler: ReturnType<typeof createModelHandler>;
 
@@ -100,7 +100,7 @@ describe("createModelHandler — insert", () => {
 // Update
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — update", () => {
+describe("createModelHandler: update", () => {
   let delegate: MutationDelegate;
 
   beforeEach(() => {
@@ -200,7 +200,7 @@ describe("createModelHandler — update", () => {
 // Delete
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — delete", () => {
+describe("createModelHandler: delete", () => {
   it("calls delegate.deleteById for standard model", async () => {
     const delegate = createMockDelegate();
     const def: StandardModelDef = {
@@ -243,7 +243,7 @@ describe("createModelHandler — delete", () => {
 // Archive / Unarchive
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — archive/unarchive", () => {
+describe("createModelHandler: archive/unarchive", () => {
   let delegate: MutationDelegate;
 
   beforeEach(() => {
@@ -326,7 +326,7 @@ describe("createModelHandler — archive/unarchive", () => {
 // Unsupported action
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — unsupported action", () => {
+describe("createModelHandler: unsupported action", () => {
   it("throws for an action not in the allowed set", () => {
     const delegate = createMockDelegate();
     const def: StandardModelDef = {
@@ -347,7 +347,7 @@ describe("createModelHandler — unsupported action", () => {
 // Composite insert (no id in data)
 // ---------------------------------------------------------------------------
 
-describe("createModelHandler — composite insert", () => {
+describe("createModelHandler: composite insert", () => {
   it("does not include id in insert data for composite model", async () => {
     const delegate = createMockDelegate();
     const def: ModelDef = {

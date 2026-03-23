@@ -191,7 +191,7 @@ export class SyncOrchestrator {
         return;
       }
 
-      // Local data is ready — mark as syncing so the UI can render
+      // Local data is ready. Mark as syncing so the UI can render
       // cached content immediately without waiting for network ops.
       this.setState("syncing");
 
@@ -273,7 +273,7 @@ export class SyncOrchestrator {
     const bootstrapModels = this.registry.getBootstrapModelNames();
     const arePersisted = await this.areModelsPersisted(bootstrapModels);
     const storedHash = meta.schemaHash ?? "";
-    // Treat an empty/missing hash as a mismatch — a valid bootstrap always
+    // Treat an empty/missing hash as a mismatch. A valid bootstrap always
     // writes the hash, so an empty value means prior state is corrupt.
     const hasSchemaMismatch =
       storedHash.length === 0 || storedHash !== this.schemaHash;
@@ -903,14 +903,14 @@ export class SyncOrchestrator {
 
     // Apply identity map changes in a single MobX action so observers
     // only see the final state (server data + pending local changes).
-    // Deferred conflict rollbacks are processed here too — inside the
-    // batch — so their intermediate deletes are never visible.
+    // Deferred conflict rollbacks are processed here too, inside the
+    // batch, so their intermediate deletes are never visible.
     const pending = await this.getActiveOutboxTransactions();
 
     this.identityMaps.batch(() => {
       // Process conflict rollbacks inside the batch.  This ensures that
       // the rollback's map.delete() and the subsequent server merge's
-      // map.merge() are in the same runInAction — microtask-scheduled
+      // map.merge() are in the same runInAction, so microtask-scheduled
       // refreshSync only fires after both have completed.
       // Also remove rolled-back clientTxIds from ownClientTxIds so the
       // server merge's modelChange event emits properly for the model.
@@ -1282,7 +1282,7 @@ export class SyncOrchestrator {
   /**
    * Re-applies pending outbox transactions to identity maps after a server sync.
    * This intentionally differs from rollbackTransaction (which inverts) and
-   * applyDeltas (which writes to storage) — it re-applies forward to restore
+   * applyDeltas (which writes to storage). It re-applies forward to restore
    * optimistic state on top of newly-synced server data.
    */
   private applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void {

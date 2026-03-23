@@ -142,7 +142,7 @@ export class MutateService {
           const cols = getTableColumns(model.table) as Record<string, unknown>;
           idColumn = cols[idField];
         } catch {
-          // Table columns unavailable — skip delegate registration
+          // Table columns unavailable, skip delegate registration
         }
 
         if (idColumn) {

@@ -41,7 +41,7 @@ Client pending update:  { title: "Final" }                     <- user changed t
 Server delta arrives:   { title: "Draft",  status: "closed" }  <- another user changed status
 ```
 
-With field-level conflict detection enabled (the default), `title` has a pending client change but no server change — no conflict. `status` has a server change but no pending client change — no conflict. Both changes merge to `{ title: "Final", status: "closed" }`.
+With field-level conflict detection enabled (the default), `title` has a pending client change but no server change, so no conflict. `status` has a server change but no pending client change, so no conflict. Both changes merge to `{ title: "Final", status: "closed" }`.
 
 ## Conflict types
 
@@ -121,8 +121,8 @@ const client = createSyncClient({
 });
 ```
 
-- **Overlapping fields**: Both client and server changed the same field — true conflict.
-- **Non-overlapping fields**: Client and server changed different fields — no conflict, changes coexist.
+- **Overlapping fields**: Both client and server changed the same field (true conflict).
+- **Non-overlapping fields**: Client and server changed different fields (no conflict, changes coexist).
 
 Most concurrent edits affect different fields, so field-level detection greatly reduces conflicts.
 
@@ -278,6 +278,6 @@ This is why `fieldLevelConflicts: true` (the default) with `rebaseStrategy: "mer
 
 ## Next steps
 
-- [Offline-First Patterns](/docs/guides/offline-first) — How mutations flow through the outbox.
-- [Collaborative Editing](/docs/guides/collaborative-editing) — CRDT-based editing that avoids field-level conflicts.
-- [sync-core Transactions API](/docs/packages/core/transactions) — Low-level transaction creation and management.
+- [Offline-First Patterns](/docs/guides/offline-first): How mutations flow through the outbox.
+- [Collaborative Editing](/docs/guides/collaborative-editing): CRDT-based editing that avoids field-level conflicts.
+- [sync-core Transactions API](/docs/packages/core/transactions): Low-level transaction creation and management.

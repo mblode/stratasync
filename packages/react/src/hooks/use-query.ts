@@ -175,7 +175,7 @@ export const useQuery = <T>(
     };
   };
 
-  // Lazy initializers — only run on mount, preventing MobX tracking on re-renders
+  // Lazy initializers: only run on mount, preventing MobX tracking on re-renders
   const initialRef = useRef<ReturnType<typeof computeState> | null>(null);
   if (initialRef.current === null) {
     initialRef.current = computeState();
@@ -196,16 +196,16 @@ export const useQuery = <T>(
 
   // Track current data for structural equality checks (avoids unnecessary re-renders)
   const dataRef = useRef<T[]>(initial.data);
-  // Snapshot of id+updatedAt per item — detects in-place identity-map mutations
+  // Snapshot of id+updatedAt per item. Detects in-place identity-map mutations.
   const snapshotsRef = useRef<ItemSnapshot[]>(captureSnapshots(initial.data));
   // Track if we have data to avoid setting loading state when refreshing cached data
   const hasDataRef = useRef(initial.data.length > 0);
-  // Ref mirrors for metadata state — only call setters when values actually change
+  // Ref mirrors for metadata state: only call setters when values actually change
   const totalCountRef = useRef<number | undefined>(initial.totalCount);
   const hasMoreRef = useRef(initial.hasMore);
   const isLoadingRef = useRef(initial.isLoading);
   const errorRef = useRef<Error | null>(null);
-  // Microtask debounce flag — coalesces rapid modelChange events into one refresh
+  // Microtask debounce flag. Coalesces rapid modelChange events into one refresh.
   const pendingRefreshRef = useRef(false);
   const requestVersionRef = useRef(0);
 
@@ -317,7 +317,7 @@ export const useQuery = <T>(
     }
   }, [client, modelName, applyResult, clearSkipped]);
 
-  // Synchronous refresh — reads identity map and updates React state immediately
+  // Synchronous refresh: reads identity map and updates React state immediately
   const refreshSync = useCallback(() => {
     if (optionsRef.current.skip) {
       clearSkipped();
