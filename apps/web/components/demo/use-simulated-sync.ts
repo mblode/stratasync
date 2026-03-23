@@ -5,10 +5,10 @@ import { createSyncClient } from "@stratasync/client";
 import type { SyncClient } from "@stratasync/client";
 import type { SchemaDefinition } from "@stratasync/core";
 import { createMobXReactivity } from "@stratasync/mobx";
+import { createLocalStorage } from "@stratasync/storage-local";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DemoServer, DemoTransport } from "./demo-transport";
-import { InMemoryStorage } from "./in-memory-storage";
 import type { SyncAnimation } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ const createDemoInfra = () => {
     optimistic: true,
     reactivity,
     schema,
-    storage: new InMemoryStorage(),
+    storage: createLocalStorage({ prefix: "demo-a" }),
     transport: transportA,
   });
 
@@ -87,7 +87,7 @@ const createDemoInfra = () => {
     optimistic: true,
     reactivity,
     schema,
-    storage: new InMemoryStorage(),
+    storage: createLocalStorage({ prefix: "demo-b" }),
     transport: transportB,
   });
 
