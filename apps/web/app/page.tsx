@@ -39,28 +39,33 @@ const client = createSyncClient({
   reactivity: createMobXReactivity(),
 })`;
 
-const HOOKS_SNIPPET = `import { useQuery, useSyncClient } from "@stratasync/react"
+const HOOKS_SNIPPET = `import { observer } from "mobx-react-lite"
+import { useQuery, useSyncClient } from "@stratasync/react"
 
-function TodoList() {
+const TodoList = observer(() => {
   const { data: todos } = useQuery("Todo", {
     where: (t) => !t.completed,
   })
   const { client } = useSyncClient()
+
+  const addTodo = async () => {
+    const todo = await client.create("Todo", {
+      title: "New todo",
+      completed: false,
+    })
+    todo.title = "Actually, a better title"
+    await todo.save()
+  }
 
   return (
     <ul>
       {todos.map((todo) => (
         <li key={todo.id}>{todo.title}</li>
       ))}
-      <button onClick={() => client.create("Todo", {
-        title: "New todo",
-        completed: false,
-      })}>
-        Add
-      </button>
+      <button onClick={addTodo}>Add</button>
     </ul>
   )
-}`;
+})`;
 
 const features = [
   {
@@ -251,7 +256,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h2 className="font-semibold font-sans text-xl tracking-tight">
-                    Use React hooks
+                    Build reactive components
                   </h2>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton

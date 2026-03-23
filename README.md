@@ -42,32 +42,33 @@ class Todo extends Model {
 ```
 
 ```tsx
+import { observer } from "mobx-react-lite";
 import { useQuery, useSyncClient } from "@stratasync/react";
 
-function TodoList() {
+const TodoList = observer(() => {
   const { data: todos } = useQuery("Todo", {
     where: (t) => !t.completed,
   });
   const { client } = useSyncClient();
+
+  const addTodo = async () => {
+    const todo = await client.create("Todo", {
+      title: "New todo",
+      completed: false,
+    });
+    todo.title = "Actually, a better title";
+    await todo.save();
+  };
 
   return (
     <ul>
       {todos.map((todo) => (
         <li key={todo.id}>{todo.title}</li>
       ))}
-      <button
-        onClick={() =>
-          client.create("Todo", {
-            title: "New todo",
-            completed: false,
-          })
-        }
-      >
-        Add
-      </button>
+      <button onClick={addTodo}>Add</button>
     </ul>
   );
-}
+});
 ```
 
 ### Documentation
