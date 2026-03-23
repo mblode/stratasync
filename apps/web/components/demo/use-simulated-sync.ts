@@ -68,6 +68,7 @@ const SEED_ROWS = [
 // ---------------------------------------------------------------------------
 
 const clearDemoStorage = (prefix: string) => {
+  if (typeof window === "undefined") {return;}
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i);

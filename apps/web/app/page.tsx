@@ -10,7 +10,7 @@ import {
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
-import { SyncDemo } from "@/components/demo/sync-demo";
+import { SyncDemoClient } from "@/components/demo/sync-demo-client";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -190,7 +190,7 @@ const Home = async () => {
           </div>
 
           {/* Interactive demo */}
-          <SyncDemo />
+          <SyncDemoClient />
 
           {/* Features */}
           <section className="py-16">

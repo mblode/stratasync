@@ -20,7 +20,9 @@ export { useQuery, useQueryAll, useQueryCount } from "./hooks/use-query.js";
 export {
   useSyncClient,
   useSyncClientInstance,
+  useSyncError,
   useSyncReady,
+  useSyncReadyPromise,
   useSyncState,
 } from "./hooks/use-sync-client.js";
 export type {
