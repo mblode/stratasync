@@ -1,5 +1,15 @@
 # @stratasync/transport-graphql
 
+## 0.2.3
+
+### Patch Changes
+
+- 3f7626e: Bug fixes and improvements across all packages
+- Updated dependencies [3f7626e]
+  - @stratasync/core@0.2.3
+  - @stratasync/client@0.2.3
+  - @stratasync/y-doc@0.2.3
+
 ## 0.2.2
 
 ### Patch Changes
