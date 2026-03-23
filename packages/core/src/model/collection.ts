@@ -26,6 +26,38 @@ interface InferredRelation {
   foreignKey: string;
 }
 
+type CollectionMutation<T extends Model> =
+  | { item: T; type: "add" }
+  | { item: T; type: "remove" }
+  | { type: "clear" };
+
+const findMatchingCollectionItemIndex = <T extends Model>(
+  items: T[],
+  item: T
+): number => {
+  const itemId =
+    typeof item.id === "string" && item.id.length > 0 ? item.id : null;
+
+  if (!itemId) {
+    return items.indexOf(item);
+  }
+
+  return items.findIndex((candidate) => candidate.id === itemId);
+};
+
+const replaceOrAppendCollectionItem = <T extends Model>(
+  items: T[],
+  item: T
+): void => {
+  const index = findMatchingCollectionItemIndex(items, item);
+  if (index === -1) {
+    items.push(item);
+    return;
+  }
+
+  items[index] = item;
+};
+
 const inferredCollectionRelationCache = new Map<
   string,
   InferredRelation | null
@@ -64,6 +96,7 @@ export class LazyCollection<T extends Model> {
   private elementsCache: T[] = [];
   private hydrated = false;
   private hydrating?: CachedPromise<T[]>;
+  private pendingMutations: CollectionMutation<T>[] = [];
   private owner?: Model;
   private propertyName?: string;
   private modelName?: string;
@@ -168,6 +201,7 @@ export class LazyCollection<T extends Model> {
   add(item: T): void {
     this.ensureHydrating();
     this.elementsCache.push(item);
+    this.recordMutation({ item, type: "add" });
   }
 
   remove(item: T): boolean {
@@ -177,6 +211,7 @@ export class LazyCollection<T extends Model> {
       return false;
     }
     this.elementsCache.splice(index, 1);
+    this.recordMutation({ item, type: "remove" });
     return true;
   }
 
@@ -184,6 +219,7 @@ export class LazyCollection<T extends Model> {
     this.ensureHydrating();
     this.elementsCache = [];
     this.hydrated = true;
+    this.recordMutation({ type: "clear" });
   }
 
   toArray(): T[] {
@@ -207,12 +243,17 @@ export class LazyCollection<T extends Model> {
       return Promise.resolve(this.elementsCache);
     }
 
+    const localElements = [...this.elementsCache];
+    this.pendingMutations = [];
     const promise = (async () => {
       try {
         const items = await this.loadElements();
-        this.elementsCache = items;
+        const merged = this.mergeLoadedItems(items, localElements);
+        this.elementsCache = merged;
         this.hydrated = true;
-        return items;
+        this.hydrating = undefined;
+        this.pendingMutations = [];
+        return merged;
       } catch (error) {
         this.hydrating = undefined;
         throw error;
@@ -261,5 +302,38 @@ export class LazyCollection<T extends Model> {
 
     // oxlint-disable-next-line prefer-native-coercion-functions
     return items.filter((item): item is T => Boolean(item));
+  }
+
+  private recordMutation(mutation: CollectionMutation<T>): void {
+    if (this.hydrating) {
+      this.pendingMutations.push(mutation);
+    }
+  }
+
+  private mergeLoadedItems(items: T[], localElements: T[]): T[] {
+    const merged = [...items];
+
+    for (const item of localElements) {
+      replaceOrAppendCollectionItem(merged, item);
+    }
+
+    for (const mutation of this.pendingMutations) {
+      if (mutation.type === "clear") {
+        merged.length = 0;
+        continue;
+      }
+
+      if (mutation.type === "add") {
+        replaceOrAppendCollectionItem(merged, mutation.item);
+        continue;
+      }
+
+      const index = findMatchingCollectionItemIndex(merged, mutation.item);
+      if (index !== -1) {
+        merged.splice(index, 1);
+      }
+    }
+
+    return merged;
   }
 }

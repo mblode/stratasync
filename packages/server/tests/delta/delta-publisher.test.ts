@@ -1,5 +1,6 @@
 import {
   createCompositeDeltaPublisher,
+  createDeltaSubscriber,
   createInMemoryDeltaBus,
   createInMemoryDeltaPublisher,
   createInMemoryDeltaSubscriber,
@@ -256,5 +257,32 @@ describe("CompositeDeltaPublisher", () => {
 
     await composite.publishMany(actions, ["g1"]);
     expect(pub.calls).toHaveLength(2);
+  });
+});
+
+describe("DeltaSubscriber", () => {
+  it("does not duplicate Redis subscriptions when started twice", async () => {
+    const subscriberRedis = {
+      connect: vi.fn().mockResolvedValue(),
+      on: vi.fn(),
+      quit: vi.fn().mockResolvedValue(),
+      subscribe: vi.fn().mockResolvedValue(),
+      unsubscribe: vi.fn().mockResolvedValue(),
+    };
+    const redis = {
+      duplicate: vi.fn(() => subscriberRedis),
+    };
+
+    const subscriber = createDeltaSubscriber(redis as never);
+
+    await subscriber.start();
+    await subscriber.start();
+    await subscriber.stop();
+
+    expect(redis.duplicate).toHaveBeenCalledOnce();
+    expect(subscriberRedis.connect).toHaveBeenCalledOnce();
+    expect(subscriberRedis.subscribe).toHaveBeenCalledOnce();
+    expect(subscriberRedis.unsubscribe).toHaveBeenCalledOnce();
+    expect(subscriberRedis.quit).toHaveBeenCalledOnce();
   });
 });

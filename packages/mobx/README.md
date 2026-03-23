@@ -13,7 +13,7 @@ sync-mobx implements the reactivity adapter interface defined in `@stratasync/co
 ## Installation
 
 ```bash
-npm install @stratasync/mobx
+npm install @stratasync/mobx mobx
 ```
 
 Peer dependency: `mobx` ^6.0.0
@@ -23,13 +23,12 @@ Peer dependency: `mobx` ^6.0.0
 Register the MobX adapter when initializing the sync client:
 
 ```typescript
-import { createMobxAdapter } from "@stratasync/mobx";
+import { createSyncClient } from "@stratasync/client";
+import { createMobXReactivity } from "@stratasync/mobx";
 
-const adapter = createMobxAdapter();
-
-// Pass to SyncClient configuration
-const client = new SyncClient({
-  reactivityAdapter: adapter,
+const client = createSyncClient({
+  reactivity: createMobXReactivity(),
+  // ...storage, transport
 });
 ```
 

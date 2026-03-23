@@ -9,6 +9,7 @@ Implements `ReactivityAdapter` using MobX. Makes synced model properties observa
 
 - **`mobxReactivityAdapter`**: a pre-configured singleton implementing `ReactivityAdapter` with MobX observables, computed values, reactions, and batched updates
 - **`createMobXReactivity`**: a factory function returning the same adapter (useful for explicit instantiation)
+- **MobX helpers**: dirty tracking, relation helpers, and model utilities
 - **Core re-exports**: model decorators and base classes from `@stratasync/core` (see [Re-exported core APIs](#re-exported-core-apis))
 
 ## Installation
@@ -111,9 +112,10 @@ Import decorators and base classes directly from `@stratasync/mobx`:
 
 ```ts
 import {
+  BackReference,
   Model,
-  Collection,
   ClientModel,
+  OneToMany,
   Property,
   Reference,
   ReferenceArray,
@@ -128,6 +130,8 @@ import {
   Model,
   ClientModel,
   Property,
+  createDirtyTracker,
+  computedReference,
   mobxReactivityAdapter,
 } from "@stratasync/mobx";
 
@@ -137,6 +141,22 @@ class Task extends Model {
   @Property() description!: string;
   @Property() priority!: number;
 }
+```
+
+Additional root exports:
+
+```ts
+import {
+  cloneModelData,
+  computedCollection,
+  computedReference,
+  createDirtyTracker,
+  diffModels,
+  getDirtyTracker,
+  initMobXObservability,
+  isModelDirty,
+  toPlainObject,
+} from "@stratasync/mobx";
 ```
 
 ## How it works

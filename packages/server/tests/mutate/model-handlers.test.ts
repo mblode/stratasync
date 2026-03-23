@@ -12,9 +12,9 @@ const mockDb = {};
 const createMockDelegate = (
   overrides?: Partial<MutationDelegate>
 ): MutationDelegate => ({
-  deleteById: vi.fn().mockResolvedValue(),
+  deleteById: vi.fn().mockResolvedValue(1),
   insert: vi.fn().mockResolvedValue(),
-  updateById: vi.fn().mockResolvedValue(),
+  updateById: vi.fn().mockResolvedValue(1),
   ...overrides,
 });
 
@@ -194,6 +194,40 @@ describe("createModelHandler: update", () => {
       "Update not configured for this model"
     );
   });
+
+  it("throws when the update delegate affects no rows", async () => {
+    const def: StandardModelDef = {
+      actions: new Set(["U"]),
+      delegate: createMockDelegate({
+        updateById: vi.fn().mockResolvedValue(0),
+      }),
+      insertFields: baseInsertFields,
+      kind: "standard",
+      updateFields: new Set(["title"]),
+    };
+    const handler = createModelHandler(def);
+
+    await expect(
+      handler(mockDb, "id-1", { title: "Updated" }, "U")
+    ).rejects.toThrow("Invalid mutation: record not found");
+  });
+
+  it("accepts update delegates that do not report affected rows", async () => {
+    const def: StandardModelDef = {
+      actions: new Set(["U"]),
+      delegate: createMockDelegate({
+        updateById: vi.fn().mockResolvedValue(),
+      }),
+      insertFields: baseInsertFields,
+      kind: "standard",
+      updateFields: new Set(["title"]),
+    };
+    const handler = createModelHandler(def);
+
+    await expect(
+      handler(mockDb, "id-1", { title: "Updated" }, "U")
+    ).resolves.toEqual({ title: "Updated" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -237,6 +271,60 @@ describe("createModelHandler: delete", () => {
     expect(deleteByPayload).toHaveBeenCalledWith(mockDb, payload);
     expect(result).toEqual(payload);
   });
+
+  it("throws when the composite delete delegate affects no rows", async () => {
+    const payload = { labelId: "l1", taskId: "t1" };
+    const deleteByPayload = vi.fn().mockResolvedValue({ rowCount: 0 });
+    const delegate: MutationDelegate = {
+      deleteByPayload,
+      insert: vi.fn().mockResolvedValue(),
+    };
+    const def: ModelDef = {
+      actions: new Set(["D"]),
+      delegate,
+      insertFields: { labelId: { type: "string" }, taskId: { type: "string" } },
+      kind: "composite",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(handler(mockDb, "id-1", payload, "D")).rejects.toThrow(
+      "Invalid mutation: record not found"
+    );
+  });
+
+  it("throws when the delete delegate affects no rows", async () => {
+    const delegate = createMockDelegate({
+      deleteById: vi.fn().mockResolvedValue(0),
+    });
+    const def: StandardModelDef = {
+      actions: new Set(["D"]),
+      delegate,
+      insertFields: baseInsertFields,
+      kind: "standard",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(
+      handler(mockDb, "id-1", { extra: "data" }, "D")
+    ).rejects.toThrow("Invalid mutation: record not found");
+  });
+
+  it("accepts delete delegates that do not report affected rows", async () => {
+    const delegate = createMockDelegate({
+      deleteById: vi.fn().mockResolvedValue(),
+    });
+    const def: StandardModelDef = {
+      actions: new Set(["D"]),
+      delegate,
+      insertFields: baseInsertFields,
+      kind: "standard",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(
+      handler(mockDb, "id-1", { extra: "data" }, "D")
+    ).resolves.toEqual({ extra: "data" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -273,6 +361,21 @@ describe("createModelHandler: archive/unarchive", () => {
     expect(result).toMatchObject({ archivedAt: epoch });
   });
 
+  it("requires archivedAt for archive mutations", async () => {
+    const def: StandardModelDef = {
+      actions: new Set(["A"]),
+      delegate,
+      insertFields: baseInsertFields,
+      kind: "standard",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(handler(mockDb, "id-1", {}, "A")).rejects.toThrow(
+      "archivedAt is required"
+    );
+    expect(delegate.updateById).not.toHaveBeenCalled();
+  });
+
   it("unarchive sets archivedAt to null via updateById", async () => {
     const def: StandardModelDef = {
       actions: new Set(["V"]),
@@ -291,6 +394,38 @@ describe("createModelHandler: archive/unarchive", () => {
     expect(updateData.archivedAt).toBeNull();
 
     expect(result).toMatchObject({ archivedAt: null });
+  });
+
+  it("throws when archive affects no rows", async () => {
+    const def: StandardModelDef = {
+      actions: new Set(["A"]),
+      delegate: createMockDelegate({
+        updateById: vi.fn().mockResolvedValue(0),
+      }),
+      insertFields: baseInsertFields,
+      kind: "standard",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(
+      handler(mockDb, "id-1", { archivedAt: Date.now() }, "A")
+    ).rejects.toThrow("Invalid mutation: record not found");
+  });
+
+  it("throws when unarchive affects no rows", async () => {
+    const def: StandardModelDef = {
+      actions: new Set(["V"]),
+      delegate: createMockDelegate({
+        updateById: vi.fn().mockResolvedValue(0),
+      }),
+      insertFields: baseInsertFields,
+      kind: "standard",
+    };
+    const handler = createModelHandler(def);
+
+    await expect(handler(mockDb, "id-1", {}, "V")).rejects.toThrow(
+      "Invalid mutation: record not found"
+    );
   });
 
   it("throws when archive is called on composite model", () => {

@@ -29,6 +29,14 @@ import {
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 5000;
 
+const setNdjsonStreamHeaders = (reply: FastifyReply): void => {
+  reply.raw.statusCode = 200;
+  reply.raw.setHeader("Cache-Control", "no-cache");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("Content-Type", "application/x-ndjson");
+  reply.raw.setHeader("Transfer-Encoding", "chunked");
+};
+
 interface RegisterRoutesOptions {
   bootstrapService: BootstrapService;
   deltaService: DeltaService;
@@ -73,15 +81,7 @@ export const registerSyncRoutes = (
       );
       const { schemaHash } = query;
 
-      const origin = request.headers.origin || "*";
-      reply.raw.writeHead(200, {
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Origin": origin,
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "Content-Type": "application/x-ndjson",
-        "Transfer-Encoding": "chunked",
-      });
+      setNdjsonStreamHeaders(reply);
 
       try {
         for await (const line of bootstrapService.generateBootstrapNdjson(
@@ -118,14 +118,7 @@ export const registerSyncRoutes = (
       const syncUser = getSyncUser(request);
       const { firstSyncId, requests } = request.body;
 
-      const origin = request.headers.origin || "*";
-      reply.raw.writeHead(200, {
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Origin": origin,
-        "Cache-Control": "no-cache",
-        "Content-Type": "application/x-ndjson",
-        "Transfer-Encoding": "chunked",
-      });
+      setNdjsonStreamHeaders(reply);
 
       try {
         for await (const line of bootstrapService.batchLoadNdjson(

@@ -9,6 +9,7 @@ import { openDB } from "idb";
 import {
   addTransaction,
   clearOutbox,
+  getAllTransactions,
   getPendingCount,
   getTransaction,
   getTransactionsByState,
@@ -82,6 +83,93 @@ test("outbox state transitions follow expected state machine semantics", async (
   await clearOutbox(db);
   // oxlint-disable-next-line no-await-expression-member
   assert.equal((await getTransactionsByState(db, "queued")).length, 0);
+
+  db.close();
+  await deleteDatabases([dbName]);
+});
+
+test("getAllTransactions returns transactions in created order", async () => {
+  const dbName = `outbox-order-${randomUUID()}`;
+  const db = await openDB(dbName, 1, {
+    upgrade(database) {
+      const store = database.createObjectStore(TRANSACTION_STORE, {
+        keyPath: "clientTxId",
+      });
+      store.createIndex("byState", "state");
+      store.createIndex("byCreatedAt", "createdAt");
+      store.createIndex("byBatchIndex", "batchIndex");
+    },
+  });
+
+  await addTransaction(db, {
+    action: "I",
+    clientId: "client-1",
+    clientTxId: "z-last-key",
+    createdAt: 1,
+    modelId: "task-1",
+    modelName: "Task",
+    payload: { title: "First" },
+    retryCount: 0,
+    state: "queued",
+  });
+  await addTransaction(db, {
+    action: "U",
+    clientId: "client-1",
+    clientTxId: "a-first-key",
+    createdAt: 2,
+    modelId: "task-1",
+    modelName: "Task",
+    payload: { title: "Second" },
+    retryCount: 0,
+    state: "queued",
+  });
+
+  const ordered = await getAllTransactions(db);
+  assert.deepEqual(
+    ordered.map((tx) => `${tx.clientTxId}:${tx.createdAt}`),
+    ["z-last-key:1", "a-first-key:2"]
+  );
+
+  db.close();
+  await deleteDatabases([dbName]);
+});
+
+test("concurrent updateTransaction calls merge without losing fields", async () => {
+  const dbName = `outbox-merge-${randomUUID()}`;
+  const db = await openDB(dbName, 1, {
+    upgrade(database) {
+      const store = database.createObjectStore(TRANSACTION_STORE, {
+        keyPath: "clientTxId",
+      });
+      store.createIndex("byState", "state");
+      store.createIndex("byCreatedAt", "createdAt");
+      store.createIndex("byBatchIndex", "batchIndex");
+    },
+  });
+
+  await addTransaction(db, {
+    action: "U",
+    clientId: "client-1",
+    clientTxId: "tx-merge",
+    createdAt: Date.now(),
+    modelId: "task-1",
+    modelName: "Task",
+    original: { title: "Before" },
+    payload: { title: "After" },
+    retryCount: 0,
+    state: "queued",
+  });
+
+  await Promise.all([
+    updateTransaction(db, "tx-merge", { state: "sent" }),
+    updateTransaction(db, "tx-merge", {
+      original: { title: "Server version" },
+    }),
+  ]);
+
+  const stored = await getTransaction(db, "tx-merge");
+  assert.equal(stored?.state, "sent");
+  assert.deepEqual(stored?.original, { title: "Server version" });
 
   db.close();
   await deleteDatabases([dbName]);

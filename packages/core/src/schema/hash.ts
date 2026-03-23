@@ -12,10 +12,10 @@ const FNV_PRIME_64 = 0x1_00_00_00_01_b3n;
 
 const stableHash64 = (str: string): bigint => {
   let hash = FNV_OFFSET_BASIS_64;
-  for (let i = 0; i < str.length; i += 1) {
+  for (const char of str) {
     // biome-ignore lint/suspicious/noBitwiseOperators: FNV-1a requires XOR mixing.
     // oxlint-disable-next-line no-bitwise
-    const mixed = hash ^ BigInt(str.codePointAt(i) ?? 0);
+    const mixed = hash ^ BigInt(char.codePointAt(0) ?? 0);
     hash = BigInt.asUintN(64, mixed * FNV_PRIME_64);
   }
   return hash;
@@ -57,6 +57,26 @@ const canonicalizeProperty = (
     type: prop.type,
   });
 
+const canonicalizeIndexes = (
+  indexes: ModelRegistrySnapshot["models"][string]["meta"]["indexes"]
+): { fields: string[]; unique?: boolean }[] | undefined => {
+  if (!(indexes && indexes.length > 0)) {
+    return undefined;
+  }
+
+  return indexes
+    .map(
+      (index) =>
+        sortObject({
+          fields: [...index.fields],
+          unique: index.unique,
+        }) as { fields: string[]; unique?: boolean }
+    )
+    .toSorted((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right))
+    );
+};
+
 const canonicalizeModelEntry = (
   entry: ModelRegistrySnapshot["models"][string]
 ): Record<string, unknown> => {
@@ -66,9 +86,12 @@ const canonicalizeModelEntry = (
 
   return {
     meta: sortObject({
+      groupKey: entry.meta.groupKey,
+      indexes: canonicalizeIndexes(entry.meta.indexes),
       loadStrategy: entry.meta.loadStrategy,
       name: entry.meta.name,
       partialLoadMode: entry.meta.partialLoadMode,
+      primaryKey: entry.meta.primaryKey,
       schemaVersion: entry.meta.schemaVersion,
       tableName: entry.meta.tableName,
       usedForPartialIndexes: entry.meta.usedForPartialIndexes,

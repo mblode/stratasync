@@ -49,6 +49,11 @@ const decompressFromBase64 = (encoded: string): Promise<string> => {
   return new Response(decompressedStream).text();
 };
 
+const isBootstrapEncoding = (
+  encoding: unknown
+): encoding is "json" | "gzip-base64" =>
+  encoding === "json" || encoding === "gzip-base64";
+
 export const serializeBootstrapSnapshot = async (
   snapshot: BootstrapSnapshot,
   options: SerializeBootstrapOptions = {}
@@ -84,6 +89,12 @@ export const deserializeBootstrapSnapshot = async (
 
   if (payload.encoding === "json") {
     return JSON.parse(payload.data) as BootstrapSnapshot;
+  }
+
+  if (!isBootstrapEncoding(payload.encoding)) {
+    throw new Error(
+      `Unsupported bootstrap payload encoding: ${payload.encoding}`
+    );
   }
 
   if (!canUseCompressionStreams()) {

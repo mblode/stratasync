@@ -8,8 +8,8 @@ import {
   SyncClientContext,
   SyncContext,
   SyncStatusContext,
-} from "../src/context";
-import { useYjsPresence } from "../src/hooks/use-yjs-presence";
+  useYjsPresence,
+} from "../src";
 
 // Create a mock sync client with Yjs support
 const createMockClient = (
@@ -66,7 +66,8 @@ const createWrapper = (mockData: ReturnType<typeof createMockClient>) =>
       isReady: mockData.isReady,
       isSyncing: false,
       lastSyncId: 0,
-      state: "ready" as const,
+      readyPromise: Promise.resolve(),
+      state: "syncing" as const,
     };
 
     return React.createElement(
@@ -131,7 +132,7 @@ describe(useYjsPresence, () => {
       expect(mockData.presenceManager.startViewing).not.toHaveBeenCalled();
     });
 
-    it("should not start viewing when client not ready", () => {
+    it("should start viewing even when client not ready", () => {
       const mockData = createMockClient({ isReady: false });
       const { result } = renderHook(() => useYjsPresence(testDocKey), {
         wrapper: createWrapper(mockData),
@@ -141,7 +142,10 @@ describe(useYjsPresence, () => {
         result.current.startViewing();
       });
 
-      expect(mockData.presenceManager.startViewing).not.toHaveBeenCalled();
+      expect(mockData.presenceManager.startViewing).toHaveBeenCalledWith(
+        testDocKey
+      );
+      expect(result.current.isViewing).toBeTruthy();
     });
   });
 
@@ -249,6 +253,25 @@ describe(useYjsPresence, () => {
       const refCallback = result.current.getRef();
       expectTypeOf(refCallback).toBeFunction();
     });
+
+    it("attaches auto-tracking listeners without throwing", () => {
+      const mockData = createMockClient();
+      const { result } = renderHook(
+        () => useYjsPresence(testDocKey, { trackFocus: true }),
+        {
+          wrapper: createWrapper(mockData),
+        }
+      );
+
+      const refCallback = result.current.getRef<HTMLDivElement>();
+      const element = document.createElement("div");
+
+      expect(() => {
+        act(() => {
+          refCallback(element);
+        });
+      }).not.toThrow();
+    });
   });
 
   describe("cleanup", () => {
@@ -266,6 +289,30 @@ describe(useYjsPresence, () => {
       unmount();
 
       expect(mockData.presenceManager.stopViewing).toHaveBeenCalled();
+    });
+
+    it("stops viewing when skip becomes true", () => {
+      const mockData = createMockClient();
+      const { result, rerender } = renderHook(
+        ({ skip }) => useYjsPresence(testDocKey, { skip }),
+        {
+          initialProps: { skip: false },
+          wrapper: createWrapper(mockData),
+        }
+      );
+
+      act(() => {
+        result.current.startViewing();
+      });
+
+      act(() => {
+        rerender({ skip: true });
+      });
+
+      expect(mockData.presenceManager.stopViewing).toHaveBeenCalledWith(
+        testDocKey
+      );
+      expect(result.current.isViewing).toBeFalsy();
     });
   });
 

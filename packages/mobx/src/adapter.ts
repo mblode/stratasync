@@ -9,31 +9,38 @@ import type {
   ReactivityAdapter,
 } from "@stratasync/core";
 import { setBoxFactory } from "@stratasync/core";
-import {
-  computed,
-  makeObservable,
-  observable,
-  reaction,
-  runInAction,
-} from "mobx";
+import { computed, observable, reaction, runInAction } from "mobx";
+
+const toMobXObservableOptions = function toMobXObservableOptions(
+  options?: ObservableOptions
+): {
+  deep?: boolean;
+  name?: string;
+} {
+  if (!options) {
+    return {};
+  }
+
+  return {
+    deep: options.deep,
+    name: options.name,
+  };
+};
 
 class MobXBox<T> implements ObservableBox<T> {
-  value: T;
+  private readonly box: { get(): T; set(value: T): void };
 
-  constructor(initialValue: T) {
-    this.value = initialValue;
-    makeObservable(this, {
-      value: observable,
-    });
+  constructor(initialValue: T, options?: ObservableOptions) {
+    this.box = observable.box(initialValue, toMobXObservableOptions(options));
   }
 
   get(): T {
-    return this.value;
+    return this.box.get();
   }
 
   set(value: T): void {
     runInAction(() => {
-      this.value = value;
+      this.box.set(value);
     });
   }
 }
@@ -41,8 +48,17 @@ class MobXBox<T> implements ObservableBox<T> {
 class MobXMap<K, V> implements ObservableMap<K, V> {
   private readonly map: Map<K, V>;
 
-  constructor(entries?: Iterable<[K, V]>) {
-    this.map = observable.map<K, V>(entries ? new Map(entries) : undefined);
+  constructor(entries?: Iterable<[K, V]>, options?: ObservableOptions) {
+    const initialEntries = entries ? new Map(entries) : undefined;
+    const observableOptions = toMobXObservableOptions(options);
+
+    if (Object.keys(observableOptions).length === 0) {
+      this.map = observable.map<K, V>(initialEntries);
+      return;
+    }
+
+    // oxlint-disable-next-line no-array-method-this-argument -- false positive for MobX observable.map options
+    this.map = observable.map<K, V>(initialEntries, observableOptions);
   }
 
   get(key: K): V | undefined {
@@ -95,8 +111,11 @@ class MobXMap<K, V> implements ObservableMap<K, V> {
 class MobXArray<T> implements ObservableArray<T> {
   private readonly array: T[];
 
-  constructor(items?: T[]) {
-    this.array = observable.array<T>(items ?? []);
+  constructor(items?: T[], options?: ObservableOptions) {
+    this.array = observable.array<T>(
+      items ?? [],
+      toMobXObservableOptions(options)
+    );
   }
 
   get(index: number): T | undefined {
@@ -168,34 +187,31 @@ export const mobxReactivityAdapter: ReactivityAdapter = {
     runInAction(fn);
   },
 
-  computed<T>(getter: () => T, _options?: ObservableOptions): { get(): T } {
-    const c = computed(getter);
+  computed<T>(getter: () => T, options?: ObservableOptions): { get(): T } {
+    const c = computed(
+      getter,
+      options?.name ? { name: options.name } : undefined
+    );
     return { get: () => c.get() };
   },
 
-  createArray<T>(
-    items?: T[],
-    _options?: ObservableOptions
-  ): ObservableArray<T> {
-    return new MobXArray(items);
+  createArray<T>(items?: T[], options?: ObservableOptions): ObservableArray<T> {
+    return new MobXArray(items, options);
   },
 
-  createBox<T>(
-    initialValue: T,
-    _options?: ObservableOptions
-  ): ObservableBox<T> {
-    return new MobXBox(initialValue);
+  createBox<T>(initialValue: T, options?: ObservableOptions): ObservableBox<T> {
+    return new MobXBox(initialValue, options);
   },
 
   createMap<K, V>(
     entries?: Iterable<[K, V]>,
-    _options?: ObservableOptions
+    options?: ObservableOptions
   ): ObservableMap<K, V> {
-    return new MobXMap(entries);
+    return new MobXMap(entries, options);
   },
 
-  makeObservable<T extends object>(target: T, _options?: ObservableOptions): T {
-    return observable(target);
+  makeObservable<T extends object>(target: T, options?: ObservableOptions): T {
+    return observable(target, undefined, toMobXObservableOptions(options));
   },
 
   reaction<T>(
@@ -215,11 +231,30 @@ export const mobxReactivityAdapter: ReactivityAdapter = {
  * Registers the MobX observable.box factory with sync-core's observability system.
  * Call this to enable MobX reactivity for model properties without using the full adapter.
  */
+let mobxObservabilityInitialized = false;
+
 export const initMobXObservability = (): void => {
-  setBoxFactory((initialValue) => observable.box(initialValue));
+  if (mobxObservabilityInitialized) {
+    return;
+  }
+
+  setBoxFactory((initialValue) => {
+    const box = observable.box(initialValue);
+    return {
+      get: () => box.get(),
+      set: (value) => {
+        runInAction(() => {
+          box.set(value);
+        });
+      },
+    };
+  });
+  mobxObservabilityInitialized = true;
 };
 
 export const createMobXReactivity = (): ReactivityAdapter => {
   initMobXObservability();
   return mobxReactivityAdapter;
 };
+
+initMobXObservability();

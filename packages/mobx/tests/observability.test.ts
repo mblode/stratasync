@@ -74,6 +74,15 @@ describe(makeObservableProperty, () => {
       { name: "status", newValue: "closed", oldValue: "open" },
     ]);
   });
+
+  it("does not emit changes for no-op assignments", () => {
+    const model = new TestModel();
+
+    model.title = "Initial";
+
+    expect(model.changes).toEqual([]);
+    expect(model.__data.title).toBe("Initial");
+  });
 });
 
 describe(makeReferenceModelProperty, () => {

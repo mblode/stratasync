@@ -31,8 +31,10 @@ import { GraphQLTransportAdapter } from "@stratasync/transport-graphql"
 const client = createSyncClient({
   storage: createIndexedDbStorage(),
   transport: new GraphQLTransportAdapter({
-    endpoint: "/api/sync",
+    endpoint: "/api/graphql",
+    syncEndpoint: "/api/sync",
     wsEndpoint: "wss://api.example.com/sync/ws",
+    auth: { getAccessToken: async () => "token" },
   }),
   reactivity: createMobXReactivity(),
 })`;

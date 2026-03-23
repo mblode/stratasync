@@ -20,6 +20,16 @@ export interface CheckboxProps extends Omit<
   onCheckedChange?: (checked: CheckedState) => void;
 }
 
+const getDataState = (state: {
+  checked: boolean;
+  indeterminate: boolean;
+}): string => {
+  if (state.indeterminate) {
+    return "indeterminate";
+  }
+  return state.checked ? "checked" : "unchecked";
+};
+
 const Checkbox = React.forwardRef<
   React.ElementRef<typeof CheckboxPrimitive.Root>,
   CheckboxProps
@@ -39,6 +49,21 @@ const Checkbox = React.forwardRef<
       indeterminate ??
       (checked === "indeterminate" || defaultChecked === "indeterminate");
 
+    const handleCheckedChange = React.useCallback(
+      (nextChecked: boolean) => {
+        onCheckedChange?.(nextChecked);
+      },
+      [onCheckedChange]
+    );
+
+    const renderCheckbox = React.useCallback(
+      (
+        renderProps: React.HTMLAttributes<HTMLSpanElement>,
+        state: { checked: boolean; indeterminate: boolean }
+      ) => <span {...renderProps} data-state={getDataState(state)} />,
+      []
+    );
+
     return (
       <CheckboxPrimitive.Root
         checked={checked === "indeterminate" ? false : checked}
@@ -51,20 +76,9 @@ const Checkbox = React.forwardRef<
           defaultChecked === "indeterminate" ? false : defaultChecked
         }
         indeterminate={resolvedIndeterminate}
-        onCheckedChange={(nextChecked) => onCheckedChange?.(nextChecked)}
+        onCheckedChange={handleCheckedChange}
         ref={ref}
-        render={(renderProps, state) => (
-          <span
-            {...renderProps}
-            data-state={
-              state.indeterminate
-                ? "indeterminate"
-                : state.checked
-                  ? "checked"
-                  : "unchecked"
-            }
-          />
-        )}
+        render={renderCheckbox}
         {...props}
       >
         <CheckboxPrimitive.Indicator

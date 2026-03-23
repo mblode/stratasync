@@ -24,6 +24,13 @@ test("partial index keys round trip even with colons", () => {
   assert.equal(parsed.keyValue, "abc:def");
 });
 
+test("partial index keys reject indexed keys containing colons", () => {
+  assert.throws(
+    () => createPartialIndexKey("task:Id", "abc:def"),
+    /Invalid partial index key: task:Id/
+  );
+});
+
 test("partial index store tracks coverage", async () => {
   const dbName = `partial-${randomUUID()}`;
   const db = await openDB(dbName, 1, {

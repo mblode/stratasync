@@ -7,13 +7,12 @@ Yjs CRDT utilities and integration for collaborative editing.
 - `npm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
 - `npm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
 - `npm run test`: run tests (`vitest run`)
-- `npm run lint`: lint with Oxlint
-- `npm run check-types`: type check without emitting
+- `npm run check-types`: type check package sources and tests without emitting
 
 ## Gotchas
 
 - Uses `tsconfig.build.json` for builds (not the default `tsconfig.json`).
-- `yjs` ^13.6.21 is a direct dependency. Keep in sync with the version used by sync-react and sync-transport-graphql.
+- `yjs` is a peer dependency. Install it alongside `@stratasync/y-doc`.
 - Awareness (presence) protocol requires a separate connection channel. It does not go through the sync delta pipeline.
 - Yjs documents are binary-encoded. Always use `Y.encodeStateAsUpdate` / `Y.applyUpdate`, not JSON serialization.
 

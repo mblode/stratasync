@@ -2,6 +2,7 @@ export type {
   BatchOperation,
   ModelPersistenceMeta,
   StorageAdapter,
+  StorageIndexKey,
   StorageMeta,
   StorageOptions,
 } from "@stratasync/client";

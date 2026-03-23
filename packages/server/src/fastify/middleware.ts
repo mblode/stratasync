@@ -20,8 +20,8 @@ const extractBearerToken = (authHeader: string | null): string | null => {
   if (!authHeader) {
     return null;
   }
-  const parts = authHeader.trim().split(" ");
-  if (parts.length !== 2 || parts[0] !== "Bearer") {
+  const parts = authHeader.trim().split(/\s+/);
+  if (parts.length !== 2 || parts[0]?.toLowerCase() !== "bearer") {
     return null;
   }
   return parts[1]?.trim() ?? null;
@@ -54,16 +54,33 @@ export const createSyncAuthMiddleware = (
       return;
     }
 
+    let authPayload;
     try {
-      const authPayload = await auth.verifyToken(token);
-      if (!authPayload) {
-        reply.code(401).send({ error: "Invalid token" });
+      authPayload = await auth.verifyToken(token);
+    } catch (error) {
+      logger.warn({ error }, "Sync auth failed");
+
+      if (error instanceof Error && error.message.includes("expired")) {
+        reply.code(401).send({ error: "Token expired" });
         return;
       }
 
+      reply.code(401).send({ error: "Invalid token" });
+      return;
+    }
+
+    if (!authPayload) {
+      reply.code(401).send({ error: "Invalid token" });
+      return;
+    }
+
+    try {
       const { userId } = authPayload;
-      const groupsFromDb = await syncDao.getUserGroups(userId);
-      const groups = [...new Set([...groupsFromDb, userId])];
+      const [groupsFromAuth, groupsFromDb] = await Promise.all([
+        auth.resolveGroups(userId),
+        syncDao.getUserGroups(userId),
+      ]);
+      const groups = [...new Set([...groupsFromAuth, ...groupsFromDb, userId])];
 
       const syncUser: SyncUserContext = {
         email: authPayload.email,
@@ -78,14 +95,8 @@ export const createSyncAuthMiddleware = (
         "Sync auth middleware complete"
       );
     } catch (error) {
-      logger.warn({ error }, "Sync auth failed");
-
-      if (error instanceof Error && error.message.includes("expired")) {
-        reply.code(401).send({ error: "Token expired" });
-        return;
-      }
-
-      reply.code(401).send({ error: "Invalid token" });
+      logger.error({ error }, "Sync group resolution failed");
+      reply.code(500).send({ error: "Failed to resolve sync groups" });
     }
   };
 

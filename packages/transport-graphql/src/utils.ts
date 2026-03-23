@@ -24,7 +24,7 @@ export const calculateBackoff = (
   const jitter = config.jitter ?? 0;
   if (jitter > 0) {
     const jitterAmount = clampedDelay * jitter;
-    return clampedDelay + (Math.random() * 2 - 1) * jitterAmount;
+    return Math.max(0, clampedDelay + (Math.random() * 2 - 1) * jitterAmount);
   }
 
   return clampedDelay;
@@ -83,7 +83,7 @@ const createTimeoutController = (
 /**
  * Wraps a fetch call with timeout support
  */
-const fetchWithTimeout = async (
+export const fetchWithTimeout = async (
   url: string,
   options: RequestInit,
   timeoutMs: number
@@ -139,11 +139,13 @@ export const buildRequestHeaders = (
  */
 export class HttpError extends Error {
   readonly status: number;
+  readonly body: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body = "") {
     super(message);
     this.name = "HttpError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -156,13 +158,18 @@ export const fetchChecked = async (
   timeoutMs: number | undefined,
   errorPrefix: string
 ): Promise<Response> => {
-  const res = timeoutMs
-    ? await fetchWithTimeout(url, init, timeoutMs)
-    : await fetch(url, init);
+  const res =
+    timeoutMs === undefined
+      ? await fetch(url, init)
+      : await fetchWithTimeout(url, init, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();
-    throw new HttpError(res.status, `${errorPrefix}: ${res.status} ${text}`);
+    throw new HttpError(
+      res.status,
+      `${errorPrefix}: ${res.status} ${text}`,
+      text
+    );
   }
 
   return res;
@@ -173,13 +180,14 @@ export const fetchChecked = async (
  */
 export const isNetworkError = (error: unknown): boolean => {
   if (error instanceof Error) {
+    const message = error.message.toLowerCase();
     return (
       error.name === "TypeError" ||
-      error.message.includes("network") ||
-      error.message.includes("fetch") ||
-      error.message.includes("ECONNREFUSED") ||
-      error.message.includes("ETIMEDOUT") ||
-      error.message.includes("ENETUNREACH")
+      message.includes("network") ||
+      message.includes("fetch") ||
+      message.includes("econnrefused") ||
+      message.includes("etimedout") ||
+      message.includes("enetunreach")
     );
   }
   return false;
@@ -190,10 +198,12 @@ export const isNetworkError = (error: unknown): boolean => {
  */
 export const isTimeoutError = (error: unknown): boolean => {
   if (error instanceof Error) {
+    const message = error.message.toLowerCase();
     return (
       error.name === "AbortError" ||
-      error.message.includes("timeout") ||
-      error.message.includes("aborted")
+      message.includes("timeout") ||
+      message.includes("timed out") ||
+      message.includes("aborted")
     );
   }
   return false;
@@ -220,6 +230,9 @@ export const isRetryableError = (error: unknown): boolean => {
 
   return false;
 };
+
+export const isAuthHttpError = (error: unknown): error is HttpError =>
+  error instanceof HttpError && (error.status === 401 || error.status === 403);
 
 const SYNC_ID_RE = /^\d+$/;
 
@@ -250,3 +263,46 @@ export const resolveAuthToken = async (
   }
   return token;
 };
+
+const normalizeError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+export const notifyAuthError = (auth: AuthProvider, error: unknown): void => {
+  auth.onAuthError?.(normalizeError(error));
+};
+
+export const executeWithAuthRetry = async <T>(
+  auth: AuthProvider,
+  operation: (token: string | null) => Promise<T>
+): Promise<T> => {
+  let token = await resolveAuthToken(auth);
+  let hasRetriedWithRefresh = false;
+
+  while (true) {
+    try {
+      return await operation(token);
+    } catch (error) {
+      if (
+        isAuthHttpError(error) &&
+        auth.refreshToken &&
+        !hasRetriedWithRefresh
+      ) {
+        hasRetriedWithRefresh = true;
+        token = await auth.refreshToken();
+        if (token) {
+          continue;
+        }
+      }
+
+      if (isAuthHttpError(error)) {
+        notifyAuthError(auth, error);
+      }
+      throw error;
+    }
+  }
+};
+
+export const createTransportError = <T extends Record<string, unknown>>(
+  message: string,
+  props: T
+): Error & T => Object.assign(new Error(message), props);

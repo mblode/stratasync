@@ -11,7 +11,13 @@ export const PARTIAL_INDEX_STORE = "partial_index";
 export const createPartialIndexKey = (
   indexedKey: string,
   keyValue: string
-): string => `${indexedKey}:${keyValue}`;
+): string => {
+  if (indexedKey.includes(":")) {
+    throw new Error(`Invalid partial index key: ${indexedKey}`);
+  }
+
+  return `${indexedKey}:${keyValue}`;
+};
 
 /**
  * Parses a partial index key into indexedKey and keyValue */

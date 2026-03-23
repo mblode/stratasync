@@ -32,6 +32,7 @@ import type {
   ModelChangeAction,
   ModelFactory,
   ModelFactoryFactory,
+  ModelFactoryOptions,
   ModelStore,
   QueryOptions,
   QueryResult,
@@ -42,37 +43,10 @@ import type {
 import { getModelData, getModelKey, pickOriginal } from "./utils.js";
 
 /**
- * Default model factory: creates model instances using the constructor
- * registered in ModelRegistry, falling back to plain data objects.
- */
-const defaultModelFactory: ModelFactoryFactory =
-  ({ store }) =>
-  (modelName: string, data: Record<string, unknown>) => {
-    const ctor = ModelRegistry.getModelConstructor(modelName);
-    if (!ctor) {
-      return data;
-    }
-    const instance = new ctor() as Record<string, unknown>;
-    const candidate = instance as {
-      store?: SyncStore;
-      _applyUpdate?: (changes: Record<string, unknown>) => void;
-    };
-    if ("store" in candidate) {
-      candidate.store = store;
-    }
-    if (typeof candidate._applyUpdate === "function") {
-      candidate._applyUpdate(data);
-    } else {
-      Object.assign(instance, data);
-    }
-    return instance;
-  };
-
-/**
  * Resolves a ModelFactory or ModelFactoryFactory into a ModelFactory.
  * A ModelFactoryFactory is a function that takes a store context and returns
- * a ModelFactory. We distinguish by arity: factories take 1 arg (context),
- * plain ModelFactory takes 2 (modelName, data).
+ * a ModelFactory. Prefer return-type detection over function arity so plain
+ * factories that use default/rest params are not misclassified.
  */
 const resolveModelFactory = (
   factory: ModelFactory | ModelFactoryFactory | undefined,
@@ -81,9 +55,16 @@ const resolveModelFactory = (
   if (!factory) {
     return undefined;
   }
-  if (typeof factory === "function" && factory.length <= 1) {
-    return (factory as ModelFactoryFactory)({ store: modelStore });
+
+  try {
+    const resolved = (factory as ModelFactoryFactory)({ store: modelStore });
+    if (typeof resolved === "function") {
+      return resolved;
+    }
+  } catch {
+    // Plain model factories can throw when probed with a context object.
   }
+
   return factory as ModelFactory;
 };
 
@@ -109,6 +90,95 @@ const buildEffectiveUpdate = <T extends Record<string, unknown>>(
     effectiveChanges,
   };
 };
+
+const MUTATION_START_REQUIRED_ERROR =
+  "Sync client must be started before mutations";
+
+const isAlreadySerializedValue = (
+  serializer: {
+    deserialize: (value: unknown) => unknown;
+    serialize: (value: unknown) => unknown;
+  },
+  value: unknown
+): boolean => {
+  try {
+    return Object.is(
+      serializer.serialize(serializer.deserialize(value)),
+      value
+    );
+  } catch {
+    return false;
+  }
+};
+
+const deserializeModelRecord = (
+  registry: ModelRegistry,
+  modelName: string,
+  data: Record<string, unknown>,
+  options: ModelFactoryOptions = {}
+): Record<string, unknown> => {
+  if (options.serialized === false) {
+    return data;
+  }
+
+  const properties = registry.getModelProperties(modelName);
+  if (properties.size === 0) {
+    return data;
+  }
+
+  const deserialized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key === "id" || value === undefined) {
+      deserialized[key] = value;
+      continue;
+    }
+
+    const serializer = properties.get(key)?.serializer;
+    deserialized[key] = serializer ? serializer.deserialize(value) : value;
+  }
+
+  return deserialized;
+};
+
+/**
+ * Default model factory: creates model instances using the constructor
+ * registered in ModelRegistry, falling back to plain data objects.
+ */
+const createDefaultModelFactory =
+  (registry: ModelRegistry, store: SyncStore): ModelFactory =>
+  (
+    modelName: string,
+    data: Record<string, unknown>,
+    options: ModelFactoryOptions = {}
+  ) => {
+    const hydratedData = deserializeModelRecord(
+      registry,
+      modelName,
+      data,
+      options
+    );
+    const ctor = ModelRegistry.getModelConstructor(modelName);
+    if (!ctor) {
+      return hydratedData;
+    }
+    const instance = new ctor() as Record<string, unknown>;
+    const candidate = instance as {
+      store?: SyncStore;
+      _applyUpdate?: (
+        changes: Record<string, unknown>,
+        updateOptions?: ModelFactoryOptions
+      ) => void;
+    };
+    if ("store" in candidate) {
+      candidate.store = store;
+    }
+    if (typeof candidate._applyUpdate === "function") {
+      candidate._applyUpdate(hydratedData, { ...options, serialized: false });
+    } else {
+      Object.assign(instance, hydratedData);
+    }
+    return instance;
+  };
 
 /**
  * Creates a sync client instance.
@@ -168,11 +238,16 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     entry: HistoryEntry | null,
     queuedTx?: Transaction
   ): void => {
-    if (!entry) {
+    if (!entry || queuedTx?.state === "failed") {
       return;
     }
 
     history.record(entry, queuedTx?.clientTxId);
+  };
+
+  const handleRejectedTransaction = (tx: Transaction): void => {
+    rollbackTransaction(tx);
+    history.removeByTxId(tx.clientTxId);
   };
 
   /**
@@ -333,27 +408,34 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   let hasStarted = false;
   let lifecycleVersion = 0;
 
-  const buildOutboxOptions = () => ({
-    batchDelay: options.batchDelay,
-    batchMutations: options.batchMutations,
-    clientId: orchestrator.getClientId() || "temp",
-    onTransactionRejected: rollbackTransaction,
-    onTransactionStateChange: async () => {
-      try {
-        await emitPendingCount();
-      } catch (error) {
-        emitEvent({
-          error:
-            error instanceof Error
-              ? error
-              : new Error("Failed to emit pending count"),
-          type: "syncError",
-        });
-      }
-    },
-    storage: options.storage,
-    transport: options.transport,
-  });
+  const buildOutboxOptions = () => {
+    const clientId = orchestrator.getClientId();
+    if (!clientId) {
+      throw new Error("Sync client ID is not available");
+    }
+
+    return {
+      batchDelay: options.batchDelay,
+      batchMutations: options.batchMutations,
+      clientId,
+      onTransactionRejected: handleRejectedTransaction,
+      onTransactionStateChange: async () => {
+        try {
+          await emitPendingCount();
+        } catch (error) {
+          emitEvent({
+            error:
+              error instanceof Error
+                ? error
+                : new Error("Failed to emit pending count"),
+            type: "syncError",
+          });
+        }
+      },
+      storage: options.storage,
+      transport: options.transport,
+    };
+  };
 
   const createOutboxManager = (): OutboxManager => {
     const nextOutboxManager = new OutboxManager(buildOutboxOptions());
@@ -362,33 +444,33 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     return nextOutboxManager;
   };
 
-  const replaceOutboxManager = (): OutboxManager => {
-    outboxManager?.dispose();
-    return createOutboxManager();
-  };
-
   const clearOutboxManager = (): void => {
     outboxManager?.dispose();
     outboxManager = null;
+    orchestrator.setOutboxManager(null);
+  };
+
+  const waitForInflightSends = async (): Promise<void> => {
+    if (!outboxManager) {
+      return;
+    }
+
+    await outboxManager.waitForInflightSends();
   };
 
   const getPendingCountInternal = async (pendingOpts?: {
     awaitStart?: boolean;
   }): Promise<number> => {
-    if (!outboxManager) {
-      return 0;
-    }
-
     if (pendingOpts?.awaitStart !== false && startPromise) {
       try {
         await startPromise;
       } catch {
         return 0;
       }
+    }
 
-      if (!outboxManager) {
-        return 0;
-      }
+    if (!outboxManager) {
+      return 0;
     }
 
     return outboxManager.getPendingCount();
@@ -402,6 +484,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     }
     const pendingCount = await getPendingCountInternal(pendingOpts);
     emitEvent({ pendingCount, type: "outboxChange" });
+  };
+
+  const getStartedOutboxManager = (): OutboxManager => {
+    if (!(hasStarted && outboxManager)) {
+      throw new Error(MUTATION_START_REQUIRED_ERROR);
+    }
+
+    return outboxManager;
   };
 
   const clearYjsState = (): void => {
@@ -423,6 +513,50 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const runWithStateLock = <T>(operation: () => Promise<T>): Promise<T> =>
     orchestrator.runWithStateLock(operation);
 
+  const runWithMutationOutbox = async <T>(
+    operation: (activeOutboxManager: OutboxManager) => Promise<T>
+  ): Promise<T> => {
+    if (startPromise) {
+      await startPromise;
+    }
+
+    return runWithStateLock(() => operation(getStartedOutboxManager()));
+  };
+
+  const synchronizeOutboxWithSyncCursor = async (
+    activeOutboxManager: OutboxManager
+  ): Promise<void> => {
+    await activeOutboxManager.completeUpToSyncId(orchestrator.getLastSyncId());
+    await activeOutboxManager.processPendingTransactions();
+  };
+
+  const serializeMutationRecord = (
+    modelName: string,
+    data: Record<string, unknown>
+  ): Record<string, unknown> => {
+    const properties = orchestrator.getRegistry().getModelProperties(modelName);
+    const serialized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "id" || value === undefined) {
+        serialized[key] = value;
+        continue;
+      }
+
+      const serializer = properties.get(key)?.serializer;
+      if (!serializer) {
+        serialized[key] = value;
+        continue;
+      }
+
+      serialized[key] = isAlreadySerializedValue(serializer, value)
+        ? value
+        : serializer.serialize(value);
+    }
+
+    return serialized;
+  };
+
   const createBatchLoadStream = (
     requests: BatchLoadOptions["requests"]
   ): ReturnType<SyncClientOptions["transport"]["batchLoad"]> =>
@@ -430,32 +564,6 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       firstSyncId: orchestrator.getFirstSyncId(),
       requests,
     });
-
-  const queueUpdateTransaction = async (
-    modelName: string,
-    id: string,
-    effectiveChangeRecord: Record<string, unknown>,
-    original: Record<string, unknown>,
-    mutationOptions?:
-      | {
-          original?: Record<string, unknown>;
-          onTransactionCreated?: (tx: Transaction) => void;
-        }
-      | undefined
-  ): Promise<Transaction | undefined> => {
-    if (!outboxManager) {
-      return undefined;
-    }
-
-    const queuedTx = await outboxManager.update(
-      modelName,
-      id,
-      effectiveChangeRecord,
-      original
-    );
-    mutationOptions?.onTransactionCreated?.(queuedTx);
-    return queuedTx;
-  };
 
   const processBatchLoadRow = async (
     row: ModelRow
@@ -473,7 +581,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         row.modelName
       );
       const existed = rowMap.has(rowId);
-      rowMap.merge(rowId, row.data);
+      rowMap.merge(rowId, row.data, { serialized: true });
       emitModelChange(row.modelName, rowId, existed ? "update" : "insert");
       return rowId;
     });
@@ -490,10 +598,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
 
     const stored = await options.storage.get<T>(modelName, id);
     if (stored) {
-      map.set(id, stored as T & Record<string, unknown>);
+      map.set(id, stored as T & Record<string, unknown>, { serialized: true });
       const key = getModelKey(modelName, id);
       missingModels.delete(key);
-      return stored;
+      return materializeModelResult(
+        modelName,
+        id,
+        stored as T & Record<string, unknown>
+      );
     }
 
     const model = orchestrator.getRegistry().getModelMetadata(modelName);
@@ -528,7 +640,11 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       for await (const row of stream) {
         const rowId = await processBatchLoadRow(row);
         if (row.modelName === modelName && rowId === id) {
-          found = row.data as T;
+          found = materializeModelResult(
+            modelName,
+            id,
+            row.data as T & Record<string, unknown>
+          );
         }
       }
 
@@ -629,9 +745,21 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       const client = getClientRef();
       return client.delete(modelName, id, deleteOpts);
     },
-    get: ensureModelInternal,
+    get: <T extends Record<string, unknown>>(
+      modelName: string,
+      id: string
+    ): Promise<T | null> => ensureModelInternal<T>(modelName, id),
+    getAll: <T extends Record<string, unknown>>(modelName: string): T[] =>
+      identityMaps.getMap<T>(modelName).values(),
     getByIndex: (modelName, indexName, key) =>
       options.storage.getByIndex(modelName, indexName, key),
+    getCached: <T extends Record<string, unknown>>(
+      modelName: string,
+      id: string
+    ): T | null => {
+      const map = identityMaps.getMap<T>(modelName);
+      return map.get(id) ?? null;
+    },
     hasPartialIndex: (modelName, indexName, key) =>
       options.storage.hasPartialIndex(modelName, indexName, key),
     loadByIndex: loadByIndexInternal,
@@ -647,10 +775,34 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     },
   };
 
-  const resolvedModelFactory = resolveModelFactory(
-    resolvedOptions.modelFactory ?? defaultModelFactory,
-    modelStore
-  );
+  const resolvedModelFactory =
+    resolveModelFactory(resolvedOptions.modelFactory, modelStore) ??
+    createDefaultModelFactory(orchestrator.getRegistry(), modelStore);
+
+  const materializeModelResult = <T extends Record<string, unknown>>(
+    modelName: string,
+    id: string,
+    data: T,
+    materializeOptions: {
+      preferCached?: boolean;
+    } = {}
+  ): T => {
+    if (materializeOptions.preferCached !== false) {
+      const map = identityMaps.getMap<T & Record<string, unknown>>(modelName);
+      const cached = map.get(id);
+      if (cached) {
+        return cached as T;
+      }
+    }
+
+    if (resolvedModelFactory) {
+      return resolvedModelFactory(modelName, data as Record<string, unknown>, {
+        serialized: false,
+      }) as T;
+    }
+
+    return data;
+  };
   identityMaps.setModelFactory(resolvedModelFactory);
 
   const client: SyncClient = {
@@ -661,7 +813,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithStateLock(async () => {
+      await runWithMutationOutbox(async (activeOutboxManager) => {
         const map = identityMaps.getMap(modelName);
         const existing = map.get(id);
 
@@ -679,14 +831,11 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "archive");
         }
 
-        let queuedTx: Transaction | undefined;
-        if (outboxManager) {
-          queuedTx = await outboxManager.archive(modelName, id, {
-            archivedAt: archived.archivedAt ?? undefined,
-            original,
-          });
-          mutationOptions?.onTransactionCreated?.(queuedTx);
-        }
+        const queuedTx = await activeOutboxManager.archive(modelName, id, {
+          archivedAt: archived.archivedAt ?? undefined,
+          original,
+        });
+        mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
           history.buildEntry("A", modelName, id, archived, original),
@@ -708,6 +857,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       lifecycleVersion += 1;
       startPromise = null;
       hasStarted = false;
+      await waitForInflightSends();
       await outboxManager?.clear();
       clearOutboxManager();
       clearYjsState();
@@ -738,37 +888,43 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       return orchestrator.connectionState;
     },
 
-    async create<T extends Record<string, unknown>>(
+    create<T extends Record<string, unknown>>(
       modelName: string,
       data: T,
       mutationOptions?: { onTransactionCreated?: (tx: Transaction) => void }
     ): Promise<T> {
-      return await runWithStateLock(async () => {
+      return runWithMutationOutbox(async (activeOutboxManager) => {
         const primaryKey = orchestrator.getRegistry().getPrimaryKey(modelName);
 
         // Generate ID if not provided
         const id = (data[primaryKey] as string) || generateUUID();
         const fullData = { ...data, [primaryKey]: id };
+        const serializedFullData = serializeMutationRecord(modelName, fullData);
 
         if (resolvedOptions.optimistic !== false) {
           const map = identityMaps.getMap<T>(modelName);
-          map.set(id, fullData);
+          map.set(id, fullData, { serialized: false });
           missingModels.delete(getModelKey(modelName, id));
           emitModelChange(modelName, id, "insert");
         }
 
-        let queuedTx: Transaction | undefined;
-        if (outboxManager) {
-          queuedTx = await outboxManager.insert(modelName, id, fullData);
-          mutationOptions?.onTransactionCreated?.(queuedTx);
-        }
+        const queuedTx = await activeOutboxManager.insert(
+          modelName,
+          id,
+          serializedFullData
+        );
+        mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
           history.buildEntry("I", modelName, id, fullData),
           queuedTx
         );
 
-        return fullData;
+        return materializeModelResult(
+          modelName,
+          id,
+          fullData as T & Record<string, unknown>
+        );
       });
     },
 
@@ -780,7 +936,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithStateLock(async () => {
+      await runWithMutationOutbox(async (activeOutboxManager) => {
         const map = identityMaps.getMap(modelName);
         const existing = map.get(id);
 
@@ -794,11 +950,13 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         }
 
         const original = mutationOptions?.original ?? getModelData(existing);
-        let queuedTx: Transaction | undefined;
-        if (outboxManager) {
-          queuedTx = await outboxManager.delete(modelName, id, original);
-          mutationOptions?.onTransactionCreated?.(queuedTx);
-        }
+        const serializedOriginal = serializeMutationRecord(modelName, original);
+        const queuedTx = await activeOutboxManager.delete(
+          modelName,
+          id,
+          serializedOriginal
+        );
+        mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
           history.buildEntry("D", modelName, id, {}, original),
@@ -823,9 +981,17 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       const stored = await options.storage.get<T>(modelName, id);
       if (stored) {
         // Cache in identity map
-        map.set(id, stored as T & Record<string, unknown>);
+        map.set(id, stored as T & Record<string, unknown>, {
+          serialized: true,
+        });
+        missingModels.delete(getModelKey(modelName, id));
+        return materializeModelResult(
+          modelName,
+          id,
+          stored as T & Record<string, unknown>
+        );
       }
-      return stored;
+      return null;
     },
 
     getAll<T>(modelName: string, queryOptions?: QueryOptions<T>): Promise<T[]> {
@@ -909,8 +1075,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       const startVersion = lifecycleVersion;
       let currentStartPromise: Promise<void> = Promise.resolve();
       currentStartPromise = (async () => {
-        replaceOutboxManager();
-        orchestrator.setConflictHandler(rollbackTransaction);
+        orchestrator.setConflictHandler(handleRejectedTransaction);
 
         try {
           await orchestrator.start();
@@ -919,11 +1084,29 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
             return;
           }
 
-          // Recreate with correct client ID after orchestrator resolves it.
-          replaceOutboxManager();
+          const nextOutboxManager = createOutboxManager();
           hasStarted = true;
 
           await emitPendingCount({ awaitStart: false });
+          // oxlint-disable-next-line no-void -- fire-and-forget background drain after startup
+          void (async () => {
+            try {
+              await synchronizeOutboxWithSyncCursor(nextOutboxManager);
+              await emitPendingCount({ awaitStart: false });
+            } catch (error) {
+              if (startVersion !== lifecycleVersion) {
+                return;
+              }
+
+              emitEvent({
+                error:
+                  error instanceof Error
+                    ? error
+                    : new Error("Failed to process pending transactions"),
+                type: "syncError",
+              });
+            }
+          })();
         } catch (error) {
           if (startVersion === lifecycleVersion) {
             clearOutboxManager();
@@ -950,6 +1133,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       lifecycleVersion += 1;
       startPromise = null;
       hasStarted = false;
+      await waitForInflightSends();
       clearOutboxManager();
       await orchestrator.stop();
       await pendingStart?.catch(() => {
@@ -968,7 +1152,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithStateLock(async () => {
+      await runWithMutationOutbox(async (activeOutboxManager) => {
         const map = identityMaps.getMap(modelName);
         const existing = map.get(id);
 
@@ -986,11 +1170,10 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "unarchive");
         }
 
-        let queuedTx: Transaction | undefined;
-        if (outboxManager) {
-          queuedTx = await outboxManager.unarchive(modelName, id, { original });
-          mutationOptions?.onTransactionCreated?.(queuedTx);
-        }
+        const queuedTx = await activeOutboxManager.unarchive(modelName, id, {
+          original,
+        });
+        mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
           history.buildEntry(
@@ -1009,7 +1192,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       await history.undo(applyHistoryOperation);
     },
 
-    async update<T extends Record<string, unknown>>(
+    update<T extends Record<string, unknown>>(
       modelName: string,
       id: string,
       changes: Partial<T>,
@@ -1018,45 +1201,44 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<T> {
-      // Apply the optimistic update synchronously (outside the state lock)
-      // so MobX observers see it immediately and the identity map is updated
-      // before any concurrent delta processing can run. The outbox queue and
-      // history recording still use the lock to serialize with deltas.
-      const map = identityMaps.getMap<T>(modelName);
-      const existing = map.get(id);
+      return runWithMutationOutbox(async (activeOutboxManager) => {
+        const map = identityMaps.getMap<T>(modelName);
+        const existing = map.get(id);
 
-      if (!existing) {
-        throw new Error(`Model ${modelName} with id ${id} not found`);
-      }
+        if (!existing) {
+          throw new Error(`Model ${modelName} with id ${id} not found`);
+        }
 
-      const existingData = getModelData(existing) as T;
-      const { effectiveChanges, effectiveChangeRecord } = buildEffectiveUpdate(
-        existingData,
-        changes
-      );
+        const existingData = getModelData(existing) as T;
+        const { effectiveChanges, effectiveChangeRecord } =
+          buildEffectiveUpdate(existingData, changes);
 
-      if (Object.keys(effectiveChangeRecord).length === 0) {
-        return existingData as T;
-      }
+        if (Object.keys(effectiveChangeRecord).length === 0) {
+          return existing as T;
+        }
 
-      const originalSource = mutationOptions?.original ?? existingData;
-      const original = pickOriginal(originalSource, effectiveChangeRecord);
-      const updated = { ...existingData, ...effectiveChanges } as T;
+        const originalSource = mutationOptions?.original ?? existingData;
+        const original = pickOriginal(originalSource, effectiveChangeRecord);
+        const serializedChanges = serializeMutationRecord(
+          modelName,
+          effectiveChangeRecord
+        );
+        const serializedOriginal = serializeMutationRecord(modelName, original);
+        const updated = { ...existingData, ...effectiveChanges } as T;
 
-      if (resolvedOptions.optimistic !== false) {
-        map.update(id, effectiveChanges);
-        missingModels.delete(getModelKey(modelName, id));
-        emitModelChange(modelName, id, "update");
-      }
+        if (resolvedOptions.optimistic !== false) {
+          map.update(id, effectiveChanges, { serialized: false });
+          missingModels.delete(getModelKey(modelName, id));
+          emitModelChange(modelName, id, "update");
+        }
 
-      await runWithStateLock(async () => {
-        const queuedTx = await queueUpdateTransaction(
+        const queuedTx = await activeOutboxManager.update(
           modelName,
           id,
-          effectiveChangeRecord,
-          original,
-          mutationOptions
+          serializedChanges,
+          serializedOriginal
         );
+        mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
           history.buildEntry(
@@ -1068,9 +1250,15 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           ),
           queuedTx
         );
+        return materializeModelResult(
+          modelName,
+          id,
+          updated as T & Record<string, unknown>,
+          {
+            preferCached: resolvedOptions.optimistic !== false,
+          }
+        );
       });
-
-      return updated;
     },
 
     yjs: yjsManagers,

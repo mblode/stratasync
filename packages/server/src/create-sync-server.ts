@@ -35,6 +35,39 @@ interface SyncModuleState {
   redisSubscriber: DeltaSubscriberLike | null;
 }
 
+const relayDeltaWithRetry = async (
+  localPublisher: DeltaPublisherLike,
+  action: Parameters<DeltaPublisherLike["publish"]>[0],
+  groups: string[],
+  logger: SyncLogger
+): Promise<void> => {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await localPublisher.publish(action, groups);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const logContext = {
+        attempt,
+        err: lastError,
+        syncId: action.syncId,
+      };
+
+      if (attempt === 1) {
+        logger.warn(logContext, "Retrying relayed delta after publish failure");
+      } else {
+        logger.error(logContext, "Failed to relay delta");
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+};
+
 export const createSyncServer = async (
   config: SyncServerConfig & { websocketHooks?: WebSocketHooks }
 ): Promise<SyncServer> => {
@@ -59,18 +92,25 @@ export const createSyncServer = async (
   if (config.redis) {
     const serverId = `sync-${randomUUID().slice(0, 8)}`;
     const redisPublisher = createDeltaPublisher(config.redis, serverId);
-    const redisSubscriber = createDeltaSubscriber(config.redis, serverId);
+    const redisSubscriber = createDeltaSubscriber(
+      config.redis,
+      serverId,
+      logger
+    );
 
     await redisSubscriber.start();
     state.redisSubscriber = redisSubscriber;
 
     redisSubscriber.onDelta(async (action, groups) => {
       try {
-        await localPublisher.publish(action, groups);
+        await relayDeltaWithRetry(localPublisher, action, groups, logger);
       } catch (error) {
         const formattedError =
           error instanceof Error ? error : new Error(String(error));
-        logger.error({ err: formattedError }, "Failed to relay delta");
+        logger.error(
+          { err: formattedError, syncId: action.syncId },
+          "Failed to relay delta"
+        );
       }
     });
 

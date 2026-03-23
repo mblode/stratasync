@@ -41,6 +41,17 @@ interface DeferredMapOp {
   clientTxId?: string;
 }
 
+interface BootstrapRequiredError extends Error {
+  code: "BOOTSTRAP_REQUIRED";
+}
+
+const isBootstrapRequiredError = (
+  error: unknown
+): error is BootstrapRequiredError =>
+  error instanceof Error &&
+  "code" in error &&
+  error.code === "BOOTSTRAP_REQUIRED";
+
 /**
  * Orchestrates the sync state machine
  */
@@ -65,6 +76,7 @@ export class SyncOrchestrator {
   private lastError: Error | null = null;
   private firstSyncId: SyncId = ZERO_SYNC_ID;
   private groups: string[] = [];
+  private transportConnectionCleanup: (() => void) | null = null;
 
   private deltaSubscription: AsyncIterator<DeltaPacket> | null = null;
   // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
@@ -97,15 +109,24 @@ export class SyncOrchestrator {
     this.groups = options.groups ?? [];
     this.emitEvent = emitEvent;
 
-    // Listen for transport connection changes
-    this.transport.onConnectionStateChange((state) => {
-      const previousState = this._connectionState;
-      this.setConnectionState(state);
-      this.handleConnectionChange(previousState, state);
-    });
+    this.attachTransportConnectionListener();
   }
 
-  setOutboxManager(outboxManager: OutboxManager): void {
+  private attachTransportConnectionListener(): void {
+    if (this.transportConnectionCleanup) {
+      return;
+    }
+
+    this.transportConnectionCleanup = this.transport.onConnectionStateChange(
+      (state) => {
+        const previousState = this._connectionState;
+        this.setConnectionState(state);
+        this.handleConnectionChange(previousState, state);
+      }
+    );
+  }
+
+  setOutboxManager(outboxManager: OutboxManager | null): void {
     this.outboxManager = outboxManager;
   }
 
@@ -162,6 +183,8 @@ export class SyncOrchestrator {
     if (this.running) {
       return;
     }
+
+    this.attachTransportConnectionListener();
     this.running = true;
     this.runToken += 1;
     const activeRunToken = this.runToken;
@@ -214,7 +237,9 @@ export class SyncOrchestrator {
         }
       });
     } catch (error) {
-      this.handleSyncError(error);
+      if (this.isRunActive(activeRunToken)) {
+        this.handleSyncError(error);
+      }
       throw error;
     }
   }
@@ -474,6 +499,8 @@ export class SyncOrchestrator {
       this.deltaSubscription = null;
     }
 
+    this.transportConnectionCleanup?.();
+    this.transportConnectionCleanup = null;
     await this.transport.close();
     await this.deltaPacketQueue.catch(() => {
       /* noop */
@@ -640,7 +667,7 @@ export class SyncOrchestrator {
     await this.storage.put(row.modelName, row.data);
 
     const map = this.identityMaps.getMap(row.modelName);
-    map.set(id, row.data);
+    map.set(id, row.data, { serialized: true });
   }
 
   private applyBootstrapMetadata(
@@ -718,7 +745,7 @@ export class SyncOrchestrator {
         if (typeof id !== "string") {
           continue;
         }
-        map.set(id, row);
+        map.set(id, row, { serialized: true });
       }
     }
   }
@@ -784,37 +811,98 @@ export class SyncOrchestrator {
    * Processes the delta stream
    */
   private async processDeltaStream(): Promise<void> {
-    if (!this.deltaSubscription) {
+    const subscription = this.deltaSubscription;
+    if (!subscription) {
       return;
     }
 
     try {
       while (this.running) {
+        if (!this.isRunActive(this.runToken)) {
+          break;
+        }
         await this.deltaReplayBarrier;
 
-        const subscription = this.deltaSubscription;
-        if (!subscription) {
+        if (this.deltaSubscription !== subscription) {
           break;
         }
 
         const { value, done } = await subscription.next();
         if (done) {
+          const shouldRestart =
+            this.running && this._connectionState === "connected";
+          if (this.deltaSubscription === subscription) {
+            this.deltaSubscription = null;
+          }
+          if (shouldRestart) {
+            this.startDeltaSubscription(this.lastSyncId);
+          }
           break;
         }
 
         await this.deltaReplayBarrier;
+        if (this.deltaSubscription !== subscription) {
+          break;
+        }
         await this.enqueueDeltaPacket(value);
       }
     } catch (error) {
       if (this.running) {
+        if (await this.handleBootstrapRequired(error, subscription)) {
+          return;
+        }
         this.handleSyncError(error);
         // Try to reconnect
         setTimeout(() => {
-          if (this.running) {
+          if (this.running && !this.deltaSubscription) {
             this.startDeltaSubscription();
           }
         }, 5000);
       }
+    } finally {
+      if (this.deltaSubscription === subscription) {
+        this.deltaSubscription = null;
+      }
+    }
+  }
+
+  private async handleBootstrapRequired(
+    error: unknown,
+    subscription: AsyncIterator<DeltaPacket>
+  ): Promise<boolean> {
+    if (!isBootstrapRequiredError(error) || !this.isRunActive(this.runToken)) {
+      return false;
+    }
+
+    if (this.deltaSubscription === subscription) {
+      this.deltaSubscription = null;
+    }
+
+    try {
+      await this.runWithStateLock(async () => {
+        const activeRunToken = this.runToken;
+        await this.bootstrap(activeRunToken);
+        if (!this.isRunActive(activeRunToken)) {
+          return;
+        }
+        await this.applyPendingOutboxTransactions();
+      });
+
+      if (!this.isRunActive(this.runToken)) {
+        return true;
+      }
+
+      await this.processOutboxTransactions();
+      if (this.running && !this.deltaSubscription) {
+        this.startDeltaSubscription(this.lastSyncId);
+      }
+      if (this.running) {
+        this.setState("syncing");
+      }
+      return true;
+    } catch (recoveryError) {
+      this.handleSyncError(recoveryError);
+      return true;
     }
   }
 
@@ -908,6 +996,8 @@ export class SyncOrchestrator {
     const pending = await this.getActiveOutboxTransactions();
 
     this.identityMaps.batch(() => {
+      this.touchPendingTransactionTargets(pending);
+
       // Process conflict rollbacks inside the batch.  This ensures that
       // the rollback's map.delete() and the subsequent server merge's
       // map.merge() are in the same runInAction, so microtask-scheduled
@@ -933,7 +1023,7 @@ export class SyncOrchestrator {
           continue;
         }
         if (op.type === "merge" && op.data) {
-          map.merge(op.id, op.data);
+          map.merge(op.id, op.data, { serialized: true });
         } else if (op.type === "delete") {
           map.delete(op.id);
         }
@@ -988,6 +1078,15 @@ export class SyncOrchestrator {
         tx.state === "sent" ||
         tx.state === "awaitingSync"
     );
+  }
+
+  private touchPendingTransactionTargets(pending: Transaction[]): void {
+    for (const tx of pending) {
+      const map = this.identityMaps.getMap<Record<string, unknown>>(
+        tx.modelName
+      );
+      map.get(tx.modelId);
+    }
   }
 
   /**
@@ -1307,7 +1406,9 @@ export class SyncOrchestrator {
           break;
         }
         case "U": {
-          map.merge(tx.modelId, tx.payload);
+          if (map.has(tx.modelId)) {
+            map.merge(tx.modelId, tx.payload);
+          }
           break;
         }
         case "D": {
@@ -1315,10 +1416,12 @@ export class SyncOrchestrator {
           break;
         }
         case "A": {
-          map.merge(
-            tx.modelId,
-            createArchivePayload(readArchivedAt(tx.payload))
-          );
+          if (map.has(tx.modelId)) {
+            map.merge(
+              tx.modelId,
+              createArchivePayload(readArchivedAt(tx.payload))
+            );
+          }
           break;
         }
         case "V": {
@@ -1366,22 +1469,51 @@ export class SyncOrchestrator {
     actions: SyncAction[]
   ): Promise<Set<string>> {
     const redundant = new Set<string>();
-    const createdIds = actions
-      .filter((action) => action.action === "I")
-      .map((action) => action.modelId);
+    const createsByModelId = new Map<
+      string,
+      {
+        clientTxIds: Set<string>;
+        hasLegacyCreate: boolean;
+      }
+    >();
 
-    if (createdIds.length === 0) {
-      return redundant;
+    for (const action of actions) {
+      if (action.action !== "I") {
+        continue;
+      }
+
+      const entry = createsByModelId.get(action.modelId) ?? {
+        clientTxIds: new Set<string>(),
+        hasLegacyCreate: false,
+      };
+      if (typeof action.clientTxId === "string") {
+        entry.clientTxIds.add(action.clientTxId);
+      } else {
+        entry.hasLegacyCreate = true;
+      }
+      createsByModelId.set(action.modelId, entry);
     }
 
-    const createdSet = new Set(createdIds);
+    if (createsByModelId.size === 0) {
+      return redundant;
+    }
     const outbox = await this.storage.getOutbox();
 
     for (const tx of outbox) {
-      if (tx.action === "I" && createdSet.has(tx.modelId)) {
-        await this.storage.removeFromOutbox(tx.clientTxId);
-        redundant.add(tx.clientTxId);
+      if (tx.action !== "I") {
+        continue;
       }
+
+      const entry = createsByModelId.get(tx.modelId);
+      if (!entry) {
+        continue;
+      }
+      if (!entry.hasLegacyCreate && !entry.clientTxIds.has(tx.clientTxId)) {
+        continue;
+      }
+
+      await this.storage.removeFromOutbox(tx.clientTxId);
+      redundant.add(tx.clientTxId);
     }
     return redundant;
   }
@@ -1418,9 +1550,7 @@ export class SyncOrchestrator {
         const filtered = groups.filter(
           (group): group is string => typeof group === "string"
         );
-        if (filtered.length > 0) {
-          groupUpdates.push(filtered);
-        }
+        groupUpdates.push(filtered);
       }
     }
 
@@ -1442,7 +1572,7 @@ export class SyncOrchestrator {
     const removedGroups = this.groups.filter((group) => !nextSet.has(group));
 
     if (addedGroups.length > 0) {
-      await this.bootstrapSyncGroups(addedGroups, nextSyncId);
+      await this.bootstrapSyncGroups(addedGroups, nextSyncId, this.runToken);
     }
 
     if (removedGroups.length > 0) {
@@ -1459,6 +1589,7 @@ export class SyncOrchestrator {
 
     const pending = await this.getActiveOutboxTransactions();
     this.identityMaps.batch(() => {
+      this.touchPendingTransactionTargets(pending);
       this.applyPendingTransactionsToIdentityMaps(pending);
     });
 
@@ -1469,7 +1600,8 @@ export class SyncOrchestrator {
 
   private async bootstrapSyncGroups(
     groups: string[],
-    firstSyncId: SyncId
+    firstSyncId: SyncId,
+    runToken: number
   ): Promise<void> {
     const iterator = this.transport.bootstrap({
       firstSyncId,
@@ -1481,8 +1613,30 @@ export class SyncOrchestrator {
 
     const hydrated = new Set(this.registry.getBootstrapModelNames());
 
+    const cancelIfStale = async (): Promise<boolean> => {
+      if (this.isRunActive(runToken)) {
+        return false;
+      }
+
+      try {
+        await iterator.return?.({ subscribedSyncGroups: groups });
+      } catch {
+        // Best-effort cleanup when cancellation races with bootstrap.
+      }
+
+      return true;
+    };
+
     while (true) {
+      if (await cancelIfStale()) {
+        return;
+      }
+
       const { value, done } = await iterator.next();
+      if (await cancelIfStale()) {
+        return;
+      }
+
       if (done) {
         break;
       }
@@ -1494,10 +1648,13 @@ export class SyncOrchestrator {
         continue;
       }
       await this.storage.put(row.modelName, row.data);
+      if (await cancelIfStale()) {
+        return;
+      }
 
       if (hydrated.has(row.modelName)) {
         const map = this.identityMaps.getMap(row.modelName);
-        map.merge(id, row.data);
+        map.merge(id, row.data, { serialized: true });
       }
     }
   }
@@ -1562,6 +1719,9 @@ export class SyncOrchestrator {
     (async () => {
       try {
         await this.syncNow();
+        if (this.running && !this.deltaSubscription) {
+          this.startDeltaSubscription(this.lastSyncId);
+        }
         if (this.running) {
           this.setState("syncing");
         }

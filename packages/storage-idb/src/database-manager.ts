@@ -15,24 +15,39 @@ interface DatabasesSchema extends IDBSchema {
 
 export class DatabaseManager {
   private db: IDBPDatabase<DatabasesSchema> | null = null;
+  private openPromise: Promise<void> | null = null;
 
   async open(): Promise<void> {
     if (this.db) {
       return;
     }
 
-    this.db = await openDB<DatabasesSchema>(DATABASES_DB, 1, {
-      upgrade: (database) => {
-        if (!database.objectStoreNames.contains(DATABASES_STORE)) {
-          database.createObjectStore(DATABASES_STORE, { keyPath: "name" });
-        }
-      },
-    });
+    if (this.openPromise) {
+      await this.openPromise;
+      return;
+    }
+
+    this.openPromise = (async () => {
+      this.db = await openDB<DatabasesSchema>(DATABASES_DB, 1, {
+        upgrade: (database) => {
+          if (!database.objectStoreNames.contains(DATABASES_STORE)) {
+            database.createObjectStore(DATABASES_STORE, { keyPath: "name" });
+          }
+        },
+      });
+    })();
+
+    try {
+      await this.openPromise;
+    } finally {
+      this.openPromise = null;
+    }
   }
 
   close(): void {
     this.db?.close();
     this.db = null;
+    this.openPromise = null;
   }
 
   async getDatabaseInfo(name: string): Promise<DatabaseInfo | null> {

@@ -117,34 +117,94 @@ export type DeltaSubscriberCallback = (
  */
 export class DeltaSubscriber implements DeltaSubscriberLike {
   private readonly callbacks = new Set<DeltaSubscriberCallback>();
+  private readonly logger: SyncLogger;
   private readonly redis: RedisClient;
+  private subscribePromise: Promise<void> | null = null;
+  private subscribed = false;
   private subscriberRedis: RedisClient | null = null;
   private readonly sourceId?: string;
 
-  constructor(redis: RedisClient, sourceId?: string) {
+  constructor(
+    redis: RedisClient,
+    sourceId?: string,
+    logger: SyncLogger = noopLogger
+  ) {
     this.redis = redis;
     this.sourceId = sourceId;
+    this.logger = logger;
+  }
+
+  private async subscribeToChannel(): Promise<void> {
+    if (!this.subscriberRedis || this.subscribed) {
+      return;
+    }
+
+    if (this.subscribePromise) {
+      await this.subscribePromise;
+      return;
+    }
+
+    this.subscribePromise = (async () => {
+      try {
+        await this.subscriberRedis?.subscribe(SYNC_DELTA_CHANNEL, (message) => {
+          try {
+            const delta = parseDeltaMessage(JSON.parse(message));
+            if (this.sourceId && delta.sourceId === this.sourceId) {
+              return;
+            }
+            this.notifyCallbacks(delta.action, delta.groups);
+          } catch {
+            // Invalid message, ignore
+          }
+        });
+        this.subscribed = true;
+      } finally {
+        this.subscribePromise = null;
+      }
+    })();
+
+    await this.subscribePromise;
   }
 
   async start(): Promise<void> {
-    this.subscriberRedis = this.redis.duplicate();
-    await this.subscriberRedis.connect();
+    if (this.subscriberRedis) {
+      await this.subscribeToChannel();
+      return;
+    }
 
-    await this.subscriberRedis.subscribe(SYNC_DELTA_CHANNEL, (message) => {
-      try {
-        const delta = parseDeltaMessage(JSON.parse(message));
-        if (this.sourceId && delta.sourceId === this.sourceId) {
-          return;
-        }
-        this.notifyCallbacks(delta.action, delta.groups);
-      } catch {
-        // Invalid message, ignore
+    this.subscriberRedis = this.redis.duplicate();
+    this.subscriberRedis.on("error", (error) => {
+      this.logger.warn({ error }, "Redis delta subscriber error");
+    });
+    this.subscriberRedis.on("end", () => {
+      this.subscribed = false;
+    });
+    this.subscriberRedis.on("ready", () => {
+      if (!this.subscribed) {
+        const resubscribe = async () => {
+          try {
+            await this.subscribeToChannel();
+          } catch (error) {
+            this.logger.error(
+              { error },
+              "Failed to resubscribe to delta channel"
+            );
+          }
+        };
+        resubscribe();
       }
     });
+
+    await this.subscriberRedis.connect();
+    await this.subscribeToChannel();
   }
 
   async stop(): Promise<void> {
     if (this.subscriberRedis) {
+      this.subscribed = false;
+      if (this.subscribePromise) {
+        await this.subscribePromise;
+      }
       await this.subscriberRedis.unsubscribe(SYNC_DELTA_CHANNEL);
       await this.subscriberRedis.quit();
       this.subscriberRedis = null;
@@ -310,8 +370,9 @@ export const createDeltaPublisher = (
 
 export const createDeltaSubscriber = (
   redis: RedisClient,
-  sourceId?: string
-): DeltaSubscriber => new DeltaSubscriber(redis, sourceId);
+  sourceId?: string,
+  logger: SyncLogger = noopLogger
+): DeltaSubscriber => new DeltaSubscriber(redis, sourceId, logger);
 
 export const createInMemoryDeltaBus = (): InMemoryDeltaBus =>
   new InMemoryDeltaBus();

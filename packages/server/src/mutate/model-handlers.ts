@@ -11,6 +11,7 @@ import {
   buildUpdateData,
   serializeSyncData,
 } from "./field-codecs.js";
+import { assertMutationTargetAffected } from "./write-results.js";
 
 // ---------------------------------------------------------------------------
 // Drizzle mutation delegates
@@ -22,12 +23,12 @@ export interface MutationDelegate {
     db: unknown,
     id: string,
     data: Record<string, unknown>
-  ) => Promise<void>;
-  deleteById?: (db: unknown, id: string) => Promise<void>;
+  ) => Promise<unknown>;
+  deleteById?: (db: unknown, id: string) => Promise<unknown>;
   deleteByPayload?: (
     db: unknown,
     payload: Record<string, unknown>
-  ) => Promise<void>;
+  ) => Promise<unknown>;
 }
 
 export const createStandardDelegate = <TTable extends AnyPgTable>(
@@ -37,13 +38,12 @@ export const createStandardDelegate = <TTable extends AnyPgTable>(
   const idColumn = getColumn(table, idField);
 
   return {
-    deleteById: async (db, id) => {
+    deleteById: async (db, id) =>
       await (
         db as { delete(t: AnyPgTable): { where(c: unknown): Promise<unknown> } }
       )
         .delete(table)
-        .where(eq(idColumn, id));
-    },
+        .where(eq(idColumn, id)),
     insert: async (db, data) => {
       await (
         db as {
@@ -53,7 +53,7 @@ export const createStandardDelegate = <TTable extends AnyPgTable>(
         .insert(table)
         .values(data as InferInsertModel<TTable>);
     },
-    updateById: async (db, id, data) => {
+    updateById: async (db, id, data) =>
       await (
         db as {
           update(t: AnyPgTable): {
@@ -63,8 +63,7 @@ export const createStandardDelegate = <TTable extends AnyPgTable>(
       )
         .update(table)
         .set(data as Partial<InferInsertModel<TTable>>)
-        .where(eq(idColumn, id));
-    },
+        .where(eq(idColumn, id)),
   };
 };
 
@@ -72,13 +71,12 @@ export const createCompositeDelegate = <TTable extends AnyPgTable>(
   table: TTable,
   buildDeleteWhere: (payload: Record<string, unknown>) => SQL<unknown>
 ): MutationDelegate => ({
-  deleteByPayload: async (db, payload) => {
+  deleteByPayload: async (db, payload) =>
     await (
       db as { delete(t: AnyPgTable): { where(c: unknown): Promise<unknown> } }
     )
       .delete(table)
-      .where(buildDeleteWhere(payload));
-  },
+      .where(buildDeleteWhere(payload)),
   insert: async (db, data) => {
     await (
       db as { insert(t: AnyPgTable): { values(d: unknown): Promise<unknown> } }
@@ -175,7 +173,8 @@ const handleUpdate = async (
     return {};
   }
 
-  await def.delegate.updateById(db, modelId, updateData);
+  const updateResult = await def.delegate.updateById(db, modelId, updateData);
+  assertMutationTargetAffected(updateResult);
   return serializeSyncData(updateData, def.insertFields, {
     keys: Object.keys(updateData),
   });
@@ -191,7 +190,8 @@ const handleDelete = async (
     if (!def.delegate.deleteByPayload) {
       throw new Error("Composite delete delegate missing for this model");
     }
-    await def.delegate.deleteByPayload(db, payload);
+    const deleteResult = await def.delegate.deleteByPayload(db, payload);
+    assertMutationTargetAffected(deleteResult);
     return payload;
   }
 
@@ -199,7 +199,8 @@ const handleDelete = async (
     throw new Error("Delete delegate missing for this model");
   }
 
-  await def.delegate.deleteById(db, modelId);
+  const deleteResult = await def.delegate.deleteById(db, modelId);
+  assertMutationTargetAffected(deleteResult);
   return payload;
 };
 

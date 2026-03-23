@@ -118,6 +118,51 @@ describe("delta fetching", () => {
     expect(secondUrl.searchParams.get("after")).toBe("12");
   });
 
+  it("returns the furthest packet cursor even when no action reaches it", async () => {
+    const responses = [
+      {
+        actions: [
+          {
+            action: "I",
+            data: {},
+            id: "11",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        hasMore: true,
+        lastSyncId: "20",
+      },
+      {
+        actions: [],
+        hasMore: false,
+        lastSyncId: "25",
+      },
+    ];
+
+    let callIndex = 0;
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const response = responses[callIndex] ?? responses.at(-1);
+      callIndex += 1;
+      return Promise.resolve(Response.json(response));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const iterator = fetchAllDeltas({
+      afterSyncId: "10",
+      auth: createAuthProvider(null),
+      batchSize: 1,
+      syncEndpoint: SYNC_ENDPOINT,
+    });
+
+    let next = await iterator.next();
+    while (!next.done) {
+      next = await iterator.next();
+    }
+
+    expect(next.value).toBe("25");
+  });
+
   it("uses refreshToken fallback when access token is missing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({
@@ -172,6 +217,39 @@ describe("delta fetching", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstHeaders = headersToRecord(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers
+    );
+    const secondHeaders = headersToRecord(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].headers
+    );
+    expect(firstHeaders.Authorization).toBe("Bearer stale-deltas-token");
+    expect(secondHeaders.Authorization).toBe("Bearer fresh-deltas-token");
+  });
+
+  it("refreshes and retries after a 401 delta response", async () => {
+    const refreshToken = vi.fn().mockResolvedValue("fresh-deltas-token");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          actions: [],
+          lastSyncId: "11",
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchDeltas({
+      afterSyncId: "10",
+      auth: {
+        getAccessToken: () => "stale-deltas-token",
+        refreshToken,
+      },
+      syncEndpoint: SYNC_ENDPOINT,
+    });
+
+    expect(refreshToken).toHaveBeenCalledOnce();
     const firstHeaders = headersToRecord(
       (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers
     );

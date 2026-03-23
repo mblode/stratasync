@@ -21,6 +21,43 @@ import type {
 /**
  * Provider component for the sync client
  */
+
+interface ReadyPromiseController {
+  isSettled: () => boolean;
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+const createReadyPromiseController = (
+  resolved = false
+): ReadyPromiseController => {
+  let settled = resolved;
+  // oxlint-disable-next-line consistent-function-scoping -- initial noop, reassigned inside Promise constructor
+  let resolvePromise = () => {
+    /* noop */
+  };
+
+  const promise = resolved
+    ? Promise.resolve()
+    : // oxlint-disable-next-line avoid-new -- wrapping readiness state in a promise
+      new Promise<void>((resolve) => {
+        resolvePromise = () => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve();
+        };
+      });
+
+  return {
+    isSettled: () => settled,
+    promise,
+    resolve: resolvePromise,
+  };
+};
+
 export const SyncProvider = ({
   client,
   children,
@@ -31,9 +68,26 @@ export const SyncProvider = ({
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     client.connectionState
   );
-  const lastSyncIdRef = useRef<SyncId>(client.lastSyncId);
+  const [lastSyncId, setLastSyncId] = useState<SyncId>(client.lastSyncId);
   const [backlog, setBacklog] = useState<number>(0);
   const [error, setError] = useState<Error | null>(client.lastError ?? null);
+  const readyPromiseClientRef = useRef(client);
+  const readyPromiseRef = useRef(
+    createReadyPromiseController(client.state === "syncing")
+  );
+
+  if (readyPromiseClientRef.current !== client) {
+    readyPromiseClientRef.current = client;
+    readyPromiseRef.current = createReadyPromiseController(
+      client.state === "syncing"
+    );
+  } else if (state === "syncing") {
+    readyPromiseRef.current.resolve();
+  } else if (readyPromiseRef.current.isSettled()) {
+    readyPromiseRef.current = createReadyPromiseController();
+  }
+
+  const readyPromise = readyPromiseRef.current.promise;
 
   useEffect(() => {
     let mounted = true;
@@ -41,6 +95,11 @@ export const SyncProvider = ({
     // Subscribe to state changes
     const unsubState = client.onStateChange((nextState) => {
       if (mounted) {
+        if (nextState === "syncing") {
+          readyPromiseRef.current.resolve();
+        } else if (readyPromiseRef.current.isSettled()) {
+          readyPromiseRef.current = createReadyPromiseController();
+        }
         setState(nextState);
       }
     });
@@ -55,7 +114,7 @@ export const SyncProvider = ({
       }
       switch (event.type) {
         case "syncComplete": {
-          lastSyncIdRef.current = event.lastSyncId;
+          setLastSyncId(event.lastSyncId);
           break;
         }
         case "stateChange": {
@@ -81,7 +140,8 @@ export const SyncProvider = ({
     // Sync initial state
     setState(client.state);
     setConnectionState(client.connectionState);
-    lastSyncIdRef.current = client.lastSyncId;
+    setLastSyncId(client.lastSyncId);
+    setBacklog(0);
     setError(client.lastError ?? null);
     (async () => {
       try {
@@ -134,12 +194,11 @@ export const SyncProvider = ({
       isOffline: connectionState === "disconnected",
       isReady: state === "syncing",
       isSyncing: state === "syncing" || state === "bootstrapping",
-      get lastSyncId() {
-        return lastSyncIdRef.current;
-      },
+      lastSyncId,
+      readyPromise,
       state,
     }),
-    [state, connectionState, error, client.clientId]
+    [state, connectionState, error, client.clientId, lastSyncId, readyPromise]
   );
 
   const value = useMemo<SyncContextValue>(

@@ -33,7 +33,7 @@ import { createGraphQLTransport } from "@stratasync/transport-graphql";
 const transport = createGraphQLTransport({
   endpoint: "https://api.example.com/graphql",
   syncEndpoint: "https://api.example.com/sync",
-  wsEndpoint: "wss://api.example.com/sync",
+  wsEndpoint: "wss://api.example.com/sync/ws",
   auth: {
     getAccessToken: () => getTokenFromStore(),
     refreshToken: () => refreshAccessToken(),
@@ -256,13 +256,12 @@ Fetch deltas via REST for catch-up. `fetchDeltas` for a single page, `fetchAllDe
 const packet = await transport.fetchDeltas(lastSyncId, 1000);
 
 // Paginated generator
-for await (const action of fetchAllDeltas(
-  syncEndpoint,
-  lastSyncId,
+for await (const action of fetchAllDeltas({
+  afterSyncId: lastSyncId,
   auth,
-  {},
-  1000
-)) {
+  batchSize: 1000,
+  syncEndpoint,
+})) {
   await applyAction(action);
 }
 ```
@@ -275,8 +274,8 @@ Bridges Yjs protocol messages over the existing WebSocket: no separate connectio
 const yjsTransport = transport.getYjsTransport();
 
 // Use with YjsDocumentManager and YjsPresenceManager
-documentManager.setTransport(yjsTransport);
 presenceManager.setTransport(yjsTransport);
+documentManager.setTransport(yjsTransport);
 ```
 
 The `YjsTransportAdapter` implements `YjsTransport` from `@stratasync/y-doc`:
@@ -296,14 +295,12 @@ class YjsTransportAdapter implements YjsTransport {
 | ------------------------------------------- | ----------------------------------------------------------------------- |
 | `retryWithBackoff(fn, config, shouldRetry)` | Retries an async function with exponential backoff.                     |
 | `calculateBackoff(attempt, config)`         | Computes the delay for a given retry attempt with jitter.               |
-| `delay(ms)`                                 | Returns a promise that resolves after `ms` milliseconds.                |
 | `fetchWithTimeout(url, options, timeoutMs)` | Wraps `fetch()` with an `AbortController` timeout.                      |
-| `createTimeoutController(timeoutMs)`        | Creates an `AbortController` that auto-aborts after a timeout.          |
 | `isNetworkError(error)`                     | Checks for network-level errors (TypeError, ECONNREFUSED, and others).  |
 | `isTimeoutError(error)`                     | Checks for timeout/abort errors.                                        |
 | `isRetryableError(error)`                   | Returns `true` for network errors, timeouts, 5xx, and 429 status codes. |
 | `isAuthError(error)`                        | Returns `true` for 401/403 or Unauthorized/Forbidden errors.            |
-| `parseBigInt(value)`                        | Converts a string or number to a numeric value (for sync IDs).          |
+| `parseSyncId(value)`                        | Validates a string-encoded sync ID without losing precision.            |
 
 ## Architecture role
 

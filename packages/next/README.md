@@ -4,11 +4,11 @@ Next.js App Router integration helpers.
 
 ## Overview
 
-sync-next bridges the sync engine with Next.js App Router patterns:
+`@stratasync/next` bridges the sync engine with Next.js App Router patterns:
 
-- **Server utilities**: Server-side setup and initialization
-- **Client utilities**: Hooks and providers for client components
-- **Metadata helpers**: Integration with Next.js metadata API
+- **Server utilities**: Bootstrap snapshot fetch/serialize/seed helpers
+- **Client utilities**: The `NextSyncProvider` client component
+- **Shared types**: Bootstrap and provider type exports
 
 ## Installation
 
@@ -16,42 +16,70 @@ sync-next bridges the sync engine with Next.js App Router patterns:
 npm install @stratasync/next
 ```
 
-Peer dependencies: `next` ^14.0.0 || ^15.0.0, `react` ^18.0.0 || ^19.0.0
+Peer dependencies: `next` ^14.0.0 || ^15.0.0 || ^16.0.0, `react` ^18.0.0 || ^19.0.0
 
 ## Exports
 
-The package has separate entry points for server and client code:
+Use explicit subpaths for predictable behavior:
 
 ```typescript
 // Client components
-import {} from /* client utilities */ "@stratasync/next/client";
+import {
+  NextSyncProvider,
+  type NextSyncProviderProps,
+} from "@stratasync/next/client";
 
 // Server components / route handlers
-import {} from /* server utilities */ "@stratasync/next/server";
+import {
+  decodeBootstrapSnapshot,
+  deserializeBootstrapSnapshot,
+  encodeBootstrapSnapshot,
+  isBootstrapSnapshotStale,
+  prefetchBootstrap,
+  seedStorageFromBootstrap,
+  serializeBootstrapSnapshot,
+  type BootstrapSnapshot,
+  type BootstrapSnapshotPayload,
+  type PrefetchBootstrapOptions,
+  type SeedStorageOptions,
+  type SeedStorageResult,
+  type SerializeBootstrapOptions,
+} from "@stratasync/next/server";
 
-// Default export (client-side)
-import {} from /* default exports */ "@stratasync/next";
+// Root import aliases the client entrypoint.
+import { NextSyncProvider } from "@stratasync/next";
 ```
 
 ## Usage
 
-Use Server Components for initial data loading and Client Components for interactive sync features:
+Use Server Components for bootstrap loading and Client Components for interactive sync features:
 
 ```tsx
-// Server Component: fetch initial data
-import { initSync } from "@stratasync/next/server";
+import {
+  prefetchBootstrap,
+  seedStorageFromBootstrap,
+  type SeedStorageOptions,
+} from "@stratasync/next/server";
+
+declare const storage: SeedStorageOptions["storage"];
 
 export default async function Page() {
-  const initialData = await initSync();
-  return <ClientApp initialData={initialData} />;
+  const snapshot = await prefetchBootstrap({ endpoint: "/sync" });
+  await seedStorageFromBootstrap({ snapshot, storage });
+  return <ClientApp>{/* render app */}</ClientApp>;
 }
+```
 
-// Client Component: use sync hooks
-("use client");
-import { useSyncClient } from "@stratasync/next/client";
+```tsx
+"use client";
 
-function ClientApp({ initialData }) {
-  const client = useSyncClient({ initialData });
-  // ...
+import { NextSyncProvider } from "@stratasync/next/client";
+import type { SyncClient } from "@stratasync/client";
+import type { ReactNode } from "react";
+
+declare const client: SyncClient;
+
+function ClientApp({ children }: { children: ReactNode }) {
+  return <NextSyncProvider client={client}>{children}</NextSyncProvider>;
 }
 ```

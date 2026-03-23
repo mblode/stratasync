@@ -363,9 +363,38 @@ describe(OutboxManager, () => {
     const awaitingSync = await storage.getOutbox();
     expect(awaitingSync[0]?.state).toBe("awaitingSync");
     expect(awaitingSync[0]?.syncIdNeededForCompletion).toBe("5");
+    expect(awaitingSync[0]?.lastError).toBeUndefined();
 
     await manager.completeUpToSyncId("5");
     expect(await storage.getOutbox()).toHaveLength(0);
+  });
+
+  it("removes rejected transactions from storage and local echo tracking", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      batchMutations: false,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport((batch) => ({
+        lastSyncId: "0",
+        results: batch.transactions.map((tx) => ({
+          clientTxId: tx.clientTxId,
+          error: "rejected by server",
+          success: false,
+        })),
+        success: true,
+      })),
+    });
+
+    const tx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Rejected",
+    });
+
+    expect(tx.state).toBe("failed");
+    expect(await storage.getOutbox()).toHaveLength(0);
+    expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeFalsy();
   });
 
   it("does not double-send a batch that is already in flight", async () => {
@@ -412,5 +441,62 @@ describe(OutboxManager, () => {
     const outbox = await storage.getOutbox();
     expect(outbox[0]?.state).toBe("awaitingSync");
     expect(outbox[0]?.syncIdNeededForCompletion).toBe("7");
+  });
+
+  it("drops only the invalid transaction from a rejected REST batch", async () => {
+    const storage = new InMemoryStorage();
+    let invalidClientTxId = "";
+    const mutate = vi
+      .fn<(batch: TransactionBatch) => Promise<MutateResult>>()
+      .mockImplementationOnce(() =>
+        Promise.reject(
+          Object.assign(new Error("Invalid transaction"), {
+            clientTxId: invalidClientTxId,
+            code: "INVALID_MUTATION_BATCH",
+            details: [{ field: "payload", message: "invalid" }],
+          })
+        )
+      )
+      .mockImplementationOnce((batch) =>
+        Promise.resolve({
+          lastSyncId: "9",
+          results: batch.transactions.map((tx) => ({
+            clientTxId: tx.clientTxId,
+            success: true,
+            syncId: "9",
+          })),
+          success: true,
+        })
+      );
+    const rejected: string[] = [];
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      onTransactionRejected: (tx) => {
+        rejected.push(tx.clientTxId);
+      },
+      storage,
+      transport: new TestTransport(mutate),
+    });
+
+    const invalidTx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Invalid",
+    });
+    invalidClientTxId = invalidTx.clientTxId;
+    const validTx = await manager.insert("Task", "task-2", {
+      id: "task-2",
+      title: "Valid",
+    });
+
+    await manager.flush();
+
+    expect(rejected).toEqual([invalidTx.clientTxId]);
+    expect(mutate).toHaveBeenCalledTimes(2);
+    const outbox = await storage.getOutbox();
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.clientTxId).toBe(validTx.clientTxId);
+    expect(outbox[0]?.state).toBe("awaitingSync");
+    expect(outbox[0]?.syncIdNeededForCompletion).toBe("9");
   });
 });

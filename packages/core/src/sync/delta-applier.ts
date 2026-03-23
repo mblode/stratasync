@@ -91,32 +91,34 @@ const applySingleAction = async (
   action: SyncAction,
   target: DeltaTarget,
   options: ApplyOptions
-): Promise<void> => {
+): Promise<boolean> => {
   const { modelName, modelId, data } = action;
 
   switch (action.action) {
     case "I": {
       await target.put(modelName, modelId, data);
-      break;
+      return true;
     }
 
     case "U": {
       if (options.mergeUpdates) {
         await target.patch(modelName, modelId, data);
-      } else {
-        const existing = await target.get(modelName, modelId);
-        await target.put(
-          modelName,
-          modelId,
-          existing ? { ...existing, ...data } : data
-        );
+        return true;
       }
-      break;
+      const existing = await target.get(modelName, modelId);
+      if (!existing) {
+        return false;
+      }
+      await target.put(modelName, modelId, {
+        ...existing,
+        ...data,
+      });
+      return true;
     }
 
     case "D": {
       await target.delete(modelName, modelId);
-      break;
+      return true;
     }
 
     case "A": {
@@ -127,7 +129,7 @@ const applySingleAction = async (
         data,
         createArchivePayload(readArchivedAt(data))
       );
-      break;
+      return true;
     }
 
     case "V": {
@@ -138,10 +140,10 @@ const applySingleAction = async (
         data,
         createUnarchivePatch()
       );
-      break;
+      return true;
     }
     default: {
-      break;
+      return false;
     }
   }
 };
@@ -180,6 +182,11 @@ const updateResult = (result: ApplyResult, action: SyncAction): void => {
   }
 };
 
+const markSkipped = (result: ApplyResult, actionSyncId: SyncId): void => {
+  result.skipped += 1;
+  result.lastSyncId = maxSyncId(result.lastSyncId, actionSyncId);
+};
+
 export const applyDeltas = async (
   packet: DeltaPacket,
   target: DeltaTarget,
@@ -201,17 +208,22 @@ export const applyDeltas = async (
     const actionSyncId = action.id;
 
     if (options.clientId && action.clientId === options.clientId) {
-      result.skipped += 1;
-      result.lastSyncId = maxSyncId(result.lastSyncId, actionSyncId);
+      markSkipped(result, actionSyncId);
       continue;
     }
 
     // Verify model exists in schema
     if (!registry.hasModel(action.modelName)) {
+      markSkipped(result, actionSyncId);
       continue;
     }
 
-    await applySingleAction(action, target, options);
+    const applied = await applySingleAction(action, target, options);
+    if (!applied) {
+      markSkipped(result, actionSyncId);
+      continue;
+    }
+
     updateResult(result, action);
   }
 

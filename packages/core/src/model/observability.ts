@@ -5,6 +5,7 @@ type BoxFactory = (initialValue: unknown) => {
   get(): unknown;
   set(value: unknown): void;
 };
+type ReferenceModelName = string | (() => string);
 
 interface ObservableInstance {
   _mobx?: MobxBoxes;
@@ -51,6 +52,13 @@ const ensureBox = (
   target[key] = box;
   return box;
 };
+
+const resolveReferenceModelName = (
+  referenceModelName: ReferenceModelName
+): string =>
+  typeof referenceModelName === "function"
+    ? referenceModelName()
+    : referenceModelName;
 
 const getBox = (
   target: Record<string, { get(): unknown; set(value: unknown): void }>,
@@ -99,8 +107,12 @@ export const makeObservableProperty = (
           getBackingValue(this, propertyName))
         : getBackingValue(this, propertyName);
 
+      if (Object.is(oldValue, value)) {
+        return;
+      }
+
       if (boxes) {
-        const box = ensureBox(boxes, propertyName, value);
+        const box = ensureBox(boxes, propertyName, oldValue);
         box.set(value);
       }
 
@@ -131,8 +143,15 @@ export const makeReferenceModelProperty = (
         return null;
       }
       const { store } = this as {
-        store?: { get: (modelName: string, id: string) => unknown };
+        store?: {
+          get: (modelName: string, id: string) => unknown;
+          getCached?: (modelName: string, id: string) => unknown | null;
+        };
       };
+      const cached = store?.getCached?.(referenceModelName, id);
+      if (cached !== undefined) {
+        return cached ?? null;
+      }
       return store?.get(referenceModelName, id) ?? null;
     },
     set(value: unknown) {
@@ -167,11 +186,22 @@ const resolveCachedReference = <T>(
 
 const getCachedPromiseMap = (
   instance: unknown
-): Map<string, { id: string | null; promise: CachedPromise<unknown> }> => {
+): Map<
+  string,
+  {
+    id: string | null;
+    modelName: string;
+    promise: CachedPromise<unknown>;
+  }
+> => {
   const target = instance as {
     __cachedPromises?: Map<
       string,
-      { id: string | null; promise: CachedPromise<unknown> }
+      {
+        id: string | null;
+        modelName: string;
+        promise: CachedPromise<unknown>;
+      }
     >;
   };
   if (!target.__cachedPromises) {
@@ -187,7 +217,7 @@ export const makeCachedReferenceModelProperty = (
   target: object,
   propertyName: string,
   referenceIdKey: string,
-  referenceModelName: string
+  referenceModelName: ReferenceModelName
 ): void => {
   Object.defineProperty(target, propertyName, {
     configurable: true,
@@ -205,17 +235,14 @@ export const makeCachedReferenceModelProperty = (
       if (!store) {
         return CachedPromise.resolve();
       }
+      const modelName = resolveReferenceModelName(referenceModelName);
       const cache = getCachedPromiseMap(this);
       const cached = cache.get(propertyName);
-      if (cached && cached.id === id) {
+      if (cached && cached.id === id && cached.modelName === modelName) {
         return cached.promise;
       }
-      const promise = resolveCachedReference<unknown>(
-        store,
-        referenceModelName,
-        id
-      );
-      cache.set(propertyName, { id, promise });
+      const promise = resolveCachedReference<unknown>(store, modelName, id);
+      cache.set(propertyName, { id, modelName, promise });
       return promise;
     },
     set(value: unknown) {

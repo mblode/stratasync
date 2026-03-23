@@ -28,7 +28,8 @@ export const seedStorageFromBootstrap = async (
   } = options;
 
   const resolvedSnapshot = await resolveSnapshot(snapshot);
-  const localSchemaHash = computeSchemaHash(schema ?? ModelRegistry.snapshot());
+  const registry = new ModelRegistry(schema ?? ModelRegistry.snapshot());
+  const localSchemaHash = computeSchemaHash(registry.snapshot());
 
   if (
     validateSchemaHash &&
@@ -49,7 +50,7 @@ export const seedStorageFromBootstrap = async (
       existingMeta.clientId || getOrCreateClientId(`${dbName}_client_id`);
 
     if (clearExisting) {
-      await storage.clear();
+      await storage.clear({ preserveOutbox: true });
     }
 
     let ops: {
@@ -69,6 +70,12 @@ export const seedStorageFromBootstrap = async (
 
     if (ops.length > 0) {
       await storage.writeBatch(ops);
+    }
+
+    for (const modelName of registry.getBootstrapModelNames()) {
+      if (modelName) {
+        await storage.setModelPersistence(modelName, true);
+      }
     }
 
     await storage.setMeta({
@@ -92,7 +99,16 @@ export const seedStorageFromBootstrap = async (
 const isPayload = (
   value: BootstrapSnapshot | BootstrapSnapshotPayload | string
 ): value is BootstrapSnapshotPayload =>
-  typeof value === "object" && value !== null && "encoding" in value;
+  typeof value === "object" &&
+  value !== null &&
+  !("rows" in value) &&
+  "encoding" in value &&
+  "data" in value &&
+  "version" in value &&
+  typeof (value as { data?: unknown }).data === "string" &&
+  (value as { version?: unknown }).version === 1 &&
+  ((value as BootstrapSnapshotPayload).encoding === "json" ||
+    (value as BootstrapSnapshotPayload).encoding === "gzip-base64");
 
 const resolveSnapshot = (
   snapshot: BootstrapSnapshot | BootstrapSnapshotPayload | string

@@ -54,6 +54,9 @@ export const useSyncClientInstance = (): SyncContextValue["client"] =>
  */
 export const useSyncReady = (): boolean => useSyncStatusValue().isReady;
 
+export const useSyncReadyPromise = (): Promise<void> =>
+  useSyncStatusValue().readyPromise;
+
 /**
  * Hook to get the current sync state
  */

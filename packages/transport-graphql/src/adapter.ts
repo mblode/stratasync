@@ -22,6 +22,7 @@ import {
 import { createBatchLoadStream, createBootstrapStream } from "./bootstrap.js";
 import { fetchDeltas } from "./deltas.js";
 import { sendMutations, sendRestMutations } from "./mutations.js";
+import { joinSyncUrl, normalizeSyncEndpoint } from "./protocol.js";
 import type { RetryConfig, TransportOptions } from "./types.js";
 import { DEFAULT_RETRY_CONFIG } from "./types.js";
 import { WebSocketManager } from "./websocket.js";
@@ -38,6 +39,7 @@ export class GraphQLTransportAdapter implements TransportAdapter {
   private readonly retryConfig: RetryConfig;
   private readonly syncEndpoint: string;
   private yjsTransport: YjsTransportAdapter | null = null;
+  private yjsMessageUnsubscribe: (() => void) | null = null;
 
   constructor(options: TransportOptions) {
     this.options = options;
@@ -91,10 +93,11 @@ export class GraphQLTransportAdapter implements TransportAdapter {
   mutate(batch: TransactionBatch): Promise<MutateResult> {
     // Use REST endpoint when no GraphQL mutation builder is configured
     if (!this.options.mutationBuilder) {
+      const syncBase = normalizeSyncEndpoint(this.syncEndpoint);
       return sendRestMutations({
         auth: this.options.auth,
         batch,
-        endpoint: `${this.syncEndpoint}/mutate`,
+        endpoint: joinSyncUrl(syncBase, "/mutate"),
         headers: this.options.headers,
         retryConfig: this.retryConfig,
         timeoutMs: this.options.timeout,
@@ -126,7 +129,7 @@ export class GraphQLTransportAdapter implements TransportAdapter {
       this.wsManager.sendRaw(JSON.stringify(message));
     }, this.getYjsConnectionState());
 
-    this.wsManager.onYjsMessage((message) => {
+    this.yjsMessageUnsubscribe = this.wsManager.onYjsMessage((message) => {
       if (
         isYjsSyncStep2Message(message) ||
         isYjsUpdateMessage(message) ||
@@ -174,7 +177,12 @@ export class GraphQLTransportAdapter implements TransportAdapter {
 
   async close(): Promise<void> {
     await this.wsManager.close();
+    this.yjsMessageUnsubscribe?.();
+    this.yjsMessageUnsubscribe = null;
+    this.yjsTransport?.dispose();
+    this.yjsTransport = null;
     this.setConnectionState("disconnected");
+    this.stateListeners.clear();
   }
 
   private setConnectionState(state: ConnectionState): void {
@@ -216,3 +224,7 @@ export class GraphQLTransportAdapter implements TransportAdapter {
     return subscribeReady ? "connected" : "connecting";
   }
 }
+
+export const createGraphQLTransport = (
+  options: TransportOptions
+): GraphQLTransportAdapter => new GraphQLTransportAdapter(options);

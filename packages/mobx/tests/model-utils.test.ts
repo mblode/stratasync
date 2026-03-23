@@ -1,13 +1,17 @@
 import { Model } from "@stratasync/core";
 
 import {
+  DIRTY_TRACKER,
   cloneModelData,
   diffModels,
   isModelDirty,
   toPlainObject,
-} from "../src/model-utils";
+} from "../src/index";
 
-const createTestModel = (id: string, data: Record<string, unknown>): Model => {
+const createTestModel = function createTestModel(
+  id: string,
+  data: Record<string, unknown>
+): Model {
   const model = new Model();
   model.id = id;
   model.__data = { ...data };
@@ -98,17 +102,28 @@ describe(diffModels, () => {
       description: { new: "New", old: undefined },
     });
   });
+
+  it("treats structurally equal arrays and objects as unchanged", () => {
+    const a = createTestModel("test-7", {
+      meta: { count: 2, tags: ["a", "b"] },
+    });
+    const b = createTestModel("test-7", {
+      meta: { count: 2, tags: ["a", "b"] },
+    });
+
+    expect(diffModels(a, b)).toEqual({});
+  });
 });
 
 describe(isModelDirty, () => {
   it("returns false for an unmodified model", () => {
-    const model = createTestModel("test-7", { title: "Clean" });
+    const model = createTestModel("test-8", { title: "Clean" });
 
     expect(isModelDirty(model)).toBeFalsy();
   });
 
   it("returns true after property change via markPropertyChanged", () => {
-    const model = createTestModel("test-8", { title: "Before" });
+    const model = createTestModel("test-9", { title: "Before" });
     model.markPropertyChanged("title", "Before", "After");
     model.__data.title = "After";
 
@@ -116,17 +131,15 @@ describe(isModelDirty, () => {
   });
 
   it("reads from DirtyTracker when attached", () => {
-    const model = createTestModel("test-9", { title: "Clean" });
-    const sym = Symbol.for("done:dirty-tracker");
-    (model as Record<symbol, unknown>)[sym] = { isDirty: true };
+    const model = createTestModel("test-10", { title: "Clean" });
+    (model as Record<symbol, unknown>)[DIRTY_TRACKER] = { isDirty: true };
 
     expect(isModelDirty(model)).toBeTruthy();
   });
 
   it("respects DirtyTracker returning false", () => {
-    const model = createTestModel("test-10", { title: "Clean" });
-    const sym = Symbol.for("done:dirty-tracker");
-    (model as Record<symbol, unknown>)[sym] = { isDirty: false };
+    const model = createTestModel("test-11", { title: "Clean" });
+    (model as Record<symbol, unknown>)[DIRTY_TRACKER] = { isDirty: false };
 
     // Even if changeSnapshot would say dirty, the tracker takes precedence
     model.markPropertyChanged("title", "Clean", "Changed");

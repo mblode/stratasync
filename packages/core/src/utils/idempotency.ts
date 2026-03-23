@@ -1,3 +1,5 @@
+const fallbackClientIds = new Map<string, string>();
+
 /**
  * Generates a UUID v4
  * Uses crypto.randomUUID when available, falls back to manual generation
@@ -29,7 +31,13 @@ export const getOrCreateClientId = (storageKey = "sync_client_id"): string => {
 
   const storage = (globalThis as { localStorage?: StorageLike }).localStorage;
   if (!storage) {
-    return generateUUID();
+    const cachedClientId = fallbackClientIds.get(storageKey);
+    if (cachedClientId) {
+      return cachedClientId;
+    }
+    const clientId = generateUUID();
+    fallbackClientIds.set(storageKey, clientId);
+    return clientId;
   }
 
   let clientId = storage.getItem(storageKey);

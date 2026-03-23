@@ -97,5 +97,11 @@ test("computeWorkspaceDatabaseName varies with user and versions", () => {
 });
 
 test("computePartialDatabaseName appends suffix", () => {
-  assert.equal(computePartialDatabaseName("abc123"), "abc123_partial");
+  assert.equal(
+    computePartialDatabaseName({
+      storeName: "abc123",
+      workspaceDatabaseName: "workspace-1",
+    }),
+    "workspace-1_abc123_partial"
+  );
 });

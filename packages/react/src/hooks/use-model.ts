@@ -11,7 +11,13 @@ import {
   useSyncClientInstance,
   useSyncError,
   useSyncReady,
+  useSyncReadyPromise,
 } from "./use-sync-client.js";
+
+interface ModelSnapshot<T> {
+  model: T | null;
+  version: number;
+}
 
 /**
  * Hook to access a single model by ID
@@ -34,27 +40,26 @@ export const useModel = <T>(
 ): T | null => {
   const client = useSyncClientInstance();
   const isReady = useSyncReady();
+  const readyPromise = useSyncReadyPromise();
   const error = useSyncError();
-  const readyPromiseRef = useRef<Promise<void> | null>(null);
-  const readyPromiseKeyRef = useRef({
+  const snapshotCacheRef = useRef<ModelSnapshot<T> | null>(null);
+  const snapshotKeyRef = useRef({
     client,
-    error,
     id,
     modelName,
   });
+  const snapshotVersionRef = useRef(0);
 
-  const readyPromiseKey = readyPromiseKeyRef.current;
+  const snapshotKey = snapshotKeyRef.current;
   if (
-    readyPromiseKey.client !== client ||
-    readyPromiseKey.error !== error ||
-    readyPromiseKey.id !== id ||
-    readyPromiseKey.modelName !== modelName ||
-    isReady
+    snapshotKey.client !== client ||
+    snapshotKey.id !== id ||
+    snapshotKey.modelName !== modelName
   ) {
-    readyPromiseRef.current = null;
-    readyPromiseKeyRef.current = {
+    snapshotCacheRef.current = null;
+    snapshotVersionRef.current = 0;
+    snapshotKeyRef.current = {
       client,
-      error,
       id,
       modelName,
     };
@@ -74,6 +79,7 @@ export const useModel = <T>(
           event.modelName === modelName &&
           event.modelId === id
         ) {
+          snapshotVersionRef.current += 1;
           onStoreChange();
         }
       });
@@ -82,13 +88,28 @@ export const useModel = <T>(
   );
 
   const getSnapshot = useCallback(() => {
-    if (!id) {
-      return null;
+    const model = id ? client.getCached<T>(modelName, id) : null;
+    const version = snapshotVersionRef.current;
+    const cachedSnapshot = snapshotCacheRef.current;
+
+    if (
+      cachedSnapshot &&
+      cachedSnapshot.model === model &&
+      cachedSnapshot.version === version
+    ) {
+      return cachedSnapshot;
     }
-    return client.getCached<T>(modelName, id);
+
+    const nextSnapshot = {
+      model,
+      version,
+    };
+    snapshotCacheRef.current = nextSnapshot;
+    return nextSnapshot;
   }, [client, modelName, id]);
 
-  const model = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const { model } = snapshot;
 
   if (error) {
     throw error;
@@ -99,24 +120,7 @@ export const useModel = <T>(
   }
 
   if (!isReady) {
-    if (!readyPromiseRef.current) {
-      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-      readyPromiseRef.current = new Promise<void>((resolve, reject) => {
-        const unsubscribe = client.onEvent((event) => {
-          if (event.type === "syncError") {
-            unsubscribe();
-            readyPromiseRef.current = null;
-            reject(event.error);
-          }
-          if (event.type === "stateChange" && event.state === "syncing") {
-            unsubscribe();
-            readyPromiseRef.current = null;
-            resolve();
-          }
-        });
-      });
-    }
-    throw readyPromiseRef.current;
+    throw readyPromise;
   }
 
   if (model) {
@@ -144,15 +148,29 @@ export const useModelState = <T>(
   const [data, setData] = useState<T | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(id));
   const [error, setError] = useState<Error | null>(null);
+  const clientRef = useRef(client);
+  const modelNameRef = useRef(modelName);
+  const idRef = useRef(id);
+  const isReadyRef = useRef(isReady);
+  const requestVersionRef = useRef(0);
+
+  clientRef.current = client;
+  modelNameRef.current = modelName;
+  idRef.current = id;
+  isReadyRef.current = isReady;
 
   const loadModel = useCallback(async () => {
-    if (!id) {
+    const requestVersion = requestVersionRef.current + 1;
+    requestVersionRef.current = requestVersion;
+
+    if (!idRef.current) {
       setData(null);
+      setError(null);
       setIsLoading(false);
       return;
     }
 
-    if (!isReady) {
+    if (!isReadyRef.current) {
       setIsLoading(true);
       return;
     }
@@ -161,23 +179,34 @@ export const useModelState = <T>(
     setError(null);
 
     try {
-      const result = await client.ensureModel<T>(modelName, id);
+      const result = await clientRef.current.ensureModel<T>(
+        modelNameRef.current,
+        idRef.current
+      );
+      if (requestVersion !== requestVersionRef.current) {
+        return;
+      }
       setData(result);
     } catch (loadError) {
+      if (requestVersion !== requestVersionRef.current) {
+        return;
+      }
       setError(
         loadError instanceof Error ? loadError : new Error(String(loadError))
       );
     } finally {
-      setIsLoading(false);
+      if (requestVersion === requestVersionRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [client, modelName, id, isReady]);
+  }, []);
 
   useEffect(() => {
     // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
     loadModel().catch(() => {
       /* noop */
     });
-  }, [loadModel]);
+  }, [client, modelName, id, isReady, loadModel]);
 
   useEffect(() => {
     if (!id) {
@@ -198,6 +227,13 @@ export const useModelState = <T>(
     return unsubscribe;
   }, [client, modelName, id, loadModel]);
 
+  useEffect(
+    () => () => {
+      requestVersionRef.current += 1;
+    },
+    []
+  );
+
   return {
     data,
     error,
@@ -206,3 +242,5 @@ export const useModelState = <T>(
     refresh: loadModel,
   };
 };
+
+export const useModelSuspense = useModel;

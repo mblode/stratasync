@@ -33,9 +33,7 @@ const documentManager = new YjsDocumentManager(config);
 Set a transport before connecting to any documents.
 
 ```ts
-import { YjsTransportAdapter } from "@stratasync/transport-graphql";
-
-const yjsTransport = new YjsTransportAdapter(/* ... */);
+const yjsTransport = transport.getYjsTransport();
 documentManager.setTransport(yjsTransport);
 ```
 
@@ -58,12 +56,12 @@ const docKey: DocumentKey = {
 };
 
 const doc: Y.Doc = documentManager.getDocument(docKey);
-const text = doc.getText("content");
+const fragment = doc.getXmlFragment("prosemirror");
 ```
 
 **Signature:** `getDocument(docKey: DocumentKey): Y.Doc`
 
-Cached per key: subsequent calls return the same instance. Each document uses a shared text type named `"content"`.
+Cached per key: subsequent calls return the same instance. Each document uses a shared ProseMirror fragment named `"prosemirror"`.
 
 ### connect
 
@@ -82,10 +80,9 @@ documentManager.connect(docKey, {
 
 ### ConnectOptions
 
-| Property         | Type      | Default | Description                                              |
-| ---------------- | --------- | ------- | -------------------------------------------------------- |
-| `initialContent` | `string`  | -       | Initial text content to insert if the document is empty. |
-| `editing`        | `boolean` | -       | Whether to start in editing mode.                        |
+| Property         | Type     | Default | Description                                              |
+| ---------------- | -------- | ------- | -------------------------------------------------------- |
+| `initialContent` | `string` | -       | Initial text content to insert if the document is empty. |
 
 If `initialContent` is provided and the text type is empty, it's inserted at position 0 to seed the field.
 
@@ -158,7 +155,7 @@ Returns an unsubscribe function.
 
 ### getDerivedContent
 
-Returns the document's text content as a plain string.
+Returns the document's content as a plain string.
 
 ```ts
 const content: string = documentManager.getDerivedContent(docKey);
@@ -166,7 +163,7 @@ const content: string = documentManager.getDerivedContent(docKey);
 
 **Signature:** `getDerivedContent(docKey: DocumentKey): string`
 
-Reads from `doc.getText("content").toString()`. Returns an empty string if the document doesn't exist.
+Reads from the `"prosemirror"` fragment and renders a plain-text derivation. Returns an empty string if the document doesn't exist.
 
 ### applyRemoteUpdate
 
@@ -262,7 +259,7 @@ const unsubState = manager.onConnectionStateChange(docKey, (state) => {
 manager.connect(docKey, { initialContent: "Initial description" });
 
 const doc = manager.getDocument(docKey);
-const text = doc.getText("content");
+const fragment = doc.getXmlFragment("prosemirror");
 
 // Clean up
 unsubContent();

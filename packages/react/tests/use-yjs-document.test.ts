@@ -8,8 +8,8 @@ import {
   SyncClientContext,
   SyncContext,
   SyncStatusContext,
-} from "../src/context";
-import { useYjsDocument } from "../src/hooks/use-yjs-document";
+  useYjsDocument,
+} from "../src";
 
 // Mock Yjs
 vi.mock(import("yjs"), () => ({
@@ -127,7 +127,8 @@ const createWrapper = (mockData: ReturnType<typeof createMockClient>) =>
       isReady: mockData.isReady,
       isSyncing: false,
       lastSyncId: 0,
-      state: "ready" as const,
+      readyPromise: Promise.resolve(),
+      state: "syncing" as const,
     };
 
     return React.createElement(
@@ -307,6 +308,40 @@ describe(useYjsDocument, () => {
       expect(result.current.error?.message).toBe(
         "Yjs document manager not available on client"
       );
+    });
+
+    it("clears stale errors after a later successful connect", () => {
+      const mockData = createMockClient({ hasYjs: false });
+      const { result } = renderHook(() => useYjsDocument(testDocKey), {
+        wrapper: createWrapper(mockData),
+      });
+
+      act(() => {
+        result.current.connect();
+      });
+
+      expect(result.current.error?.message).toBe(
+        "Yjs document manager not available on client"
+      );
+
+      (
+        mockData.client as {
+          yjs?: {
+            documentManager: typeof mockData.documentManager;
+            presenceManager: typeof mockData.presenceManager;
+          };
+        }
+      ).yjs = {
+        documentManager: mockData.documentManager,
+        presenceManager: mockData.presenceManager,
+      };
+
+      act(() => {
+        result.current.connect();
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.doc).not.toBeNull();
     });
   });
 

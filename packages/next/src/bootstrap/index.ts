@@ -2,6 +2,14 @@
 
 export { prefetchBootstrap } from "./fetch.js";
 export { seedStorageFromBootstrap } from "./seed.js";
+export type {
+  BootstrapSnapshot,
+  BootstrapSnapshotPayload,
+  PrefetchBootstrapOptions,
+  SeedStorageOptions,
+  SeedStorageResult,
+  SerializeBootstrapOptions,
+} from "./types.js";
 export {
   decodeBootstrapSnapshot,
   deserializeBootstrapSnapshot,

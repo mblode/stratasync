@@ -1,6 +1,7 @@
 import type { AuthProvider } from "../src/types";
 import {
   buildRequestHeaders,
+  executeWithAuthRetry,
   fetchChecked,
   HttpError,
   isNetworkError,
@@ -99,6 +100,36 @@ describe(fetchChecked, () => {
       expect((error as HttpError).message).toContain("Test");
       expect((error as HttpError).message).toContain("404");
     }
+  });
+
+  it("classifies actual timeout aborts as retryable", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason ?? new Error("aborted"));
+          });
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    let captured: unknown;
+    try {
+      await fetchChecked(
+        "https://example.com",
+        { method: "GET" },
+        10,
+        "Timeout test"
+      );
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toBeInstanceOf(Error);
+    expect((captured as Error).message).toContain("timed out");
+    expect(isTimeoutError(captured)).toBeTruthy();
+    expect(isRetryableError(captured)).toBeTruthy();
   });
 });
 
@@ -225,5 +256,50 @@ describe(resolveAuthToken, () => {
       getAccessToken: () => null,
     };
     expect(await resolveAuthToken(auth)).toBeNull();
+  });
+});
+
+describe(executeWithAuthRetry, () => {
+  it("retries once with a refreshed token after an auth failure", async () => {
+    const refreshToken = vi.fn().mockResolvedValue("fresh-token");
+    const operation = vi
+      .fn()
+      .mockRejectedValueOnce(new HttpError(401, "Unauthorized"))
+      .mockResolvedValueOnce("ok");
+
+    await expect(
+      executeWithAuthRetry(
+        {
+          getAccessToken: () => "stale-token",
+          refreshToken,
+        },
+        operation
+      )
+    ).resolves.toBe("ok");
+
+    expect(refreshToken).toHaveBeenCalledOnce();
+    expect(operation.mock.calls).toEqual([["stale-token"], ["fresh-token"]]);
+  });
+
+  it("notifies onAuthError when auth still fails after refresh", async () => {
+    const authError = new HttpError(403, "Forbidden");
+    const onAuthError = vi.fn();
+    const refreshToken = vi.fn().mockResolvedValue("fresh-token");
+    const operation = vi.fn().mockRejectedValue(authError);
+
+    await expect(
+      executeWithAuthRetry(
+        {
+          getAccessToken: () => "stale-token",
+          onAuthError,
+          refreshToken,
+        },
+        operation
+      )
+    ).rejects.toBe(authError);
+
+    expect(refreshToken).toHaveBeenCalledOnce();
+    expect(operation).toHaveBeenCalledTimes(2);
+    expect(onAuthError).toHaveBeenCalledWith(authError);
   });
 });

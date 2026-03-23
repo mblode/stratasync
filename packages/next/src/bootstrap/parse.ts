@@ -81,14 +81,21 @@ const parseBootstrapLine = (line: string): ParsedBootstrapLine | null => {
   }
 
   if (trimmed.startsWith("_metadata_=")) {
-    const raw = JSON.parse(trimmed.slice("_metadata_=".length)) as Record<
-      string,
-      unknown
-    >;
+    const raw = parseBootstrapJsonLine(
+      trimmed.slice("_metadata_=".length)
+    ) as Record<string, unknown>;
     return { metadata: normalizeBootstrapMetadata(raw), type: "meta" };
   }
 
-  const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+  const parsed = parseBootstrapJsonLine(trimmed) as Record<string, unknown>;
+
+  if (typeof parsed.__class === "string") {
+    const { __class: modelName, ...data } = parsed;
+    return {
+      row: { data, modelName },
+      type: "row",
+    };
+  }
 
   if (typeof parsed._metadata_ === "object" && parsed._metadata_ !== null) {
     return {
@@ -97,6 +104,14 @@ const parseBootstrapLine = (line: string): ParsedBootstrapLine | null => {
       ),
       type: "meta",
     };
+  }
+
+  if (parsed.type === "error") {
+    const message =
+      typeof parsed.message === "string"
+        ? parsed.message
+        : "Unknown server error";
+    throw new Error(`Bootstrap server error: ${message}`);
   }
 
   if (isBootstrapMetadata(parsed)) {
@@ -111,15 +126,18 @@ const parseBootstrapLine = (line: string): ParsedBootstrapLine | null => {
     };
   }
 
-  if (typeof parsed.__class !== "string") {
-    throw new TypeError("Bootstrap row is missing __class");
-  }
+  throw new TypeError("Bootstrap row is missing __class");
+};
 
-  const { __class: modelName, ...data } = parsed;
-  return {
-    row: { data, modelName },
-    type: "row",
-  };
+const parseBootstrapJsonLine = (line: string): unknown => {
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse bootstrap line: ${reason}`, {
+      cause: error,
+    });
+  }
 };
 
 const isBootstrapMetadata = (parsed: Record<string, unknown>): boolean =>

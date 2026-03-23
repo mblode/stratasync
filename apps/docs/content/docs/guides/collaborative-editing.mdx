@@ -41,10 +41,9 @@ flowchart TB
 
 ```ts
 import { YjsDocumentManager } from "@stratasync/y-doc";
-import type { YjsTransportAdapter } from "@stratasync/transport-graphql";
 
 // The transport adapter provides the WebSocket connection
-const yjsTransport: YjsTransportAdapter = transport.createYjsAdapter();
+const yjsTransport = transport.getYjsTransport();
 
 const documentManager = new YjsDocumentManager({
   transport: yjsTransport,

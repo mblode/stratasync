@@ -1,5 +1,5 @@
 import { ModelRegistry } from "../schema/registry.js";
-import type { ModelConstructor } from "../schema/types.js";
+import type { ModelConstructor, PropertySerializer } from "../schema/types.js";
 import type { SyncStore } from "../store/types.js";
 import {
   captureArchiveState,
@@ -11,6 +11,10 @@ import type { Hydrated } from "./hydration.js";
 export interface ChangeSnapshot {
   changes: Record<string, unknown>;
   original: Record<string, unknown>;
+}
+
+interface ApplyUpdateOptions {
+  serialized?: boolean;
 }
 
 /**
@@ -126,15 +130,7 @@ export class Model {
     if (this.modifiedProperties.has(propertyName)) {
       return;
     }
-
-    const meta = ModelRegistry.getModelProperties(this.__modelName).get(
-      propertyName
-    );
-    const serializer = meta?.serializer;
-    const serializedOldValue = serializer
-      ? serializer.serialize(oldValue)
-      : oldValue;
-    this.modifiedProperties.set(propertyName, serializedOldValue);
+    this.modifiedProperties.set(propertyName, oldValue);
   }
 
   /**
@@ -145,8 +141,18 @@ export class Model {
     const original: Record<string, unknown> = {};
 
     for (const [propertyName, oldValue] of this.modifiedProperties.entries()) {
-      original[propertyName] = oldValue;
-      changes[propertyName] = this.__data[propertyName];
+      const currentValue = this.__data[propertyName];
+      if (Object.is(currentValue, oldValue)) {
+        continue;
+      }
+      original[propertyName] = this.serializePropertyValue(
+        propertyName,
+        oldValue
+      );
+      changes[propertyName] = this.serializePropertyValue(
+        propertyName,
+        currentValue
+      );
     }
 
     return { changes, original };
@@ -162,16 +168,26 @@ export class Model {
   /**
    * Applies updates without recording change tracking.
    */
-  _applyUpdate(changes: Record<string, unknown>): void {
+  _applyUpdate(
+    changes: Record<string, unknown>,
+    options: ApplyUpdateOptions = {}
+  ): void {
+    const serialized = options.serialized ?? true;
     this.withSuppressedTracking(() => {
       for (const [key, value] of Object.entries(changes)) {
-        if (key === "id" && typeof value === "string") {
-          this.id = value;
+        if (key === "id") {
+          if (typeof value === "string") {
+            this.id = value;
+          }
+          continue;
         }
+        const nextValue = serialized
+          ? this.deserializePropertyValue(key, value)
+          : value;
         const current = this.__data[key];
-        if (!Object.is(current, value)) {
-          (this as Record<string, unknown>)[key] = value;
-          this.__data[key] = value;
+        if (!Object.is(current, nextValue)) {
+          (this as Record<string, unknown>)[key] = nextValue;
+          this.__data[key] = nextValue;
         }
       }
     });
@@ -181,6 +197,20 @@ export class Model {
    * Serializes model data for persistence.
    */
   toJSON(): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(this.__data)) {
+      data[key] = this.serializePropertyValue(key, value);
+    }
+    if (this.id) {
+      data.id = this.id;
+    }
+    return data;
+  }
+
+  /**
+   * Returns a raw in-memory snapshot without serializer transforms.
+   */
+  toRawJSON(): Record<string, unknown> {
     const data = { ...this.__data };
     if (this.id) {
       data.id = this.id;
@@ -215,9 +245,15 @@ export class Model {
       throw new Error("Model store does not support update");
     }
 
-    await this.store.update(this.__modelName, this.id, snapshot.changes, {
-      original: snapshot.original,
-    });
+    const updated = await this.store.update(
+      this.__modelName,
+      this.id,
+      snapshot.changes,
+      {
+        original: snapshot.original,
+      }
+    );
+    this._applyUpdate(updated);
     this.clearChanges();
   }
 
@@ -265,5 +301,34 @@ export class Model {
     } finally {
       this.suppressTracking -= 1;
     }
+  }
+
+  private getPropertySerializer(
+    propertyName: string
+  ): PropertySerializer<unknown> | undefined {
+    return ModelRegistry.getModelProperties(this.__modelName).get(propertyName)
+      ?.serializer;
+  }
+
+  private serializePropertyValue(
+    propertyName: string,
+    value: unknown
+  ): unknown {
+    if (value === undefined) {
+      return value;
+    }
+    return this.getPropertySerializer(propertyName)?.serialize(value) ?? value;
+  }
+
+  private deserializePropertyValue(
+    propertyName: string,
+    value: unknown
+  ): unknown {
+    if (value === undefined) {
+      return value;
+    }
+    return (
+      this.getPropertySerializer(propertyName)?.deserialize(value) ?? value
+    );
   }
 }

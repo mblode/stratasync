@@ -11,6 +11,7 @@ import {
   DEFAULT_META,
   getMetadata,
   getModelPersistence,
+  mergeMetadata,
   META_STORE,
   removeGroup,
   SYNC_META_KEY,
@@ -62,13 +63,35 @@ test("group helpers track subscribed sync groups", async () => {
   assert.deepEqual(meta1.subscribedSyncGroups, ["team-1"]);
 
   await addGroup(db, "team-2");
+  const metaBeforeDuplicateAdd = await getMetadata(db);
+  const firstUpdatedAt = metaBeforeDuplicateAdd.updatedAt;
   await addGroup(db, "team-2");
   const meta2 = await getMetadata(db);
   assert.deepEqual(meta2.subscribedSyncGroups, ["team-1", "team-2"]);
+  assert.equal(meta2.updatedAt, firstUpdatedAt);
 
   await removeGroup(db, "team-1");
   const meta3 = await getMetadata(db);
   assert.deepEqual(meta3.subscribedSyncGroups, ["team-2"]);
+
+  db.close();
+  await deleteDatabases([dbName]);
+});
+
+test("mergeMetadata preserves explicit updatedAt values", async () => {
+  const dbName = `meta-explicit-${randomUUID()}`;
+  const db = await openDB(dbName, 1, {
+    upgrade(database) {
+      database.createObjectStore(META_STORE);
+    },
+  });
+
+  await setMetadata(db, { ...DEFAULT_META, updatedAt: 1234 });
+  await mergeMetadata(db, { lastSyncId: "12" });
+
+  const meta = await getMetadata(db);
+  assert.equal(meta.updatedAt, 1234);
+  assert.equal(meta.lastSyncId, "12");
 
   db.close();
   await deleteDatabases([dbName]);

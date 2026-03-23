@@ -7,14 +7,6 @@
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
-    "lint": {},
-    "lint:fix": {
-      "cache": false
-    },
-    "format": {
-      "cache": false
-    },
-    "format:check": {},
     "check-types": {
       "dependsOn": ["^build"]
     },

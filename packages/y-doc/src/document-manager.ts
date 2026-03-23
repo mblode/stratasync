@@ -17,6 +17,7 @@ import {
   clearPersistedYjsDocuments,
   DEFAULT_PERSISTED_YJS_PREFIX,
 } from "./persistence.js";
+import { calculateRetryDelay, normalizeRetryConfig } from "./retry.js";
 import type {
   ClientMessage,
   ConnectOptions,
@@ -32,7 +33,6 @@ import type {
   YjsUpdateMessage,
 } from "./types.js";
 import {
-  DEFAULT_LIVE_EDITING_RETRY_CONFIG,
   fromDocumentKeyString,
   isLiveEditingErrorMessage,
   isRetryableLiveEditingErrorCode,
@@ -71,7 +71,8 @@ const normalizeDerivedContent = (content: string): string =>
 
 const getStringAttribute = (
   node: Y.XmlElement,
-  attributeNames: readonly string[]
+  attributeNames: readonly string[],
+  maxLength: number | null = 160
 ): string | null => {
   for (const attributeName of attributeNames) {
     const value = node.getAttribute(attributeName);
@@ -79,7 +80,10 @@ const getStringAttribute = (
       continue;
     }
 
-    const normalized = normalizeDerivedPart(value);
+    const normalized =
+      maxLength === null
+        ? normalizeDerivedContent(value)
+        : normalizeDerivedPart(value, maxLength);
     if (normalized.length > 0) {
       return normalized;
     }
@@ -133,7 +137,7 @@ const renderImagePlaceholder = (
   children: string
 ): string => {
   const alt = getStringAttribute(node, ["alt", "title"]) ?? "Image";
-  const src = getStringAttribute(node, ["src"]);
+  const src = getStringAttribute(node, ["src"], null);
 
   if (src) {
     const nodeType = node.nodeName.toLowerCase();
@@ -169,13 +173,11 @@ const renderEmbedPlaceholder = (
   const title = getStringAttribute(node, ["title", "label"]);
   const description = getStringAttribute(node, ["description", "caption"]);
   const provider = getStringAttribute(node, ["provider", "providerName"]);
-  const url = getStringAttribute(node, [
-    "url",
-    "href",
-    "src",
-    "iframeSrc",
-    "iframeUrl",
-  ]);
+  const url = getStringAttribute(
+    node,
+    ["url", "href", "src", "iframeSrc", "iframeUrl"],
+    null
+  );
   const placeholder = formatPlaceholder(
     "Embed",
     uniqueDerivedParts([title, title ? null : description, provider, url])
@@ -313,6 +315,7 @@ export class YjsDocumentManager {
     string,
     Set<(content: string) => void>
   >();
+  private reconnectReplayGeneration = 0;
 
   constructor(config: YjsDocumentManagerConfig) {
     this.config = config;
@@ -361,19 +364,34 @@ export class YjsDocumentManager {
     const keyString = toDocumentKeyString(docKey);
     const state = this.getOrCreateState(keyString);
     const wasActive = YjsDocumentManager.isDocActive(state);
+    const shouldRetryDisconnected =
+      wasActive && state.connectionState === "disconnected";
 
-    state.refCount += 1;
+    if (!shouldRetryDisconnected) {
+      state.refCount += 1;
+    }
 
-    if (wasActive) {
+    if (wasActive && !shouldRetryDisconnected) {
       return;
     }
 
-    // Store initial content for immediate seeding in requestSyncStep1
-    // (regardless of connection state). The CRDT merge in handleSyncStep2
-    // reconciles if the server has different content.
-    state.pendingInitialContent = options.initialContent;
     YjsDocumentManager.resetRetryState(state);
-    this.attachLocalUpdateHandler(docKey, keyString, state);
+
+    if (!wasActive) {
+      this.attachLocalUpdateHandler(docKey, keyString, state);
+      const existingState = YjsDocumentManager.getEncodedDocumentState(
+        state.doc
+      );
+      if (existingState) {
+        state.pendingLocalUpdates.push(existingState);
+        this.persistDocument(keyString, state.doc);
+      }
+    }
+
+    // Store initial content for immediate seeding during requestSyncStep1.
+    // It is inserted as a local Yjs update so the server receives it after
+    // the initial sync handshake.
+    state.pendingInitialContent = options.initialContent;
     this.requestSyncStep1(docKey, keyString, state);
   }
 
@@ -422,6 +440,9 @@ export class YjsDocumentManager {
 
     return () => {
       callbacks?.delete(callback);
+      if (callbacks?.size === 0) {
+        this.connectionStateCallbacks.delete(keyString);
+      }
     };
   }
 
@@ -446,6 +467,9 @@ export class YjsDocumentManager {
 
     return () => {
       callbacks?.delete(callback);
+      if (callbacks?.size === 0) {
+        this.contentCallbacks.delete(keyString);
+      }
     };
   }
 
@@ -578,6 +602,8 @@ export class YjsDocumentManager {
     const wasConnected = this.transportConnectionState === "connected";
     const isConnected = state === "connected";
     this.transportConnectionState = state;
+    this.reconnectReplayGeneration += 1;
+    const replayGeneration = this.reconnectReplayGeneration;
 
     if (!isConnected) {
       this.markActiveDocumentsAsConnecting();
@@ -585,7 +611,28 @@ export class YjsDocumentManager {
     }
 
     if (!wasConnected) {
-      this.replaySyncStep1ForActiveDocuments();
+      const replayTargets = this.getActiveReconnectReplayTargets();
+      if (replayTargets.length === 0) {
+        return;
+      }
+
+      enqueueReconnectReplay(() => {
+        if (
+          this.reconnectReplayGeneration !== replayGeneration ||
+          this.transportConnectionState !== "connected"
+        ) {
+          return;
+        }
+
+        for (const { docKey, keyString } of replayTargets) {
+          const currentState = this.docs.get(keyString);
+          if (!(currentState && YjsDocumentManager.isDocActive(currentState))) {
+            continue;
+          }
+
+          this.requestSyncStep1(docKey, keyString, currentState);
+        }
+      });
     }
   }
 
@@ -598,7 +645,12 @@ export class YjsDocumentManager {
     }
   }
 
-  private replaySyncStep1ForActiveDocuments(): void {
+  private getActiveReconnectReplayTargets(): {
+    docKey: DocumentKey;
+    keyString: string;
+  }[] {
+    const replayTargets: { docKey: DocumentKey; keyString: string }[] = [];
+
     for (const [keyString, state] of this.docs) {
       if (!YjsDocumentManager.isDocActive(state)) {
         continue;
@@ -607,8 +659,11 @@ export class YjsDocumentManager {
       if (!docKey) {
         continue;
       }
-      this.requestSyncStep1(docKey, keyString, state);
+
+      replayTargets.push({ docKey, keyString });
     }
+
+    return replayTargets;
   }
 
   private requestSyncStep1(
@@ -622,13 +677,9 @@ export class YjsDocumentManager {
     }
 
     // Seed initial content immediately so the editor can render without
-    // waiting for the sync handshake round-trip. The CRDT merge in
-    // handleSyncStep2 reconciles if the server has different content.
-    // Uses remoteUpdateOrigin so the local update handler does not buffer
-    // seeded content as a pending local update.
-    if (YjsDocumentManager.seedPendingContent(state, this.remoteUpdateOrigin)) {
-      this.notifyContentChange(keyString);
-    }
+    // waiting for the sync handshake round-trip. The insert is made as a
+    // local Yjs update so it is buffered and sent after the initial sync.
+    YjsDocumentManager.seedPendingContent(state);
 
     if (!this.transport?.isConnected()) {
       this.setConnectionState(keyString, "connecting");
@@ -641,14 +692,8 @@ export class YjsDocumentManager {
 
   /**
    * Seed pending initial content into the Y.Doc. Returns true if content was seeded.
-   *
-   * Uses `origin` so the local update handler ignores the insert (prevents
-   * seeded content from being buffered as a pending local update).
    */
-  private static seedPendingContent(
-    state: DocumentState,
-    origin: object
-  ): boolean {
+  private static seedPendingContent(state: DocumentState): boolean {
     const { pendingInitialContent } = state;
     if (pendingInitialContent === undefined) {
       return false;
@@ -659,8 +704,13 @@ export class YjsDocumentManager {
     }
     state.doc.transact(() => {
       seedProsemirrorFragment(state.doc, pendingInitialContent);
-    }, origin);
+    });
     return true;
+  }
+
+  private static getEncodedDocumentState(doc: Y.Doc): Uint8Array | null {
+    const encodedState = Y.encodeStateAsUpdate(doc);
+    return encodedState.length <= 2 ? null : encodedState;
   }
 
   private static clearRetryTimer(state: DocumentState): void {
@@ -878,8 +928,14 @@ export class YjsDocumentManager {
       return;
     }
 
-    const update = base64Decode(message.payload);
-    Y.applyUpdate(state.doc, update, this.remoteUpdateOrigin);
+    const update = tryBase64Decode(message.payload);
+    if (!update) {
+      return;
+    }
+
+    if (!tryApplyUpdate(state.doc, update, this.remoteUpdateOrigin)) {
+      return;
+    }
 
     state.lastSeq = message.seq;
     YjsDocumentManager.resetRetryState(state);
@@ -917,8 +973,14 @@ export class YjsDocumentManager {
       return;
     }
 
-    const update = base64Decode(message.payload);
-    Y.applyUpdate(state.doc, update, this.remoteUpdateOrigin);
+    const update = tryBase64Decode(message.payload);
+    if (!update) {
+      return;
+    }
+
+    if (!tryApplyUpdate(state.doc, update, this.remoteUpdateOrigin)) {
+      return;
+    }
     state.lastSeq = message.seq;
 
     this.persistDocument(keyString, state.doc);
@@ -1001,61 +1063,67 @@ const base64Encode = (data: Uint8Array): string => {
 };
 
 const base64Decode = (str: string): Uint8Array => {
+  const normalized = str.replaceAll(/\s+/g, "");
+  if (!BASE64_PATTERN.test(normalized)) {
+    throw new Error("Invalid base64 payload");
+  }
+
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(normalized, "base64"));
+  }
+
   if (typeof atob === "function") {
-    const binary = atob(str);
+    const binary = atob(normalized);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) {
       bytes[i] = binary.codePointAt(i) as number;
     }
     return bytes;
   }
-  return new Uint8Array(Buffer.from(str, "base64"));
+
+  throw new Error("No base64 decoder available");
 };
 
-const normalizeRetryConfig = (
-  retryConfig: Partial<LiveEditingRetryConfig> | undefined
-): LiveEditingRetryConfig => {
-  const baseDelayMs = Math.max(
-    1,
-    retryConfig?.baseDelayMs ?? DEFAULT_LIVE_EDITING_RETRY_CONFIG.baseDelayMs
-  );
-  const maxDelayMs = Math.max(
-    baseDelayMs,
-    retryConfig?.maxDelayMs ?? DEFAULT_LIVE_EDITING_RETRY_CONFIG.maxDelayMs
-  );
-  const maxRetries = Math.max(
-    0,
-    retryConfig?.maxRetries ?? DEFAULT_LIVE_EDITING_RETRY_CONFIG.maxRetries
-  );
-  const jitter = clamp(
-    retryConfig?.jitter ?? DEFAULT_LIVE_EDITING_RETRY_CONFIG.jitter,
-    0,
-    1
-  );
+const tryBase64Decode = (str: string): Uint8Array | null => {
+  try {
+    return base64Decode(str);
+  } catch {
+    return null;
+  }
+};
 
-  return {
-    baseDelayMs,
-    jitter,
-    maxDelayMs,
-    maxRetries,
+const tryApplyUpdate = (
+  doc: Y.Doc,
+  update: Uint8Array,
+  origin: unknown
+): boolean => {
+  try {
+    Y.applyUpdate(doc, update, origin);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+// oxlint-disable-next-line prefer-await-to-callbacks -- callback is a synchronous replay function, not a Node-style callback
+const enqueueReconnectReplay = (callback: () => void): void => {
+  const runCallback = (): void => {
+    try {
+      // oxlint-disable-next-line prefer-await-to-callbacks -- synchronous invocation
+      callback();
+    } catch {
+      // replay failures are handled by the connection lifecycle
+    }
   };
-};
 
-const calculateRetryDelay = (
-  attempt: number,
-  config: LiveEditingRetryConfig
-): number => {
-  const exponentialDelay = config.baseDelayMs * 2 ** attempt;
-  const clampedDelay = Math.min(exponentialDelay, config.maxDelayMs);
-
-  if (config.jitter <= 0) {
-    return clampedDelay;
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(runCallback);
+    return;
   }
 
-  const jitterWindow = clampedDelay * config.jitter;
-  const jitteredDelay = clampedDelay + (Math.random() * 2 - 1) * jitterWindow;
-  return Math.max(0, Math.round(jitteredDelay));
+  // oxlint-disable-next-line prefer-await-to-then, no-callback-in-promise, no-void -- fallback for runtimes without queueMicrotask
+  void Promise.resolve().then(runCallback);
 };
-
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value));

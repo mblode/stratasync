@@ -10,8 +10,8 @@ npm run build            # turbo run build
 npm run dev              # turbo run dev
 npm run test             # turbo run test
 npm run typecheck        # tsc --noEmit
-npm exec -- ultracite fix   # format + lint autofix
-npm exec -- ultracite check # lint check (CI)
+npm run lint:fix          # oxfmt + oxlint autofix
+npm run lint              # oxfmt check + oxlint (CI)
 ```
 
 ## Architecture
@@ -44,6 +44,6 @@ Layer 4: next (depends on client, core, react)
 ## Gotchas
 
 - **ESM only**: This project uses `"type": "module"`. Use `.js` extensions in imports (e.g., `import { foo } from "./foo.js"`).
-- **Linting via ultracite**: Run `npm exec -- ultracite fix` instead of calling oxlint or oxfmt directly.
-- **Git hooks via ultracite**: Ultracite sets up lefthook for pre-commit hooks. Run `npx ultracite init` after cloning to wire them into git.
+- **Linting via oxlint/oxfmt**: Run `npm run lint:fix` to format and fix. Config presets come from `ultracite` (in `.oxlintrc.json` extends).
+- **Git hooks via lefthook**: Pre-commit runs oxfmt + oxlint on staged files. Hooks install automatically via `npm install`.
 - **Internal deps use workspace protocol**: All `@stratasync/*` inter-package dependencies use `"workspace:*"`.

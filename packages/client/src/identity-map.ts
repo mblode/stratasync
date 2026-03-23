@@ -1,12 +1,19 @@
 /* oxlint-disable max-classes-per-file */
 import type { ObservableMap, ReactivityAdapter } from "@stratasync/core";
 
-import type { ModelFactory } from "./types.js";
+import type { ModelFactory, ModelFactoryOptions } from "./types.js";
 
 interface ModelInstanceLike {
-  _applyUpdate?: (data: Record<string, unknown>) => void;
+  _applyUpdate?: (
+    data: Record<string, unknown>,
+    options?: ModelFactoryOptions
+  ) => void;
   makeObservable?: () => void;
   toJSON?: () => Record<string, unknown>;
+}
+
+interface IdentityMapMutationOptions {
+  serialized?: boolean;
 }
 
 const DEFAULT_IDENTITY_MAP_MAX_SIZE = 10_000;
@@ -65,14 +72,15 @@ export class IdentityMap<T extends Record<string, unknown>> {
     return instance;
   }
 
-  private toInstance(data: T): T {
+  private toInstance(data: T, options: IdentityMapMutationOptions = {}): T {
     if (!this.modelFactory || isModelInstanceLike(data)) {
       return this.ensureObservable(data);
     }
 
     const instance = this.modelFactory(
       this.modelName,
-      data as Record<string, unknown>
+      data as Record<string, unknown>,
+      options
     ) as T;
     return this.ensureObservable(instance);
   }
@@ -98,9 +106,9 @@ export class IdentityMap<T extends Record<string, unknown>> {
   /**
    * Sets a model instance, replacing any existing instance
    */
-  set(id: string, instance: T): void {
+  set(id: string, instance: T, options: IdentityMapMutationOptions = {}): void {
     this.reactivity.runInAction(() => {
-      this.map.set(id, this.toInstance(instance));
+      this.map.set(id, this.toInstance(instance, options));
       this.touch(id);
       this.evictIfNeeded();
     });
@@ -109,14 +117,18 @@ export class IdentityMap<T extends Record<string, unknown>> {
   /**
    * Updates an existing model instance in place
    */
-  update(id: string, changes: Partial<T>): T | undefined {
+  update(
+    id: string,
+    changes: Partial<T>,
+    options: IdentityMapMutationOptions = {}
+  ): T | undefined {
     const existing = this.map.get(id);
     if (!existing) {
       return undefined;
     }
 
     this.reactivity.runInAction(() => {
-      this.applyChanges(existing, changes);
+      this.applyChanges(existing, changes, options);
       this.touch(id);
     });
 
@@ -126,15 +138,19 @@ export class IdentityMap<T extends Record<string, unknown>> {
   /**
    * Merges data into an existing instance or creates a new one
    */
-  merge(id: string, data: Partial<T>): T {
+  merge(
+    id: string,
+    data: Partial<T>,
+    options: IdentityMapMutationOptions = {}
+  ): T {
     return this.reactivity.runInAction(() => {
       const existing = this.map.get(id);
       if (existing) {
-        this.applyChanges(existing, data);
+        this.applyChanges(existing, data, options);
         this.touch(id);
         return existing;
       }
-      const merged = this.toInstance(data as T);
+      const merged = this.toInstance(data as T, options);
       this.map.set(id, merged);
       this.touch(id);
       this.evictIfNeeded();
@@ -236,11 +252,15 @@ export class IdentityMap<T extends Record<string, unknown>> {
    * Applies changes to an existing instance, preserving identity
    */
   // eslint-disable-next-line class-methods-use-this -- references generic type T
-  private applyChanges(target: T, changes: Partial<T>): void {
+  private applyChanges(
+    target: T,
+    changes: Partial<T>,
+    options: IdentityMapMutationOptions = {}
+  ): void {
     const candidate = target as ModelInstanceLike;
 
     if (typeof candidate._applyUpdate === "function") {
-      candidate._applyUpdate(changes as Record<string, unknown>);
+      candidate._applyUpdate(changes as Record<string, unknown>, options);
       return;
     }
 

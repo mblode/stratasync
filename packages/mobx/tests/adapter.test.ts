@@ -1,8 +1,45 @@
-import { createMobXReactivity, mobxReactivityAdapter } from "../src/index";
+import { reaction } from "mobx";
+
+import {
+  Model,
+  createMobXReactivity,
+  makeObservableProperty,
+  mobxReactivityAdapter,
+} from "../src/index";
+
+class AdapterTestModel extends Model {
+  declare title: string;
+}
+
+makeObservableProperty(AdapterTestModel.prototype, "title");
+
+const createAdapterTestModel = function createAdapterTestModel(
+  title = "Start"
+): AdapterTestModel {
+  const model = new AdapterTestModel();
+  model._applyUpdate({ title });
+  return model;
+};
 
 describe("mobx reactivity adapter", () => {
   it("returns the shared adapter instance", () => {
     expect(createMobXReactivity()).toBe(mobxReactivityAdapter);
+  });
+
+  it("initializes model property observability for the singleton export", () => {
+    const model = createAdapterTestModel();
+    const values: string[] = [];
+
+    const dispose = reaction(
+      () => model.title,
+      (value) => values.push(value),
+      { fireImmediately: true }
+    );
+
+    model.title = "Next";
+
+    expect(values).toEqual(["Start", "Next"]);
+    dispose();
   });
 
   it("creates observable boxes that notify reactions", () => {
@@ -113,6 +150,26 @@ describe("mobx reactivity adapter", () => {
     });
 
     expect(values).toEqual([0, 1]);
+    dispose();
+  });
+
+  it("respects the deep option when making objects observable", () => {
+    const adapter = createMobXReactivity();
+    const target = adapter.makeObservable(
+      { nested: { count: 0 } },
+      { deep: false }
+    );
+    const values: number[] = [];
+
+    const dispose = reaction(
+      () => target.nested.count,
+      (value) => values.push(value),
+      { fireImmediately: true }
+    );
+
+    target.nested.count = 1;
+
+    expect(values).toEqual([0]);
     dispose();
   });
 

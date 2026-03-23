@@ -26,7 +26,11 @@ import { createGraphQLTransport } from "@stratasync/transport-graphql";
 
 const transport = createGraphQLTransport({
   endpoint: "https://api.example.com/graphql",
-  wsEndpoint: "wss://api.example.com/graphql",
+  syncEndpoint: "https://api.example.com/sync",
+  wsEndpoint: "wss://api.example.com/sync/ws",
+  auth: {
+    getAccessToken: async () => "token",
+  },
 });
 
 // Pass to SyncClient configuration

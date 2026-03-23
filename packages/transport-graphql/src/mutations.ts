@@ -15,10 +15,12 @@ import type {
 } from "./types.js";
 import {
   buildRequestHeaders,
+  createTransportError,
+  executeWithAuthRetry,
   fetchChecked,
+  HttpError,
   isRetryableError,
   parseSyncId,
-  resolveAuthToken,
   retryWithBackoff,
 } from "./utils.js";
 
@@ -33,7 +35,11 @@ const mapActionToGraphQL = (action: string): string => {
     U: "UPDATE",
     V: "UNARCHIVE",
   };
-  return mapping[action] ?? action;
+  const mapped = mapping[action];
+  if (!mapped) {
+    throw new Error(`Unsupported mutation action: ${action}`);
+  }
+  return mapped;
 };
 
 interface RestMutateResponse {
@@ -51,6 +57,12 @@ interface MutationPayload {
   aliasMap: Map<string, string>;
   query: string;
   variables: Record<string, unknown>;
+}
+
+interface RestValidationErrorPayload {
+  clientTxId?: string;
+  details?: unknown;
+  error?: string;
 }
 
 const mergeInto = <V>(
@@ -135,16 +147,16 @@ const parseMutationResults = (
   response: GraphQLResponse<Record<string, unknown>>,
   aliasMap: Map<string, string>
 ): MutateResult => {
-  if (!response.data) {
-    throw new Error("No data in mutation response");
-  }
-
   const { errorsByAlias, unscopedErrors } = collectGraphQLErrors(
     response.errors
   );
 
   if (unscopedErrors.length > 0) {
     throw new Error(`GraphQL errors: ${unscopedErrors.join(", ")}`);
+  }
+
+  if (!response.data) {
+    throw new Error("No data in mutation response");
   }
 
   const results: TransactionResult[] = [];
@@ -189,19 +201,23 @@ const parseMutationResults = (
     }
 
     const syncIdRaw = payloadRecord.syncId;
-    const syncId: SyncId | undefined =
-      syncIdRaw === undefined
-        ? undefined
-        : parseSyncId(syncIdRaw, `Mutation response ${alias} syncId`);
-
-    if (syncId !== undefined) {
-      lastSyncId = maxSyncId(lastSyncId, syncId);
+    if (syncIdRaw === undefined) {
+      results.push({
+        clientTxId,
+        error: "Mutation response is missing syncId",
+        success: false,
+      });
+      success = false;
+      continue;
     }
+
+    const syncId = parseSyncId(syncIdRaw, `Mutation response ${alias} syncId`);
+    lastSyncId = maxSyncId(lastSyncId, syncId);
 
     results.push({
       clientTxId,
       success: true,
-      ...(syncId !== undefined && { syncId }),
+      syncId,
     });
   }
 
@@ -210,6 +226,26 @@ const parseMutationResults = (
     results,
     success,
   };
+};
+
+const parseRestValidationError = (
+  error: unknown
+): RestValidationErrorPayload | null => {
+  if (!(error instanceof HttpError) || error.status !== 400 || !error.body) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(error.body) as Record<string, unknown>;
+    return {
+      clientTxId:
+        typeof parsed.clientTxId === "string" ? parsed.clientTxId : undefined,
+      details: parsed.details,
+      error: typeof parsed.error === "string" ? parsed.error : undefined,
+    };
+  } catch {
+    return null;
+  }
 };
 
 export interface SendRestMutationsOptions {
@@ -236,41 +272,59 @@ export const sendRestMutations = async (
     };
   }
 
-  const response = await retryWithBackoff(
-    async () => {
-      const token = await resolveAuthToken(opts.auth);
-      const requestHeaders = buildRequestHeaders({
-        contentType: "application/json",
-        headers: opts.headers,
-        token,
-      });
-      const body = JSON.stringify({
-        batchId: opts.batch.batchId,
-        transactions: opts.batch.transactions.map((tx) => ({
-          action: mapActionToGraphQL(tx.action),
-          clientId: tx.clientId,
-          clientTxId: tx.clientTxId,
-          modelId: tx.modelId,
-          modelName: tx.modelName,
-          payload:
-            tx.action === "D" && tx.original
-              ? { ...tx.original, ...tx.payload }
-              : tx.payload,
-        })),
-      });
+  let response: RestMutateResponse;
 
-      const res = await fetchChecked(
-        opts.endpoint,
-        { body, headers: requestHeaders, method: "POST" },
-        opts.timeoutMs,
-        "Mutation failed"
+  try {
+    response = await retryWithBackoff(
+      () =>
+        executeWithAuthRetry(opts.auth, async (token) => {
+          const requestHeaders = buildRequestHeaders({
+            contentType: "application/json",
+            headers: opts.headers,
+            token,
+          });
+          const body = JSON.stringify({
+            batchId: opts.batch.batchId,
+            transactions: opts.batch.transactions.map((tx) => ({
+              action: mapActionToGraphQL(tx.action),
+              clientId: tx.clientId,
+              clientTxId: tx.clientTxId,
+              modelId: tx.modelId,
+              modelName: tx.modelName,
+              payload:
+                tx.action === "D" && tx.original
+                  ? { ...tx.original, ...tx.payload }
+                  : tx.payload,
+            })),
+          });
+
+          const res = await fetchChecked(
+            opts.endpoint,
+            { body, headers: requestHeaders, method: "POST" },
+            opts.timeoutMs,
+            "Mutation failed"
+          );
+
+          return res.json() as Promise<RestMutateResponse>;
+        }),
+      opts.retryConfig,
+      isRetryableError
+    );
+  } catch (error) {
+    const validationError = parseRestValidationError(error);
+    if (validationError?.clientTxId) {
+      throw createTransportError(
+        validationError.error ?? "Invalid mutation batch",
+        {
+          clientTxId: validationError.clientTxId,
+          code: "INVALID_MUTATION_BATCH",
+          details: validationError.details,
+          retryable: false,
+        }
       );
-
-      return res.json() as Promise<RestMutateResponse>;
-    },
-    opts.retryConfig,
-    isRetryableError
-  );
+    }
+    throw error;
+  }
 
   return {
     lastSyncId: parseSyncId(
@@ -327,27 +381,27 @@ export const sendMutations = async (
   );
 
   const response = await retryWithBackoff(
-    async () => {
-      const token = await resolveAuthToken(opts.auth);
-      const requestHeaders = buildRequestHeaders({
-        contentType: "application/json",
-        headers: opts.headers,
-        token,
-      });
-      const body = JSON.stringify({
-        query,
-        variables,
-      });
+    () =>
+      executeWithAuthRetry(opts.auth, async (token) => {
+        const requestHeaders = buildRequestHeaders({
+          contentType: "application/json",
+          headers: opts.headers,
+          token,
+        });
+        const body = JSON.stringify({
+          query,
+          variables,
+        });
 
-      const res = await fetchChecked(
-        opts.endpoint,
-        { body, headers: requestHeaders, method: "POST" },
-        opts.timeoutMs,
-        "Mutation failed"
-      );
+        const res = await fetchChecked(
+          opts.endpoint,
+          { body, headers: requestHeaders, method: "POST" },
+          opts.timeoutMs,
+          "Mutation failed"
+        );
 
-      return res.json() as Promise<GraphQLResponse<Record<string, unknown>>>;
-    },
+        return res.json() as Promise<GraphQLResponse<Record<string, unknown>>>;
+      }),
     opts.retryConfig,
     isRetryableError
   );

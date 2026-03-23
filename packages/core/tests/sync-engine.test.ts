@@ -7,6 +7,7 @@ import {
   BackReference,
   ClientModel,
   computeSchemaHash,
+  getOrCreateClientId,
   Model,
   ModelRegistry,
   OneToMany,
@@ -14,11 +15,13 @@ import {
   Reference,
   ReferenceArray,
 } from "../src/index";
+import { LazyCollection } from "../src/model/collection.js";
 import type {
   LoadStrategy,
   ModelConstructor,
   ModelMetadata,
   PropertyMetadata,
+  SchemaDefinition,
 } from "../src/schema/types";
 import type { SyncStore } from "../src/store/types";
 
@@ -47,6 +50,7 @@ interface TaskHashOptions {
   loadStrategy: LoadStrategy;
   schemaVersion: number;
   indexed: boolean;
+  groupKey?: string;
 }
 
 const buildTaskHash = (options: TaskHashOptions): string => {
@@ -62,6 +66,7 @@ const buildTaskHash = (options: TaskHashOptions): string => {
 
   ClientModel("User")(User);
   ClientModel("Task", {
+    groupKey: options.groupKey,
     loadStrategy: options.loadStrategy,
     schemaVersion: options.schemaVersion,
   })(Task);
@@ -142,10 +147,67 @@ test("schema hash changes with metadata updates", () => {
     loadStrategy: "instant",
     schemaVersion: 1,
   });
+  const groupedHash = buildTaskHash({
+    groupKey: "teamId",
+    indexed: false,
+    loadStrategy: "instant",
+    schemaVersion: 1,
+  });
 
   assert.notEqual(baseHash, partialHash);
   assert.notEqual(baseHash, versionHash);
   assert.notEqual(baseHash, indexedHash);
+  assert.notEqual(baseHash, groupedHash);
+});
+
+test("schema hash handles surrogate pairs deterministically", () => {
+  const schema = {
+    models: {
+      "Task😀": {
+        fields: {
+          id: {},
+          title: {},
+        },
+        tableName: "tasks😀",
+      },
+    },
+  };
+
+  assert.equal(computeSchemaHash(schema), "0e96d27f35cd7d80");
+});
+
+test("schema snapshots preserve primary keys, group keys, and indexes", () => {
+  const schema: SchemaDefinition = {
+    models: {
+      Task: {
+        fields: {
+          taskId: {},
+          teamId: {},
+          title: {},
+        },
+        groupKey: "teamId",
+        indexes: [{ fields: ["teamId", "title"], unique: true }],
+        loadStrategy: "partial",
+        primaryKey: "taskId",
+      },
+    },
+  };
+
+  const snapshot = new ModelRegistry(schema).snapshot();
+  assert.equal(snapshot.models.Task.meta.primaryKey, "taskId");
+  assert.equal(snapshot.models.Task.meta.groupKey, "teamId");
+  assert.deepEqual(snapshot.models.Task.meta.indexes, [
+    { fields: ["teamId", "title"], unique: true },
+  ]);
+
+  const roundTripped = new ModelRegistry(snapshot).getModel("Task");
+  assert.equal(roundTripped?.primaryKey, "taskId");
+  assert.equal(roundTripped?.groupKey, "teamId");
+  assert.deepEqual(roundTripped?.indexes, [
+    { fields: ["teamId", "title"], unique: true },
+  ]);
+  assert.equal(Object.hasOwn(roundTripped?.fields ?? {}, "id"), false);
+  assert.equal(Object.hasOwn(roundTripped?.fields ?? {}, "taskId"), true);
 });
 
 test("reference decorator registers id + model and proxies values", () => {
@@ -204,6 +266,80 @@ test("reference decorator registers id + model and proxies values", () => {
   assert.equal(Object.hasOwn(json, "assignee"), false);
 });
 
+test("reference decorator resolves registered model names for forward refs", () => {
+  resetModelRegistry();
+
+  class Task extends Model {}
+  const refs: { userCtor?: ModelConstructor } = {};
+
+  Reference(() => {
+    const ctor = refs.userCtor;
+    if (!ctor) {
+      throw new Error("User constructor is not initialized");
+    }
+    return ctor;
+  })(Task.prototype, "assignee");
+  ClientModel("Task")(Task);
+
+  class User extends Model {}
+  refs.userCtor = User;
+
+  Property()(User.prototype, "name");
+  ClientModel("UserModel")(User);
+
+  const taskProps = ModelRegistry.getModelProperties("Task");
+  assert.equal(taskProps.get("assignee")?.referenceModel, "UserModel");
+  assert.equal(taskProps.get("assigneeId")?.referenceModel, "UserModel");
+
+  const user = new User();
+  user.id = "user-1";
+
+  const storeMap = new Map<string, Model>([["UserModel:user-1", user]]);
+  const store: SyncStore = {
+    get: (modelName: string, id: string) =>
+      storeMap.get(`${modelName}:${id}`) ?? null,
+  };
+
+  const task = new Task();
+  task.store = store;
+  task.assigneeId = "user-1";
+
+  assert.equal(task.assignee.value, user);
+  assert.notEqual(ModelRegistry.getSchemaHash(), "");
+});
+
+test("cached reference promises refresh when the resolved model name changes", () => {
+  resetModelRegistry();
+
+  class Task extends Model {}
+  class User extends Model {}
+
+  Reference(() => User)(Task.prototype, "assignee");
+  ClientModel("Task")(Task);
+
+  const calls: string[] = [];
+  const user = new User();
+  user.id = "user-1";
+
+  const store: SyncStore = {
+    get: (modelName: string) => {
+      calls.push(modelName);
+      return modelName === "UserModel" ? user : null;
+    },
+  };
+
+  const task = new Task();
+  task.store = store;
+  task.assigneeId = "user-1";
+
+  assert.equal(task.assignee.value, undefined);
+
+  ClientModel("UserModel")(User);
+
+  assert.equal(task.assignee.value, user);
+  assert.deepEqual(calls, ["User", "UserModel"]);
+});
+
 test("referenced properties include collections, back references, and arrays", () => {
   resetModelRegistry();
 
@@ -245,12 +381,12 @@ test("referenced properties include collections, back references, and arrays", (
   );
 });
 
-test("observable properties track changes and serialize originals", () => {
+test("observable properties track changes and serialize persisted values", () => {
   resetModelRegistry();
 
   const serializer = {
-    // oxlint-disable-next-line prefer-native-coercion-functions
-    deserialize: (value: unknown) => String(value),
+    deserialize: (value: unknown) =>
+      Number(String(value).replace(/^ser:/u, "")),
     serialize: (value: unknown) => `ser:${String(value)}`,
   };
 
@@ -299,11 +435,274 @@ test("observable properties track changes and serialize originals", () => {
   });
   assert.equal(task.__data.title, "Second");
 
+  task._applyUpdate({ count: "ser:2" });
+  assert.equal(task.count, 2);
+  assert.equal(task.__data.count, 2);
+  assert.equal(task.toJSON().count, "ser:2");
+
   task.clearChanges();
-  task.__data.count = 2;
   task.count = 3;
 
   const snapshot = task.changeSnapshot();
   assert.equal(snapshot.original.count, "ser:2");
-  assert.equal(snapshot.changes.count, 3);
+  assert.equal(snapshot.changes.count, "ser:3");
+});
+
+test("no-op and reverted assignments do not emit update snapshots", () => {
+  resetModelRegistry();
+
+  class Task extends Model {}
+
+  Property()(Task.prototype, "title");
+  ClientModel("Task")(Task);
+
+  const task = new Task();
+  task.title = "First";
+  task.clearChanges();
+
+  task.title = "First";
+  assert.deepEqual(task.changeSnapshot(), {
+    changes: {},
+    original: {},
+  });
+
+  task.title = "Second";
+  task.title = "First";
+  assert.deepEqual(task.changeSnapshot(), {
+    changes: {},
+    original: {},
+  });
+});
+
+test("_applyUpdate ignores non-string ids while applying other fields", () => {
+  resetModelRegistry();
+
+  class Task extends Model {}
+
+  Property()(Task.prototype, "title");
+  ClientModel("Task")(Task);
+
+  const task = new Task();
+  task.id = "task-1";
+
+  task._applyUpdate({ id: 123, title: "Updated title" });
+
+  assert.equal(task.id, "task-1");
+  assert.equal(task.title, "Updated title");
+  assert.equal(task.__data.title, "Updated title");
+  assert.equal(Object.hasOwn(task.__data, "id"), false);
+});
+
+test("save applies the row returned by store.update", async () => {
+  resetModelRegistry();
+
+  class Task extends Model {}
+
+  Property()(Task.prototype, "title");
+  Property()(Task.prototype, "updatedAt");
+  ClientModel("Task")(Task);
+
+  const task = new Task();
+  task.id = "task-1";
+  task.__data.title = "Before";
+  task.store = {
+    get: () => null,
+    update: () =>
+      Promise.resolve({
+        title: "Server title",
+        updatedAt: 123,
+      }),
+  };
+
+  task.title = "Local title";
+  await task.save();
+
+  assert.equal(task.title, "Server title");
+  assert.equal(task.updatedAt, 123);
+  assert.deepEqual(task.changeSnapshot(), {
+    changes: {},
+    original: {},
+  });
+});
+
+test("SyncStore uses serialized payloads for persistence operations", async () => {
+  resetModelRegistry();
+
+  const serializer = {
+    deserialize: (value: unknown) =>
+      Number(String(value).replace(/^ser:/u, "")),
+    serialize: (value: unknown) => `ser:${String(value)}`,
+  };
+
+  class Task extends Model {}
+
+  Property({ serializer })(Task.prototype, "count");
+  ClientModel("Task")(Task);
+
+  let createdPayload: Record<string, unknown> | undefined;
+  let updatedPayload:
+    | {
+        changes: Record<string, unknown>;
+        original: Record<string, unknown> | undefined;
+      }
+    | undefined;
+  let deletedOriginal: Record<string, unknown> | undefined;
+
+  const task = new Task();
+  task.store = {
+    create: (_modelName, data) => {
+      createdPayload = data;
+      return Promise.resolve({ ...data, id: "task-1" });
+    },
+    delete: (_modelName, _id, options) => {
+      deletedOriginal = options?.original;
+      return Promise.resolve();
+    },
+    get: () => null,
+    update: (_modelName, _id, changes, options) => {
+      updatedPayload = {
+        changes,
+        original: options?.original,
+      };
+      return Promise.resolve({
+        count: "ser:3",
+      });
+    },
+  };
+
+  task.count = 2;
+  await task.save();
+
+  assert.equal(createdPayload?.count, "ser:2");
+  assert.equal(task.count, 2);
+
+  task.count = 3;
+  await task.save();
+
+  assert.equal(updatedPayload?.changes.count, "ser:3");
+  assert.equal(updatedPayload?.original?.count, "ser:2");
+  assert.equal(task.count, 3);
+
+  await task.delete();
+  assert.equal(deletedOriginal?.count, "ser:3");
+});
+
+test("LazyCollection preserves local additions during hydration", async () => {
+  class User extends Model {}
+  class Task extends Model {}
+
+  const remoteTask = new Task();
+  remoteTask.id = "task-remote";
+
+  const localTask = new Task();
+  localTask.id = "task-local";
+
+  const pendingRows = Promise.withResolvers<Record<string, unknown>[]>();
+  const user = new User();
+  user.id = "user-1";
+  user.store = {
+    get: (_modelName: string, id: string) => {
+      if (id === remoteTask.id) {
+        return remoteTask;
+      }
+      return null;
+    },
+    loadByIndex: () => pendingRows.promise,
+  };
+
+  const collection = new LazyCollection<Task>();
+  collection.attach(user, "assignedTasks", {
+    foreignKey: "userId",
+    modelName: "Task",
+  });
+
+  const hydration = collection.hydrate();
+  collection.add(localTask);
+  pendingRows.resolve([{ id: remoteTask.id }]);
+
+  const items = await hydration;
+  assert.deepEqual(items, [remoteTask, localTask]);
+  assert.deepEqual(collection.toArray(), [remoteTask, localTask]);
+});
+
+test("LazyCollection deduplicates matching ids during hydration", async () => {
+  class User extends Model {}
+  class Task extends Model {}
+
+  const remoteTask = new Task();
+  remoteTask.id = "task-1";
+
+  const localTask = new Task();
+  localTask.id = "task-1";
+
+  const pendingRows = Promise.withResolvers<Record<string, unknown>[]>();
+  const user = new User();
+  user.id = "user-1";
+  user.store = {
+    get: () => remoteTask,
+    loadByIndex: () => pendingRows.promise,
+  };
+
+  const collection = new LazyCollection<Task>();
+  collection.attach(user, "assignedTasks", {
+    foreignKey: "userId",
+    modelName: "Task",
+  });
+
+  const hydration = collection.hydrate();
+  collection.add(localTask);
+  pendingRows.resolve([{ id: remoteTask.id }]);
+
+  const items = await hydration;
+  assert.equal(items.length, 1);
+  assert.equal(items[0], localTask);
+  assert.deepEqual(collection.toArray(), [localTask]);
+});
+
+test("LazyCollection preserves clear during hydration", async () => {
+  class User extends Model {}
+  class Task extends Model {}
+
+  const remoteTask = new Task();
+  remoteTask.id = "task-remote";
+
+  const pendingRows = Promise.withResolvers<Record<string, unknown>[]>();
+  const user = new User();
+  user.id = "user-1";
+  user.store = {
+    get: () => remoteTask,
+    loadByIndex: () => pendingRows.promise,
+  };
+
+  const collection = new LazyCollection<Task>();
+  collection.attach(user, "assignedTasks", {
+    foreignKey: "userId",
+    modelName: "Task",
+  });
+
+  const hydration = collection.hydrate();
+  collection.clear();
+  pendingRows.resolve([{ id: remoteTask.id }]);
+
+  const items = await hydration;
+  assert.deepEqual(items, []);
+  assert.deepEqual(collection.toArray(), []);
+});
+
+test("getOrCreateClientId is stable without localStorage", () => {
+  const globals = globalThis as { localStorage?: unknown };
+  const originalLocalStorage = globals.localStorage;
+  globals.localStorage = undefined;
+
+  try {
+    const first = getOrCreateClientId("packages-core-test-client-id");
+    const second = getOrCreateClientId("packages-core-test-client-id");
+    assert.equal(first, second);
+  } finally {
+    if (originalLocalStorage === undefined) {
+      Reflect.deleteProperty(globals, "localStorage");
+    } else {
+      globals.localStorage = originalLocalStorage;
+    }
+  }
 });

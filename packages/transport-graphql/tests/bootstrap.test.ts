@@ -121,6 +121,39 @@ describe("bootstrap streaming", () => {
     expect(parsedMetadata).toEqual({ subscribedSyncGroups: [] });
   });
 
+  it("treats rows with metadata-like fields as model rows when __class is present", async () => {
+    const lines = [
+      buildModelLine("Task", {
+        id: "task-1",
+        lastSyncId: "row-field",
+        subscribedSyncGroups: ["not-metadata"],
+      }),
+      `_metadata_=${JSON.stringify({ lastSyncId: "11" })}`,
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(createNdjsonResponse(lines));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generator = createBootstrapStream({
+      auth: createAuthProvider(null),
+      bootstrapOptions: { onlyModels: ["Task"], type: "full" },
+      syncEndpoint: SYNC_ENDPOINT,
+    });
+
+    const { result: metadata, values } = await collectAsyncGenerator(generator);
+
+    expect(values).toEqual([
+      {
+        data: {
+          id: "task-1",
+          lastSyncId: "row-field",
+          subscribedSyncGroups: ["not-metadata"],
+        },
+        modelName: "Task",
+      },
+    ]);
+    expect(metadata.lastSyncId).toBe("11");
+  });
+
   it("uses refreshToken fallback when access token is missing", async () => {
     const lines = [
       buildModelLine("Task", { id: "task-1", title: "Refreshed token" }),
@@ -186,6 +219,43 @@ describe("bootstrap streaming", () => {
     );
     expect(firstHeaders.Authorization).toBe("Bearer stale-bootstrap-token");
     expect(secondHeaders.Authorization).toBe("Bearer fresh-bootstrap-token");
+  });
+
+  it("times out when the bootstrap stream stalls between chunks", async () => {
+    const encoder = new TextEncoder();
+    let firstChunkSent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (firstChunkSent) {
+          // oxlint-disable-next-line avoid-new -- keep the stream pending to exercise timeout handling
+          return new Promise(() => {
+            // Intentionally left pending.
+          });
+        }
+
+        firstChunkSent = true;
+        controller.enqueue(
+          encoder.encode(`${buildModelLine("Task", { id: "task-1" })}\n`)
+        );
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const iterator = createBootstrapStream({
+      auth: createAuthProvider(null),
+      bootstrapOptions: { onlyModels: ["Task"], type: "full" },
+      syncEndpoint: SYNC_ENDPOINT,
+      timeoutMs: 5,
+    });
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { data: { id: "task-1" }, modelName: "Task" },
+    });
+    await expect(iterator.next()).rejects.toThrow(
+      "Stream read timed out after 5ms"
+    );
   });
 });
 

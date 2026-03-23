@@ -24,10 +24,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch -p tsconfig.build.json",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check .",
     "check-types": "tsc --noEmit",
     "test": "vitest --globals"
   },
@@ -37,11 +33,7 @@
     "@stratasync/y-doc": "*"
   },
   "devDependencies": {
-    "lefthook": "^2.1.4",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
     "typescript": "^5.9.3",
-    "ultracite": "^7.3.2",
     "vitest": "^4.1.0"
   }
 }

@@ -13,15 +13,18 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useCallback } from "react";
+import { Suspense, useCallback } from "react";
 
 import {
   SyncProvider,
   useConnectionState,
   useIsOffline,
+  useModel,
   useModelState,
+  useModelSuspense,
   usePendingCount,
   useQuery,
+  useQueryCount,
   useSync,
   useSyncClient,
   useSyncClientInstance,
@@ -369,6 +372,31 @@ const ModelProbe = ({ id }: { id: string | null }) => {
   );
 };
 
+const SuspenseModelProbe = ({ id }: { id: string }) => {
+  const task = useModel<Task>("Task", id);
+
+  return <div data-testid="suspenseTitle">{task?.title ?? ""}</div>;
+};
+
+const QueryFilterProbe = ({ type }: { type: string }) => {
+  const { data } = useQuery<Task & { type: string }>("Task", {
+    where: (task) => task.type === type,
+  });
+
+  return <div data-testid="filteredTitle">{data[0]?.title ?? ""}</div>;
+};
+
+const QueryCountProbe = () => {
+  const { count, isLoading } = useQueryCount<Task>("Task");
+
+  return (
+    <div>
+      <div data-testid="queryCount">{String(count)}</div>
+      <div data-testid="queryCountLoading">{booleanText(isLoading)}</div>
+    </div>
+  );
+};
+
 describe("sync-react bindings", () => {
   it("throws when useSyncClient is outside the provider", () => {
     const renderOutside = () => render(<StatusProbe />);
@@ -429,6 +457,30 @@ describe("sync-react bindings", () => {
     expect(screen.getByTestId("isOffline").textContent).toBe("false");
     expect(screen.getByTestId("error").textContent).toBe("");
     expect(screen.getByTestId("pendingCount").textContent).toBe("0");
+  });
+
+  it("updates lastSyncId when syncComplete fires on its own", async () => {
+    const client = createTestClient({
+      connectionState: "connected",
+      lastSyncId: 1,
+      state: "syncing",
+    });
+
+    render(
+      <SyncProvider client={client}>
+        <StatusProbe />
+      </SyncProvider>
+    );
+
+    expect(screen.getByTestId("lastSyncId").textContent).toBe("1");
+
+    act(() => {
+      client.emitSyncComplete(2);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("lastSyncId").textContent).toBe("2");
+    });
   });
 
   it("stops the client when the provider unmounts", async () => {
@@ -541,6 +593,157 @@ describe("sync-react bindings", () => {
     expect(screen.getByTestId("hasMore").textContent).toBe("false");
   });
 
+  it("updates query results when filter options change without re-querying", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const tasks = [
+      { id: "task-a", title: "A", type: "a" },
+      { id: "task-b", title: "B", type: "b" },
+    ];
+
+    client.query = vi.fn(
+      (_modelName, options?: QueryOptions<(typeof tasks)[number]>) => {
+        const data = tasks.filter((task) =>
+          options?.where ? options.where(task) : true
+        );
+
+        return Promise.resolve({
+          data,
+          hasMore: false,
+          totalCount: data.length,
+        });
+      }
+    ) as typeof client.query;
+
+    client.getIdentityMap = vi.fn(() => {
+      const map = new Map<string, (typeof tasks)[number]>();
+      for (const task of tasks) {
+        map.set(task.id, task);
+      }
+      return map;
+    }) as typeof client.getIdentityMap;
+
+    const { rerender } = render(
+      <SyncProvider client={client}>
+        <QueryFilterProbe type="a" />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("filteredTitle").textContent).toBe("A");
+    });
+
+    rerender(
+      <SyncProvider client={client}>
+        <QueryFilterProbe type="b" />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("filteredTitle").textContent).toBe("B");
+    });
+
+    expect(client.query).toHaveBeenCalledOnce();
+  });
+
+  it("does not run a queued query refresh after unmount", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const getIdentityMap = vi.fn(
+      () =>
+        new Map<string, Task>([["task-1", { id: "task-1", title: "Initial" }]])
+    );
+
+    client.getIdentityMap = getIdentityMap as typeof client.getIdentityMap;
+    client.setQueryResult({
+      data: [{ id: "task-1", title: "Initial" }],
+      hasMore: false,
+      totalCount: 1,
+    });
+
+    const { unmount } = render(
+      <SyncProvider client={client}>
+        <QueryProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("count").textContent).toBe("1");
+    });
+
+    getIdentityMap.mockClear();
+
+    act(() => {
+      client.emitModelChange("Task", "task-1", "update");
+      unmount();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(getIdentityMap).not.toHaveBeenCalled();
+  });
+
+  it("refreshes query consumers after in-place model updates", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const task = { id: "task-1", title: "Initial" };
+
+    client.setQueryResult({
+      data: [task],
+      hasMore: false,
+      totalCount: 1,
+    });
+
+    render(
+      <SyncProvider client={client}>
+        <QueryProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("firstTitle").textContent).toBe("Initial");
+    });
+
+    act(() => {
+      task.title = "Updated";
+      client.emitModelChange("Task", "task-1", "update");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("firstTitle").textContent).toBe("Updated");
+    });
+  });
+
+  it("refreshes query consumers after manual refresh of in-place model updates", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const task = { id: "task-1", title: "Initial" };
+
+    client.query = vi.fn(() =>
+      Promise.resolve({
+        data: [task],
+        hasMore: false,
+        totalCount: 1,
+      })
+    ) as typeof client.query;
+
+    render(
+      <SyncProvider client={client}>
+        <QueryProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("firstTitle").textContent).toBe("Initial");
+    });
+
+    task.title = "Updated";
+
+    fireEvent.click(screen.getByTestId("refresh"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("firstTitle").textContent).toBe("Updated");
+    });
+  });
+
   it("keeps previous query data when a refresh fails", async () => {
     const client = createTestClient({ state: "syncing" });
 
@@ -577,6 +780,40 @@ describe("sync-react bindings", () => {
 
     expect(screen.getByTestId("count").textContent).toBe("1");
     expect(screen.getByTestId("firstTitle").textContent).toBe("First");
+  });
+
+  it("clears query metadata when skip becomes true", async () => {
+    const client = createTestClient({ state: "syncing" });
+
+    client.setQueryResult({
+      data: [{ id: "task-1", title: "First" }],
+      hasMore: true,
+      totalCount: 2,
+    });
+
+    const { rerender } = render(
+      <SyncProvider client={client}>
+        <QueryProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("count").textContent).toBe("1");
+    });
+
+    rerender(
+      <SyncProvider client={client}>
+        <QueryProbe skip />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("count").textContent).toBe("0");
+    });
+
+    expect(screen.getByTestId("hasMore").textContent).toBe("false");
+    expect(screen.getByTestId("totalCount").textContent).toBe("0");
+    expect(screen.getByTestId("error").textContent).toBe("");
   });
 
   it("ignores stale query results after a newer refresh resolves", async () => {
@@ -671,5 +908,171 @@ describe("sync-react bindings", () => {
     });
 
     expect(client.ensureModel).toHaveBeenCalledTimes(2);
+  });
+
+  it("guards useModelState against stale ensureModel resolutions", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const slowRequest = createDeferred<Task | null>();
+    const fastRequest = createDeferred<Task | null>();
+
+    client.ensureModel = vi.fn((_modelName: string, id: string) => {
+      if (id === "slow") {
+        return slowRequest.promise;
+      }
+
+      return fastRequest.promise;
+    }) as typeof client.ensureModel;
+
+    const { rerender } = render(
+      <SyncProvider client={client}>
+        <ModelProbe id="slow" />
+      </SyncProvider>
+    );
+
+    rerender(
+      <SyncProvider client={client}>
+        <ModelProbe id="fast" />
+      </SyncProvider>
+    );
+
+    act(() => {
+      fastRequest.resolve({ id: "fast", title: "Fast" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("title").textContent).toBe("Fast");
+    });
+
+    act(() => {
+      slowRequest.resolve({ id: "slow", title: "Slow" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("title").textContent).toBe("Fast");
+    });
+  });
+
+  it("keeps the useModelState modelChange subscription stable when readiness changes", async () => {
+    const client = createTestClient({ state: "bootstrapping" });
+    const originalOnEvent = client.onEvent.bind(client);
+    const unsubscribeSpies: ReturnType<typeof vi.fn>[] = [];
+
+    // oxlint-disable-next-line prefer-await-to-callbacks -- mock callback pattern
+    client.onEvent = vi.fn((callback) => {
+      const unsubscribe = originalOnEvent(callback);
+      const trackedUnsubscribe = vi.fn(() => {
+        unsubscribe();
+      });
+
+      unsubscribeSpies.push(trackedUnsubscribe);
+      return trackedUnsubscribe;
+    }) as typeof client.onEvent;
+    client.setEnsureModelResult({ id: "task-1", title: "Ready" });
+
+    render(
+      <SyncProvider client={client}>
+        <ModelProbe id="task-1" />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(client.onEvent).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      client.emitStateChange("syncing");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("title").textContent).toBe("Ready");
+    });
+
+    expect(client.onEvent).toHaveBeenCalledTimes(2);
+    expect(
+      unsubscribeSpies.filter((spy) => spy.mock.calls.length > 0)
+    ).toHaveLength(0);
+  });
+
+  it("re-renders useModel consumers for in-place cached model updates", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const task = { id: "task-1", title: "Initial" };
+
+    client.getCached = vi.fn((_modelName: string, id: string) =>
+      id === task.id ? task : null
+    ) as typeof client.getCached;
+
+    render(
+      <SyncProvider client={client}>
+        <SuspenseModelProbe id="task-1" />
+      </SyncProvider>
+    );
+
+    expect(screen.getByTestId("suspenseTitle").textContent).toBe("Initial");
+
+    act(() => {
+      task.title = "Updated";
+      client.emitModelChange("Task", "task-1", "update");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("suspenseTitle").textContent).toBe("Updated");
+    });
+  });
+
+  it("does not add separate ready listeners for suspended models", () => {
+    const client = createTestClient({ state: "bootstrapping" });
+    const originalOnEvent = client.onEvent.bind(client);
+    const unsubscribeSpies: ReturnType<typeof vi.fn>[] = [];
+
+    // oxlint-disable-next-line prefer-await-to-callbacks -- mock callback pattern
+    client.onEvent = vi.fn((callback) => {
+      const unsubscribe = originalOnEvent(callback);
+      const trackedUnsubscribe = vi.fn(() => {
+        unsubscribe();
+      });
+
+      unsubscribeSpies.push(trackedUnsubscribe);
+      return trackedUnsubscribe;
+    }) as typeof client.onEvent;
+
+    const { unmount } = render(
+      <SyncProvider client={client}>
+        <Suspense fallback={<div data-testid="fallback">loading</div>}>
+          <SuspenseModelProbe id="task-1" />
+          <SuspenseModelProbe id="task-1" />
+        </Suspense>
+      </SyncProvider>
+    );
+
+    expect(screen.getByTestId("fallback").textContent).toBe("loading");
+    expect(client.onEvent).toHaveBeenCalledOnce();
+
+    unmount();
+
+    expect(
+      unsubscribeSpies.filter((spy) => spy.mock.calls.length > 0)
+    ).toHaveLength(1);
+  });
+
+  it("exports the documented helper hooks from the package entrypoint", async () => {
+    const client = createTestClient({ state: "syncing" });
+
+    client.setQueryResult({
+      data: [{ id: "task-1", title: "Counted" }],
+      hasMore: false,
+      totalCount: 1,
+    });
+
+    render(
+      <SyncProvider client={client}>
+        <QueryCountProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("queryCount").textContent).toBe("1");
+    });
+
+    expect(useModelSuspense).toBe(useModel);
   });
 });

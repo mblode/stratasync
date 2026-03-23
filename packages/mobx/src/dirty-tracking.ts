@@ -10,17 +10,28 @@ export interface DirtyTracker {
   readonly modifiedCount: number;
   /** Reset tracking */
   clear(): void;
+  /** Remove tracker hooks from the model */
+  dispose(): void;
 }
 
 // Symbol to store tracker on model instances
-const DIRTY_TRACKER = Symbol.for("done:dirty-tracker");
+export const DIRTY_TRACKER = Symbol.for("done:dirty-tracker");
 
-export const getDirtyTracker = (model: Model): DirtyTracker | undefined =>
-  (model as unknown as Record<symbol, unknown>)[DIRTY_TRACKER] as
+const getTrackedFields = function getTrackedFields(model: Model): string[] {
+  return Object.keys(model.changeSnapshot().changes);
+};
+
+export const getDirtyTracker = function getDirtyTracker(
+  model: Model
+): DirtyTracker | undefined {
+  return (model as unknown as Record<symbol, unknown>)[DIRTY_TRACKER] as
     | DirtyTracker
     | undefined;
+};
 
-export const createDirtyTracker = (model: Model): DirtyTracker => {
+export const createDirtyTracker = function createDirtyTracker(
+  model: Model
+): DirtyTracker {
   // Check if already attached
   const existing = getDirtyTracker(model);
   if (existing) {
@@ -28,27 +39,37 @@ export const createDirtyTracker = (model: Model): DirtyTracker => {
   }
 
   // Create an observable set to mirror modified property names
-  const fields = observable.set<string>();
+  const fields = observable.set<string>(getTrackedFields(model));
+  let disposed = false;
+
+  const syncField = function syncField(name: string): void {
+    const trackedFields = getTrackedFields(model);
+    runInAction(() => {
+      if (trackedFields.includes(name)) {
+        fields.add(name);
+        return;
+      }
+      fields.delete(name);
+    });
+  };
 
   // Wrap markPropertyChanged to track fields.
   // We wrap markPropertyChanged (not propertyChanged) so that _applyUpdate,
   // which suppresses tracking via suppressTracking counter, does not mark dirty.
-  const originalMarkPropertyChanged = model.markPropertyChanged.bind(model);
+  const originalMarkPropertyChanged = model.markPropertyChanged;
   model.markPropertyChanged = (
     name: string,
     oldValue: unknown,
     newValue: unknown
   ) => {
-    originalMarkPropertyChanged(name, oldValue, newValue);
-    runInAction(() => {
-      fields.add(name);
-    });
+    originalMarkPropertyChanged.call(model, name, oldValue, newValue);
+    syncField(name);
   };
 
   // Wrap clearChanges to reset tracking
-  const originalClearChanges = model.clearChanges.bind(model);
+  const originalClearChanges = model.clearChanges;
   model.clearChanges = () => {
-    originalClearChanges();
+    originalClearChanges.call(model);
     runInAction(() => {
       fields.clear();
     });
@@ -60,6 +81,19 @@ export const createDirtyTracker = (model: Model): DirtyTracker => {
   const tracker: DirtyTracker = {
     clear() {
       model.clearChanges();
+    },
+    dispose() {
+      if (disposed) {
+        return;
+      }
+
+      model.markPropertyChanged = originalMarkPropertyChanged;
+      model.clearChanges = originalClearChanges;
+      runInAction(() => {
+        fields.clear();
+      });
+      (model as unknown as Record<symbol, unknown>)[DIRTY_TRACKER] = undefined;
+      disposed = true;
     },
     get isDirty() {
       return isDirtyComputed.get();

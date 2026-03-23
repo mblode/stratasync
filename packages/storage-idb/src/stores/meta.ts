@@ -18,7 +18,6 @@ export const SYNC_META_KEY = "_metadata_";
  */
 export const DEFAULT_META: StorageMeta = {
   bootstrapComplete: false,
-  clientId: "",
   firstSyncId: "0",
   lastSyncId: "0",
   schemaHash: "",
@@ -45,14 +44,53 @@ const normalizeMeta = (meta: StorageMeta): StorageMeta => ({
     meta.subscribedSyncGroups ?? DEFAULT_META.subscribedSyncGroups,
 });
 
+type MetadataUpdates =
+  | Partial<StorageMeta>
+  | ((current: StorageMeta) => Partial<StorageMeta> | null);
+
+const getMetadataRecord = async (
+  db: IDBPDatabase
+): Promise<StorageMeta | undefined> =>
+  (await db.get(META_STORE, SYNC_META_KEY)) as StorageMeta | undefined;
+
+const applyMetadataUpdate = async (
+  db: IDBPDatabase,
+  updates: MetadataUpdates,
+  options?: { touchUpdatedAt?: boolean }
+): Promise<StorageMeta> => {
+  const tx = db.transaction(META_STORE, "readwrite");
+  const store = tx.objectStore(META_STORE);
+  const stored = (await store.get(SYNC_META_KEY)) as StorageMeta | undefined;
+  const current = stored ? normalizeMeta(stored) : { ...DEFAULT_META };
+  const resolvedUpdates =
+    typeof updates === "function" ? updates(current) : updates;
+
+  if (resolvedUpdates === null) {
+    await tx.done;
+    return current;
+  }
+
+  const updated: StorageMeta =
+    options?.touchUpdatedAt === false
+      ? {
+          ...current,
+          ...resolvedUpdates,
+        }
+      : {
+          ...current,
+          ...resolvedUpdates,
+          updatedAt: Date.now(),
+        };
+  await store.put(normalizeMeta(updated), SYNC_META_KEY);
+  await tx.done;
+  return updated;
+};
+
 /**
  * Gets the sync metadata from the database
  */
 export const getMetadata = async (db: IDBPDatabase): Promise<StorageMeta> => {
-  const syncMeta = (await db.get(META_STORE, SYNC_META_KEY)) as
-    | StorageMeta
-    | undefined;
-
+  const syncMeta = await getMetadataRecord(db);
   if (syncMeta) {
     return normalizeMeta(syncMeta);
   }
@@ -74,19 +112,16 @@ export const setMetadata = async (
 /**
  * Updates specific fields in the metadata
  */
-export const updateMetadata = async (
+export const updateMetadata = (
   db: IDBPDatabase,
-  updates: Partial<StorageMeta>
-): Promise<StorageMeta> => {
-  const current = await getMetadata(db);
-  const updated: StorageMeta = {
-    ...current,
-    ...updates,
-    updatedAt: Date.now(),
-  };
-  await setMetadata(db, updated);
-  return updated;
-};
+  updates: MetadataUpdates
+): Promise<StorageMeta> => applyMetadataUpdate(db, updates);
+
+export const mergeMetadata = (
+  db: IDBPDatabase,
+  updates: MetadataUpdates
+): Promise<StorageMeta> =>
+  applyMetadataUpdate(db, updates, { touchUpdatedAt: false });
 
 /**
  * Adds a group to the subscribed groups
@@ -95,13 +130,16 @@ export const addGroup = async (
   db: IDBPDatabase,
   groupId: string
 ): Promise<void> => {
-  const meta = await getMetadata(db);
-  const current = meta.subscribedSyncGroups ?? [];
-  if (!current.includes(groupId)) {
-    await updateMetadata(db, {
-      subscribedSyncGroups: [...current, groupId],
-    });
-  }
+  await updateMetadata(db, (current) => {
+    const groups = current.subscribedSyncGroups ?? [];
+    if (groups.includes(groupId)) {
+      return null;
+    }
+
+    return {
+      subscribedSyncGroups: [...groups, groupId],
+    };
+  });
 };
 
 /**
@@ -111,10 +149,16 @@ export const removeGroup = async (
   db: IDBPDatabase,
   groupId: string
 ): Promise<void> => {
-  const meta = await getMetadata(db);
-  const current = meta.subscribedSyncGroups ?? [];
-  await updateMetadata(db, {
-    subscribedSyncGroups: current.filter((g) => g !== groupId),
+  await updateMetadata(db, (current) => {
+    const groups = current.subscribedSyncGroups ?? [];
+    const nextGroups = groups.filter((group) => group !== groupId);
+    if (nextGroups.length === groups.length) {
+      return null;
+    }
+
+    return {
+      subscribedSyncGroups: nextGroups,
+    };
   });
 };
 

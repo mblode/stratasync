@@ -89,6 +89,21 @@ const scopedWhere = (
   ...conditions: (SQL<unknown> | undefined)[]
 ): SQL<unknown> => combineWhere([scope, ...conditions]) ?? scope;
 
+const isCursorValue = (value: unknown): boolean =>
+  value !== undefined && value !== null;
+
+const normalizeModelId = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  return null;
+};
+
 const mapRow = (
   item: Record<string, unknown>,
   def: BootstrapModelDef
@@ -111,9 +126,10 @@ const mapRow = (
     row[field] = item[field];
   }
 
-  if (def.cursor.type === "composite") {
-    row.id = def.cursor.syntheticId(item);
-  }
+  row.id =
+    def.cursor.type === "simple"
+      ? item[def.cursor.idField]
+      : def.cursor.syntheticId(item);
 
   return row;
 };
@@ -196,7 +212,12 @@ export class BootstrapService {
     const returnedModelsCount: Record<string, number> = {};
 
     for (const modelName of modelsToBootstrap) {
-      const modelCount = await this.countModelRows(modelName, filter);
+      const modelCount = await this.countBootstrapModelRows(
+        modelName,
+        filter,
+        groups,
+        lastSyncId
+      );
       returnedModelsCount[modelName] = modelCount;
     }
 
@@ -212,9 +233,14 @@ export class BootstrapService {
 
     for (const modelName of modelsToBootstrap) {
       let rowCount = 0;
-      for await (const row of this.streamModelRows(modelName, filter)) {
+      for await (const line of this.streamFilteredModelRows(
+        modelName,
+        filter,
+        groups,
+        lastSyncId
+      )) {
         rowCount += 1;
-        yield JSON.stringify({ __class: modelName, ...row });
+        yield line;
       }
       this.logger.debug({ modelName, rowCount }, "Bootstrap model streamed");
     }
@@ -307,9 +333,9 @@ export class BootstrapService {
   private static simpleCursorCondition(
     table: AnyPgTable,
     idField: string,
-    cursor: string | undefined
+    cursor: unknown
   ): SQL<unknown> | undefined {
-    if (!cursor) {
+    if (!isCursorValue(cursor)) {
       return undefined;
     }
 
@@ -319,7 +345,7 @@ export class BootstrapService {
   private static compositeCursorCondition(
     table: AnyPgTable,
     fields: readonly string[],
-    cursorValues: Record<string, string> | undefined
+    cursorValues: Record<string, unknown> | undefined
   ): SQL<unknown> | undefined {
     if (!cursorValues || fields.length === 0) {
       return undefined;
@@ -358,7 +384,7 @@ export class BootstrapService {
   private static compositeCursorBranch(
     table: AnyPgTable,
     fields: readonly string[],
-    cursorValues: Record<string, string>,
+    cursorValues: Record<string, unknown>,
     index: number
   ): SQL<unknown> | undefined {
     const field = fields[index];
@@ -367,7 +393,7 @@ export class BootstrapService {
     }
 
     const fieldValue = cursorValues[field];
-    if (typeof fieldValue !== "string") {
+    if (!isCursorValue(fieldValue)) {
       return undefined;
     }
 
@@ -390,7 +416,7 @@ export class BootstrapService {
   private static compositeCursorPrefix(
     table: AnyPgTable,
     fields: readonly string[],
-    cursorValues: Record<string, string>,
+    cursorValues: Record<string, unknown>,
     index: number
   ): SQL<unknown> | undefined {
     const prefixConditions: SQL<unknown>[] = [];
@@ -402,7 +428,7 @@ export class BootstrapService {
       }
 
       const prefixValue = cursorValues[prefixField];
-      if (typeof prefixValue !== "string") {
+      if (!isCursorValue(prefixValue)) {
         continue;
       }
 
@@ -447,7 +473,7 @@ export class BootstrapService {
 
     const scopeWhere = def.buildScopeWhere(filter, this.db);
     const idColumn = getColumn(def.table, def.cursor.idField);
-    let cursor: string | undefined;
+    let cursor: unknown;
 
     while (true) {
       const cursorWhere = BootstrapService.simpleCursorCondition(
@@ -474,7 +500,7 @@ export class BootstrapService {
 
       const last = rows.at(-1);
       const nextCursor = last?.[def.cursor.idField];
-      if (rows.length === batchSize && typeof nextCursor === "string") {
+      if (rows.length === batchSize && isCursorValue(nextCursor)) {
         cursor = nextCursor;
       } else {
         break;
@@ -501,7 +527,7 @@ export class BootstrapService {
       return;
     }
 
-    let cursorValues: Record<string, string> | undefined;
+    let cursorValues: Record<string, unknown> | undefined;
 
     while (true) {
       const cursorWhere = BootstrapService.compositeCursorCondition(
@@ -531,11 +557,11 @@ export class BootstrapService {
         break;
       }
 
-      const nextCursor: Record<string, string> = {};
+      const nextCursor: Record<string, unknown> = {};
       let validCursor = true;
       for (const field of def.cursor.fields) {
         const value = last[field];
-        if (typeof value !== "string") {
+        if (!isCursorValue(value)) {
           validCursor = false;
           break;
         }
@@ -579,30 +605,12 @@ export class BootstrapService {
     const where = scopedWhere(scopeWhereVal, indexedCondition);
 
     if (!indexedWhere) {
-      let bufferedRows: Record<string, unknown>[] = [];
-      for await (const row of this.streamModel(modelName, 1000, filter)) {
-        bufferedRows.push(row);
-        if (bufferedRows.length < 250) {
-          continue;
-        }
-
-        yield* this.filterBatchRowsByFirstSyncId(
-          modelName,
-          bufferedRows,
-          groups,
-          firstSyncId
-        );
-        bufferedRows = [];
-      }
-
-      if (bufferedRows.length > 0) {
-        yield* this.filterBatchRowsByFirstSyncId(
-          modelName,
-          bufferedRows,
-          groups,
-          firstSyncId
-        );
-      }
+      yield* this.streamFilteredModelRows(
+        modelName,
+        filter,
+        groups,
+        firstSyncId
+      );
       return;
     }
 
@@ -612,7 +620,13 @@ export class BootstrapService {
       .from(def.table)
       .where(where)
       .orderBy()
-      .limit(MAX_INDEXED_ROWS)) as Record<string, unknown>[];
+      .limit(MAX_INDEXED_ROWS + 1)) as Record<string, unknown>[];
+
+    if (rows.length > MAX_INDEXED_ROWS) {
+      throw new Error(
+        `Indexed batch load exceeded ${MAX_INDEXED_ROWS} rows for model "${modelName}"`
+      );
+    }
 
     const mappedRows = rows.map((row) => mapRow(row, def));
     yield* this.filterBatchRowsByFirstSyncId(
@@ -637,8 +651,8 @@ export class BootstrapService {
     }
 
     const modelIds = rows
-      .map((row) => row.id)
-      .filter((id): id is string => typeof id === "string");
+      .map((row) => normalizeModelId(row.id))
+      .filter((id): id is string => id !== null);
 
     const touchedIds = await this.dao.getTouchedModelIdsAfter(
       firstSyncId,
@@ -648,8 +662,8 @@ export class BootstrapService {
     );
 
     for (const row of rows) {
-      const rowId = row.id;
-      if (typeof rowId === "string" && touchedIds.has(rowId)) {
+      const rowId = normalizeModelId(row.id);
+      if (rowId && touchedIds.has(rowId)) {
         continue;
       }
 
@@ -667,9 +681,64 @@ export class BootstrapService {
     });
   }
 
+  private async *streamFilteredModelRows(
+    modelName: string,
+    filter: BootstrapFilterContext,
+    groups: string[],
+    firstSyncId?: bigint
+  ): AsyncGenerator<string, void, unknown> {
+    let bufferedRows: Record<string, unknown>[] = [];
+    for await (const row of this.streamModelRows(modelName, filter)) {
+      bufferedRows.push(row);
+      if (bufferedRows.length < 250) {
+        continue;
+      }
+
+      yield* this.filterBatchRowsByFirstSyncId(
+        modelName,
+        bufferedRows,
+        groups,
+        firstSyncId
+      );
+      bufferedRows = [];
+    }
+
+    if (bufferedRows.length > 0) {
+      yield* this.filterBatchRowsByFirstSyncId(
+        modelName,
+        bufferedRows,
+        groups,
+        firstSyncId
+      );
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Count / stream helpers
   // -------------------------------------------------------------------------
+
+  private async countBootstrapModelRows(
+    modelName: string,
+    filter: BootstrapFilterContext,
+    groups: string[],
+    firstSyncId: bigint
+  ): Promise<number> {
+    if (firstSyncId === 0n) {
+      return await this.countModelRows(modelName, filter);
+    }
+
+    let rowCount = 0;
+    for await (const _line of this.streamFilteredModelRows(
+      modelName,
+      filter,
+      groups,
+      firstSyncId
+    )) {
+      rowCount += 1;
+    }
+
+    return rowCount;
+  }
 
   private async countModelRows(
     modelName: string,

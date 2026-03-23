@@ -32,7 +32,7 @@ export type {
   SchemaDefinition,
   TransactionAction,
 } from "./schema/types.js";
-export type { SyncStore } from "./store/types.js";
+export type { SerializedModelData, SyncStore } from "./store/types.js";
 export { applyDeltas } from "./sync/delta-applier.js";
 export type { RebaseConflict, RebaseOptions } from "./sync/rebase.js";
 export { rebaseTransactions } from "./sync/rebase.js";

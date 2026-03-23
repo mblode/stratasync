@@ -8,3 +8,5 @@ dist/
 .source/
 .turbo/
 .wrangler/
+.vercel
+.env*.local

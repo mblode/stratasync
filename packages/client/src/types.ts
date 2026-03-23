@@ -71,6 +71,8 @@ export interface ClearStorageOptions {
   preserveOutbox?: boolean;
 }
 
+export type StorageIndexKey = IDBValidKey | IDBKeyRange;
+
 /**
  * Storage adapter interface
  */
@@ -87,7 +89,7 @@ export interface StorageAdapter {
   getByIndex<T>(
     modelName: string,
     indexName: string,
-    key: string
+    key: StorageIndexKey
   ): Promise<T[]>;
   writeBatch(ops: BatchOperation[]): Promise<void>;
   getMeta(): Promise<StorageMeta>;
@@ -126,10 +128,15 @@ export interface ModelStore {
     modelName: string,
     id: string
   ): Promise<T | null>;
+  getCached?<T extends Record<string, unknown>>(
+    modelName: string,
+    id: string
+  ): T | null;
+  getAll?<T extends Record<string, unknown>>(modelName: string): T[];
   getByIndex?<T extends Record<string, unknown>>(
     modelName: string,
     indexName: string,
-    key: string
+    key: StorageIndexKey
   ): Promise<T[]>;
   loadByIndex?<T extends Record<string, unknown>>(
     modelName: string,
@@ -151,9 +158,14 @@ export interface ModelStore {
 /**
  * Model factory for creating model instances from raw data
  */
+export interface ModelFactoryOptions {
+  serialized?: boolean;
+}
+
 export type ModelFactory = (
   modelName: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  options?: ModelFactoryOptions
 ) => Record<string, unknown>;
 
 /**

@@ -77,7 +77,16 @@ const toModelMetadata = (
     "usedForPartialIndexes",
     "schemaVersion",
     "tableName",
+    "groupKey",
   ]);
+
+  if (model.primaryKey && model.primaryKey !== "id") {
+    metadata.primaryKey = model.primaryKey;
+  }
+
+  if ((model.indexes?.length ?? 0) > 0) {
+    metadata.indexes = model.indexes;
+  }
 
   return metadata;
 };
@@ -248,6 +257,9 @@ export const snapshotToSchemaDefinition = (
       "usedForPartialIndexes",
       "schemaVersion",
       "tableName",
+      "primaryKey",
+      "groupKey",
+      "indexes",
     ]);
 
     models[name] = model;

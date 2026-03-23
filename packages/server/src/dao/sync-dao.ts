@@ -56,6 +56,10 @@ export class SyncDao {
     this.tables = tables;
   }
 
+  withDb(db: unknown): SyncDao {
+    return new SyncDao(db, this.tables);
+  }
+
   private visibleGroupCondition(groups: string[]) {
     const groupIdCol = getColumn(this.tables.syncActions, "groupId");
     if (groups.length === 0) {
@@ -97,6 +101,22 @@ export class SyncDao {
   }
 
   /**
+   * Gets the earliest sync ID in storage.
+   */
+  async getEarliestSyncId(): Promise<bigint> {
+    const idCol = getColumn(this.tables.syncActions, "id");
+    const rows = await this.db
+      .select({ id: idCol })
+      .from(this.tables.syncActions)
+      .where()
+      .orderBy(asc(idCol))
+      .limit(1);
+
+    const [result] = rows;
+    return result ? ensureBigint(result.id as bigint | string) : 0n;
+  }
+
+  /**
    * Gets sync actions after a given ID.
    */
   async getSyncActions(
@@ -128,23 +148,45 @@ export class SyncDao {
     const idCol = getColumn(this.tables.syncActions, "id");
     const modelCol = getColumn(this.tables.syncActions, "model");
     const modelIdCol = getColumn(this.tables.syncActions, "modelId");
+    const touchedIds = new Set<string>();
+    const targetIds = new Set(modelIds);
+    let cursor = afterId;
+    const pageSize = 1000;
 
-    const rows = await this.db
-      .select({ modelId: modelIdCol })
-      .from(this.tables.syncActions)
-      .where(
-        and(
-          gt(idCol, afterId),
-          this.visibleGroupCondition(groups),
-          eq(modelCol, modelName),
-          inArray(modelIdCol, modelIds)
+    while (touchedIds.size < targetIds.size) {
+      const rows = await this.db
+        .select({ id: idCol, modelId: modelIdCol })
+        .from(this.tables.syncActions)
+        .where(
+          and(
+            gt(idCol, cursor),
+            this.visibleGroupCondition(groups),
+            eq(modelCol, modelName),
+            inArray(modelIdCol, modelIds)
+          )
         )
-      )
-      .limit(50_000);
+        .orderBy(asc(idCol))
+        .limit(pageSize);
 
-    return new Set(
-      rows.map((row: Record<string, unknown>) => row.modelId as string)
-    );
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        if (typeof row.modelId === "string") {
+          touchedIds.add(row.modelId);
+        }
+      }
+
+      const lastRow = rows.at(-1);
+      if (!lastRow?.id) {
+        break;
+      }
+
+      cursor = ensureBigint(lastRow.id as bigint | string);
+    }
+
+    return touchedIds;
   }
 
   /**

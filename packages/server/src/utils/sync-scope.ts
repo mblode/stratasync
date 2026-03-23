@@ -12,13 +12,13 @@ export const resolveRequestedSyncGroups = (
 
 export const resolvePublishedDeltaGroups = (
   groupId: string | null | undefined,
-  fallbackGroups: string[]
+  _fallbackGroups: string[]
 ): string[] => {
   if (groupId) {
     return [groupId];
   }
 
-  return [...fallbackGroups];
+  return [];
 };
 
 export const dedupeSyncGroups = (groups: string[]): string[] => [

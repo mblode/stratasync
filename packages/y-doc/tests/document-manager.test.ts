@@ -3,6 +3,7 @@ import * as Y from "yjs";
 
 import { YjsDocumentManager } from "../src/document-manager";
 import { createPersistedYjsPrefix } from "../src/persistence";
+import { fromDocumentKeyString, toDocumentKeyString } from "../src/types";
 import type { DocumentKey } from "../src/types";
 import { createMockTransport } from "./mock-transport";
 
@@ -63,6 +64,35 @@ const setProsemirrorNodes = (
   }
 
   fragment.insert(0, nodes);
+};
+
+const getProsemirrorText = (doc: Y.Doc): string => {
+  const fragment = doc.getXmlFragment(PROSEMIRROR_FIELD);
+
+  const readNode = (node: Y.XmlElement | Y.XmlText): string => {
+    if (node instanceof Y.XmlText) {
+      return node.toString();
+    }
+
+    return node
+      .toArray()
+      .map((child) =>
+        child instanceof Y.XmlElement || child instanceof Y.XmlText
+          ? readNode(child)
+          : ""
+      )
+      .join("");
+  };
+
+  return fragment
+    .toArray()
+    .map((node) =>
+      node instanceof Y.XmlElement || node instanceof Y.XmlText
+        ? readNode(node)
+        : ""
+    )
+    .join("\n")
+    .trim();
 };
 
 const createLocalStorageMock = () => {
@@ -177,6 +207,71 @@ describe(YjsDocumentManager, () => {
       });
 
       expect(manager.getDerivedContent(testDocKey)).toBe("Hello, world!");
+    });
+
+    it("uploads seeded initial content after the initial sync handshake", () => {
+      manager.connect(testDocKey, { initialContent: "Hello, world!" });
+
+      expect(
+        transport.sentMessages.filter(
+          (message) => message.type === "yjs_update"
+        )
+      ).toHaveLength(0);
+
+      const emptyServerDoc = new Y.Doc();
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(emptyServerDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      const updateMessage = transport.sentMessages.find(
+        (message) => message.type === "yjs_update"
+      );
+      expect(updateMessage).toBeDefined();
+
+      const serverDoc = new Y.Doc();
+      Y.applyUpdate(
+        serverDoc,
+        Buffer.from(updateMessage?.payload ?? "", "base64")
+      );
+      expect(getProsemirrorText(serverDoc)).toBe("Hello, world!");
+    });
+
+    it("uploads pre-connect document changes after the initial sync handshake", () => {
+      const doc = manager.getDocument(testDocKey);
+      setProsemirrorContent(doc, "Pre-connect change");
+
+      manager.connect(testDocKey);
+
+      const emptyServerDoc = new Y.Doc();
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(emptyServerDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      const updateMessage = transport.sentMessages.find(
+        (message) => message.type === "yjs_update"
+      );
+      expect(updateMessage).toBeDefined();
+
+      const serverDoc = new Y.Doc();
+      Y.applyUpdate(
+        serverDoc,
+        Buffer.from(updateMessage?.payload ?? "", "base64")
+      );
+      expect(getProsemirrorText(serverDoc)).toBe("Pre-connect change");
     });
 
     it("should set connection state to syncing while waiting for sync step 2", () => {
@@ -477,7 +572,48 @@ describe(YjsDocumentManager, () => {
       expect(manager.getDerivedContent(testDocKey)).toBe("");
     });
 
-    it("should replay sync_step1 for active docs when transport reconnects", () => {
+    it("ignores malformed sync-step2 payloads without breaking later messages", () => {
+      manager.connect(testDocKey);
+
+      expect(() =>
+        transport.triggerMessage({
+          entityId: testDocKey.entityId,
+          entityType: testDocKey.entityType,
+          fieldName: testDocKey.fieldName,
+          payload: "%%%not-base64%%%",
+          seq: 1,
+          type: "yjs_sync_step2",
+        })
+      ).not.toThrow();
+      expect(() =>
+        transport.triggerMessage({
+          entityId: testDocKey.entityId,
+          entityType: testDocKey.entityType,
+          fieldName: testDocKey.fieldName,
+          payload: "",
+          seq: 1,
+          type: "yjs_sync_step2",
+        })
+      ).not.toThrow();
+
+      const serverDoc = new Y.Doc();
+      setProsemirrorContent(serverDoc, "Recovered");
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(serverDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(manager.getConnectionState(testDocKey)).toBe("connected");
+      expect(manager.getDerivedContent(testDocKey)).toBe("Recovered");
+    });
+
+    it("should replay sync_step1 for active docs when transport reconnects", async () => {
       manager.connect(testDocKey);
 
       const initialSyncMessages = transport.sentMessages.filter(
@@ -489,6 +625,7 @@ describe(YjsDocumentManager, () => {
       expect(manager.getConnectionState(testDocKey)).toBe("connecting");
 
       transport.triggerConnectionState("connected");
+      await Promise.resolve();
 
       const syncMessagesAfterReconnect = transport.sentMessages.filter(
         (message) => message.type === "yjs_sync_step1"
@@ -528,6 +665,64 @@ describe(YjsDocumentManager, () => {
       });
 
       expect(manager.getDerivedContent(testDocKey)).toBe("");
+    });
+
+    it("ignores malformed update payloads without breaking later updates", () => {
+      manager.connect(testDocKey);
+
+      const serverDoc = new Y.Doc();
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(serverDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(() =>
+        transport.triggerMessage({
+          clientId: "other-client",
+          connId: "other-conn",
+          entityId: testDocKey.entityId,
+          entityType: testDocKey.entityType,
+          fieldName: testDocKey.fieldName,
+          payload: "%%%not-base64%%%",
+          seq: 2,
+          type: "yjs_update",
+        })
+      ).not.toThrow();
+      expect(() =>
+        transport.triggerMessage({
+          clientId: "other-client",
+          connId: "other-conn",
+          entityId: testDocKey.entityId,
+          entityType: testDocKey.entityType,
+          fieldName: testDocKey.fieldName,
+          payload: "",
+          seq: 2,
+          type: "yjs_update",
+        })
+      ).not.toThrow();
+
+      const updateDoc = new Y.Doc();
+      setProsemirrorContent(updateDoc, "Recovered update");
+      transport.triggerMessage({
+        clientId: "other-client",
+        connId: "other-conn",
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(updateDoc)).toString(
+          "base64"
+        ),
+        seq: 2,
+        type: "yjs_update",
+      });
+
+      expect(manager.getDerivedContent(testDocKey)).toBe("Recovered update");
     });
   });
 
@@ -660,6 +855,21 @@ describe(YjsDocumentManager, () => {
 
       expect(manager.getDerivedContent(testDocKey)).toBe(
         "Intro\n\n[Embed: Sprint review - Loom - https://loom.com/share/123]\n\n[Embed: A useful preview - https://example.com/embed/abc]"
+      );
+    });
+
+    it("preserves long image urls in derived content", () => {
+      const doc = manager.getDocument(testDocKey);
+      const longUrl = `https://cdn.test/${"a".repeat(220)}`;
+      setProsemirrorNodes(doc, [
+        createXmlElement("imageBlock", {
+          alt: "Hero image",
+          src: longUrl,
+        }),
+      ]);
+
+      expect(manager.getDerivedContent(testDocKey)).toBe(
+        `![Hero image](${longUrl})`
       );
     });
   });
@@ -871,6 +1081,25 @@ describe(YjsDocumentManager, () => {
       manager.connect(testDocKey);
       expect(callback).not.toHaveBeenCalled();
     });
+
+    it("cleans up empty callback sets on unsubscribe", () => {
+      const connectionUnsubscribe = manager.onConnectionStateChange(
+        testDocKey,
+        vi.fn()
+      );
+      const contentUnsubscribe = manager.onContentChange(testDocKey, vi.fn());
+
+      connectionUnsubscribe();
+      contentUnsubscribe();
+
+      const callbackState = manager as unknown as {
+        connectionStateCallbacks: Map<string, Set<unknown>>;
+        contentCallbacks: Map<string, Set<unknown>>;
+      };
+
+      expect(callbackState.connectionStateCallbacks.size).toBe(0);
+      expect(callbackState.contentCallbacks.size).toBe(0);
+    });
   });
 
   describe("destroy", () => {
@@ -898,6 +1127,19 @@ describe(YjsDocumentManager, () => {
         manager.getConnectionState({ ...testDocKey, entityId: "other-id" })
       ).toBe("disconnected");
     });
+
+    it("destroyAll cleans up documents with encoded key segments", () => {
+      const colonDocKey: DocumentKey = {
+        entityId: "task:123",
+        entityType: "Task",
+        fieldName: "body:markdown",
+      };
+      const doc = manager.getDocument(colonDocKey);
+
+      manager.destroyAll();
+
+      expect(manager.getDocument(colonDocKey)).not.toBe(doc);
+    });
   });
 
   describe("state vector and updates", () => {
@@ -923,6 +1165,71 @@ describe(YjsDocumentManager, () => {
       const state = manager.getEncodedState(testDocKey);
       expect(state).toBeInstanceOf(Uint8Array);
       expect(state?.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("document key helpers", () => {
+    it("round-trips keys containing reserved characters", () => {
+      const docKey: DocumentKey = {
+        entityId: "tenant:123/alpha",
+        entityType: "Task%Board",
+        fieldName: "body:markdown",
+      };
+
+      expect(fromDocumentKeyString(toDocumentKeyString(docKey))).toEqual(
+        docKey
+      );
+    });
+
+    it("supports content callbacks for keys containing colons", () => {
+      const docKey: DocumentKey = {
+        entityId: "task:123",
+        entityType: "Task",
+        fieldName: "body:markdown",
+      };
+      const callback = vi.fn();
+      manager.onContentChange(docKey, callback);
+      manager.connect(docKey);
+
+      const serverDoc = new Y.Doc();
+      setProsemirrorContent(serverDoc, "Encoded key content");
+      transport.triggerMessage({
+        entityId: docKey.entityId,
+        entityType: docKey.entityType,
+        fieldName: docKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(serverDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(callback).toHaveBeenLastCalledWith("Encoded key content");
+    });
+  });
+
+  describe("terminal live editing errors", () => {
+    it("allows reconnect after a non-retryable error", () => {
+      manager.connect(testDocKey);
+
+      transport.triggerMessage({
+        code: "RATE_LIMITED",
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        error: "rate limited",
+        fieldName: testDocKey.fieldName,
+        type: "live_editing_error",
+      });
+
+      expect(manager.getConnectionState(testDocKey)).toBe("disconnected");
+
+      manager.connect(testDocKey);
+
+      const syncMessages = transport.sentMessages.filter(
+        (message) => message.type === "yjs_sync_step1"
+      );
+      expect(syncMessages).toHaveLength(2);
+      expect(manager.getConnectionState(testDocKey)).toBe("syncing");
     });
   });
 });

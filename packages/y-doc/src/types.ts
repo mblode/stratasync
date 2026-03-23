@@ -7,11 +7,38 @@ export interface DocumentKey {
   fieldName: string;
 }
 
+const encodeDocumentKeyPart = (value: string): string =>
+  encodeURIComponent(value);
+
+const decodeDocumentKeyPart = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 export const toDocumentKeyString = (key: DocumentKey): string =>
-  `${key.entityType}:${key.entityId}:${key.fieldName}`;
+  [
+    encodeDocumentKeyPart(key.entityType),
+    encodeDocumentKeyPart(key.entityId),
+    encodeDocumentKeyPart(key.fieldName),
+  ].join(":");
 
 export const fromDocumentKeyString = (str: string): DocumentKey | null => {
-  const [entityType, entityId, fieldName] = str.split(":");
+  const parts = str.split(":");
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [encodedEntityType, encodedEntityId, encodedFieldName] = parts;
+  if (!(encodedEntityType && encodedEntityId && encodedFieldName)) {
+    return null;
+  }
+
+  const entityType = decodeDocumentKeyPart(encodedEntityType);
+  const entityId = decodeDocumentKeyPart(encodedEntityId);
+  const fieldName = decodeDocumentKeyPart(encodedFieldName);
   if (!(entityType && entityId && fieldName)) {
     return null;
   }
@@ -44,8 +71,6 @@ export interface SessionState {
 export interface ConnectOptions {
   /** Initial content to use if document is empty */
   initialContent?: string;
-  /** Whether to start in editing mode */
-  editing?: boolean;
 }
 
 export type LiveEditingErrorCode =

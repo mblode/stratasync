@@ -1,5 +1,12 @@
 /* oxlint-disable max-classes-per-file */
-import { noopReactivityAdapter } from "../../core/src/index";
+import { setTimeout as delay } from "node:timers/promises";
+
+import {
+  ClientModel,
+  Model,
+  noopReactivityAdapter,
+  Property,
+} from "../../core/src/index";
 import type {
   BatchLoadOptions,
   BootstrapMetadata,
@@ -16,7 +23,9 @@ import type {
   Transaction,
   TransactionBatch,
 } from "../../core/src/index";
+import { IdentityMapRegistry } from "../src/identity-map";
 import { createSyncClient } from "../src/index";
+import { SyncOrchestrator } from "../src/sync-orchestrator";
 import type {
   ClearStorageOptions,
   ModelPersistenceMeta,
@@ -273,10 +282,8 @@ const createDeferred = <T>(): Deferred<T> => {
 
 class BlockingSyncActionStorage extends InMemoryStorage {
   private readonly blockedSyncId: string;
-  // oxlint-disable-next-line no-invalid-void-type
-  private readonly blocked = createDeferred<void>();
-  // oxlint-disable-next-line no-invalid-void-type
-  private readonly release = createDeferred<void>();
+  private readonly blocked = createDeferred<undefined>();
+  private readonly release = createDeferred<undefined>();
   private hasBlocked = false;
 
   constructor(blockedSyncId: string) {
@@ -353,7 +360,7 @@ class AsyncQueue<T> implements AsyncIterable<T> {
 }
 
 class TestTransport implements TransportAdapter {
-  private readonly deltaQueue = new AsyncQueue<DeltaPacket>();
+  private deltaQueue = new AsyncQueue<DeltaPacket>();
   private readonly fullRows: ModelRow[];
   private readonly fullMetadata: BootstrapMetadata;
   private readonly batchRows: ModelRow[];
@@ -478,9 +485,11 @@ class TestTransport implements TransportAdapter {
 
   subscribe(_options: SubscribeOptions): DeltaSubscription {
     this.subscribeCalls.push(_options);
+    const queue = new AsyncQueue<DeltaPacket>();
+    this.deltaQueue = queue;
     return {
-      [Symbol.asyncIterator]: () => this.deltaQueue[Symbol.asyncIterator](),
-      unsubscribe: () => this.deltaQueue.close(),
+      [Symbol.asyncIterator]: () => queue[Symbol.asyncIterator](),
+      unsubscribe: () => queue.close(),
     };
   }
 
@@ -521,6 +530,384 @@ class TestTransport implements TransportAdapter {
   }
 }
 
+// oxlint-disable-next-line require-yield -- intentionally empty generator for batchLoad stub
+const emptyBatchGenerator =
+  async function* emptyBatchGeneratorImpl(): AsyncGenerator<
+    ModelRow,
+    void,
+    unknown
+  > {
+    // intentionally empty
+  };
+
+class ReconnectableTransport implements TransportAdapter {
+  private readonly connectionListeners = new Set<
+    (state: ConnectionState) => void
+  >();
+  private readonly fullRows: ModelRow[];
+  private readonly fullMetadata: BootstrapMetadata;
+  private currentQueue: AsyncQueue<DeltaPacket> | null = null;
+  private connectionState: ConnectionState = "connected";
+
+  readonly bootstrapCalls: BootstrapOptions[] = [];
+  readonly subscribeCalls: SubscribeOptions[] = [];
+
+  constructor(options: {
+    fullRows: ModelRow[];
+    fullMetadata: BootstrapMetadata;
+  }) {
+    this.fullRows = options.fullRows;
+    this.fullMetadata = options.fullMetadata;
+  }
+
+  bootstrap(
+    options: BootstrapOptions
+  ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown> {
+    this.bootstrapCalls.push(options);
+    const rows = [...this.fullRows];
+    const metadata = this.fullMetadata;
+
+    return (async function* generate() {
+      await Promise.resolve();
+      yield* rows;
+      return metadata;
+    })();
+  }
+
+  batchLoad(): AsyncGenerator<ModelRow, void, unknown> {
+    return emptyBatchGenerator();
+  }
+
+  mutate(batch: TransactionBatch): Promise<MutateResult> {
+    return Promise.resolve({
+      lastSyncId: "1",
+      results: batch.transactions.map((tx) => ({
+        clientTxId: tx.clientTxId,
+        success: true,
+        syncId: "1",
+      })),
+      success: true,
+    });
+  }
+
+  subscribe(options: SubscribeOptions): DeltaSubscription {
+    this.subscribeCalls.push(options);
+    const queue = new AsyncQueue<DeltaPacket>();
+    this.currentQueue = queue;
+    return {
+      [Symbol.asyncIterator]: () => queue[Symbol.asyncIterator](),
+      unsubscribe: () => queue.close(),
+    };
+  }
+
+  emitDelta(packet: DeltaPacket): void {
+    this.currentQueue?.push(packet);
+  }
+
+  closeCurrentSubscription(): void {
+    this.currentQueue?.close();
+  }
+
+  fetchDeltas(after: string): Promise<DeltaPacket> {
+    return Promise.resolve({ actions: [], hasMore: false, lastSyncId: after });
+  }
+
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  onConnectionStateChange(
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback: (state: ConnectionState) => void
+  ): () => void {
+    this.connectionListeners.add(callback);
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback(this.connectionState);
+    return () => {
+      this.connectionListeners.delete(callback);
+    };
+  }
+
+  setConnectionState(state: ConnectionState): void {
+    if (this.connectionState === state) {
+      return;
+    }
+
+    this.connectionState = state;
+    for (const listener of this.connectionListeners) {
+      listener(state);
+    }
+  }
+
+  getConnectionListenerCount(): number {
+    return this.connectionListeners.size;
+  }
+
+  close(): Promise<void> {
+    this.currentQueue?.close();
+    return Promise.resolve();
+  }
+}
+
+class BootstrapRequiredTransport implements TransportAdapter {
+  private readonly connectionListeners = new Set<
+    (state: ConnectionState) => void
+  >();
+  private currentQueue: AsyncQueue<DeltaPacket> | null = null;
+  private connectionState: ConnectionState = "connected";
+  private bootstrapCount = 0;
+
+  readonly bootstrapCalls: BootstrapOptions[] = [];
+  readonly subscribeCalls: SubscribeOptions[] = [];
+
+  bootstrap(
+    options: BootstrapOptions
+  ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown> {
+    this.bootstrapCalls.push(options);
+    this.bootstrapCount += 1;
+    const isRecoveryBootstrap = this.bootstrapCount > 1;
+    const rows: ModelRow[] = [
+      {
+        data: {
+          id: "task-1",
+          teamId: "team-1",
+          title: isRecoveryBootstrap ? "Recovered" : "Initial",
+        },
+        modelName: "Task",
+      },
+    ];
+    const metadata: BootstrapMetadata = {
+      lastSyncId: isRecoveryBootstrap ? "25" : "10",
+      subscribedSyncGroups: ["team-1"],
+    };
+
+    return (async function* generate() {
+      await Promise.resolve();
+      yield* rows;
+      return metadata;
+    })();
+  }
+
+  batchLoad(): AsyncGenerator<ModelRow, void, unknown> {
+    return emptyBatchGenerator();
+  }
+
+  mutate(batch: TransactionBatch): Promise<MutateResult> {
+    return Promise.resolve({
+      lastSyncId: "25",
+      results: batch.transactions.map((tx) => ({
+        clientTxId: tx.clientTxId,
+        success: true,
+        syncId: "25",
+      })),
+      success: true,
+    });
+  }
+
+  subscribe(options: SubscribeOptions): DeltaSubscription {
+    this.subscribeCalls.push(options);
+
+    if (this.subscribeCalls.length === 1) {
+      const error = Object.assign(
+        new Error("A fresh bootstrap is required before subscribing to deltas"),
+        {
+          code: "BOOTSTRAP_REQUIRED",
+        }
+      );
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(error),
+          return: () =>
+            Promise.resolve({
+              done: true,
+              value: undefined as unknown as DeltaPacket,
+            }),
+        }),
+        unsubscribe: () => {
+          /* noop */
+        },
+      };
+    }
+
+    const queue = new AsyncQueue<DeltaPacket>();
+    this.currentQueue = queue;
+    return {
+      [Symbol.asyncIterator]: () => queue[Symbol.asyncIterator](),
+      unsubscribe: () => queue.close(),
+    };
+  }
+
+  fetchDeltas(after: string): Promise<DeltaPacket> {
+    return Promise.resolve({ actions: [], lastSyncId: after });
+  }
+
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  onConnectionStateChange(
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback: (state: ConnectionState) => void
+  ): () => void {
+    this.connectionListeners.add(callback);
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback(this.connectionState);
+    return () => {
+      this.connectionListeners.delete(callback);
+    };
+  }
+
+  close(): Promise<void> {
+    this.currentQueue?.close();
+    return Promise.resolve();
+  }
+}
+
+class ResubscribeBootstrapRequiredTransport implements TransportAdapter {
+  private readonly connectionListeners = new Set<
+    (state: ConnectionState) => void
+  >();
+  private currentQueue: AsyncQueue<DeltaPacket> | null = null;
+  private connectionState: ConnectionState = "connected";
+  private bootstrapCount = 0;
+
+  readonly bootstrapCalls: BootstrapOptions[] = [];
+  readonly subscribeCalls: SubscribeOptions[] = [];
+
+  bootstrap(
+    options: BootstrapOptions
+  ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown> {
+    this.bootstrapCalls.push(options);
+    this.bootstrapCount += 1;
+    const isRecoveryBootstrap = this.bootstrapCount > 1;
+    const rows: ModelRow[] = isRecoveryBootstrap
+      ? [
+          {
+            data: {
+              id: "task-1",
+              teamId: "team-1",
+              title: "Recovered",
+            },
+            modelName: "Task",
+          },
+          {
+            data: {
+              id: "task-2",
+              teamId: "team-1",
+              title: "Local",
+            },
+            modelName: "Task",
+          },
+          {
+            data: { id: "team-1", name: "Core" },
+            modelName: "Team",
+          },
+        ]
+      : [
+          {
+            data: {
+              id: "task-1",
+              teamId: "team-1",
+              title: "Initial",
+            },
+            modelName: "Task",
+          },
+          {
+            data: { id: "team-1", name: "Core" },
+            modelName: "Team",
+          },
+        ];
+    const metadata: BootstrapMetadata = {
+      lastSyncId: isRecoveryBootstrap ? "25" : "10",
+      subscribedSyncGroups: ["team-1"],
+    };
+
+    return (async function* generate() {
+      await Promise.resolve();
+      yield* rows;
+      return metadata;
+    })();
+  }
+
+  batchLoad(): AsyncGenerator<ModelRow, void, unknown> {
+    return emptyBatchGenerator();
+  }
+
+  mutate(batch: TransactionBatch): Promise<MutateResult> {
+    return Promise.resolve({
+      lastSyncId: "25",
+      results: batch.transactions.map((tx) => ({
+        clientTxId: tx.clientTxId,
+        success: true,
+        syncId: "25",
+      })),
+      success: true,
+    });
+  }
+
+  subscribe(options: SubscribeOptions): DeltaSubscription {
+    this.subscribeCalls.push(options);
+
+    if (this.subscribeCalls.length === 2) {
+      const error = Object.assign(
+        new Error("A fresh bootstrap is required before resubscribing"),
+        {
+          code: "BOOTSTRAP_REQUIRED",
+        }
+      );
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(error),
+          return: () =>
+            Promise.resolve({
+              done: true,
+              value: undefined as unknown as DeltaPacket,
+            }),
+        }),
+        unsubscribe: () => {
+          /* noop */
+        },
+      };
+    }
+
+    const queue = new AsyncQueue<DeltaPacket>();
+    this.currentQueue = queue;
+    return {
+      [Symbol.asyncIterator]: () => queue[Symbol.asyncIterator](),
+      unsubscribe: () => queue.close(),
+    };
+  }
+
+  closeCurrentSubscription(): void {
+    this.currentQueue?.close();
+  }
+
+  fetchDeltas(after: string): Promise<DeltaPacket> {
+    return Promise.resolve({ actions: [], lastSyncId: after });
+  }
+
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  onConnectionStateChange(
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback: (state: ConnectionState) => void
+  ): () => void {
+    this.connectionListeners.add(callback);
+    // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+    callback(this.connectionState);
+    return () => {
+      this.connectionListeners.delete(callback);
+    };
+  }
+
+  close(): Promise<void> {
+    this.currentQueue?.close();
+    return Promise.resolve();
+  }
+}
+
 const schema: SchemaDefinition = {
   models: {
     Task: {
@@ -556,28 +943,40 @@ const partialTaskSchema: SchemaDefinition = {
   },
 };
 
+const POLL_INTERVAL_MS = 5;
+const SYNC_SETTLE_DELAY_MS = 20;
+const WAIT_TIMEOUT_MS = 2000;
+
+const sleep = async (ms: number): Promise<void> => {
+  await delay(ms);
+};
+
+const waitUntil = async (
+  condition: () => boolean | Promise<boolean>,
+  errorMessage: string
+): Promise<void> => {
+  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  throw new Error(errorMessage);
+};
+
 const waitForSync = async (
   client: ReturnType<typeof createSyncClient>,
   expectedSyncId: string
 ): Promise<void> => {
-  const deadline = Date.now() + 2000;
-
-  while (Date.now() < deadline) {
-    if (client.lastSyncId === expectedSyncId) {
-      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-      await new Promise((resolve) => {
-        setTimeout(resolve, 20);
-      });
-      return;
-    }
-
-    // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-    await new Promise((resolve) => {
-      setTimeout(resolve, 5);
-    });
-  }
-
-  throw new Error("Timed out waiting for sync completion");
+  await waitUntil(
+    () => client.lastSyncId === expectedSyncId,
+    "Timed out waiting for sync completion"
+  );
+  await sleep(SYNC_SETTLE_DELAY_MS);
 };
 
 const waitForOutboxCount = async (
@@ -588,7 +987,7 @@ const waitForOutboxCount = async (
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for outbox count"));
-    }, 2000);
+    }, WAIT_TIMEOUT_MS);
 
     const unsubscribe = client.onEvent((event) => {
       if (
@@ -603,7 +1002,77 @@ const waitForOutboxCount = async (
   });
 };
 
+const waitForOutboxSize = async (
+  storage: Pick<StorageAdapter, "getOutbox">,
+  expectedCount: number
+): Promise<void> => {
+  await waitUntil(async () => {
+    const outbox = await storage.getOutbox();
+    return outbox.length === expectedCount;
+  }, "Timed out waiting for outbox size");
+};
+
+const waitForSubscribeCount = async (
+  transport: { subscribeCalls: unknown[] },
+  expectedCount: number
+): Promise<void> => {
+  await waitUntil(
+    () => transport.subscribeCalls.length >= expectedCount,
+    "Timed out waiting for subscription restart"
+  );
+};
+
 describe("reverse-done alignment", () => {
+  it("does not surface a sync error if start is stopped before bootstrap fails", async () => {
+    const storage = new InMemoryStorage();
+    const bootstrapGate = createDeferred<undefined>();
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "1",
+      },
+      fullRows: [],
+    });
+
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+
+      // oxlint-disable-next-line require-yield -- intentionally throws before yielding to simulate bootstrap failure
+      return (async function* generate() {
+        await bootstrapGate.promise;
+        throw new Error("bootstrap failed");
+      })();
+    }) as TestTransport["bootstrap"];
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    const syncErrors: string[] = [];
+    const unsubscribe = client.onEvent((event) => {
+      if (event.type === "syncError") {
+        syncErrors.push(event.error.message);
+      }
+    });
+
+    const startPromise = client.start();
+    await Promise.resolve();
+    await client.stop();
+    bootstrapGate.resolve();
+
+    await expect(startPromise).resolves.toBeUndefined();
+
+    unsubscribe();
+    expect(syncErrors).toEqual([]);
+    expect(client.state).toBe("disconnected");
+    expect(client.lastError).toBeNull();
+  });
+
   it("bootstraps metadata and hydrates the object pool", async () => {
     const storage = new InMemoryStorage();
     const rows: ModelRow[] = [
@@ -661,6 +1130,56 @@ describe("reverse-done alignment", () => {
     }
   });
 
+  it("re-runs bootstrap when the delta subscription requires a fresh snapshot", async () => {
+    const storage = new InMemoryStorage();
+    await storage.addToOutbox({
+      action: "U",
+      clientId: "client-1",
+      clientTxId: "persisted-awaiting-sync",
+      createdAt: Date.now(),
+      modelId: "task-1",
+      modelName: "Task",
+      original: { title: "Initial" },
+      payload: { title: "Recovered" },
+      retryCount: 0,
+      state: "awaitingSync",
+      syncIdNeededForCompletion: "25",
+    });
+    const transport = new BootstrapRequiredTransport();
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+    const syncErrors: string[] = [];
+    const unsubscribe = client.onEvent((event) => {
+      if (event.type === "syncError") {
+        syncErrors.push(event.error.message);
+      }
+    });
+
+    try {
+      await client.start();
+      await waitForSync(client, "25");
+      await waitForOutboxSize(storage, 0);
+
+      expect(transport.bootstrapCalls).toHaveLength(2);
+      expect(transport.subscribeCalls).toHaveLength(2);
+      expect(syncErrors).toEqual([]);
+      expect(await storage.getOutbox()).toHaveLength(0);
+      expect(
+        client.getIdentityMap<Record<string, unknown>>("Task").get("task-1")
+      ).toMatchObject({
+        id: "task-1",
+        title: "Recovered",
+      });
+    } finally {
+      unsubscribe();
+      await client.stop();
+    }
+  });
+
   it("preserves outbox transactions across full bootstrap", async () => {
     const storage = new InMemoryStorage();
     await storage.addToOutbox({
@@ -706,6 +1225,112 @@ describe("reverse-done alignment", () => {
       const outbox = await storage.getOutbox();
       expect(outbox).toHaveLength(1);
       expect(outbox[0]?.clientTxId).toBe("persisted-failed-tx");
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("completes persisted awaitingSync transactions during startup when the sync cursor is already ahead", async () => {
+    const storage = new InMemoryStorage();
+    await storage.addToOutbox({
+      action: "I",
+      clientId: "client-1",
+      clientTxId: "persisted-awaiting-sync",
+      createdAt: Date.now(),
+      modelId: "task-2",
+      modelName: "Task",
+      payload: {
+        id: "task-2",
+        teamId: "team-1",
+        title: "Confirmed",
+      },
+      retryCount: 0,
+      state: "awaitingSync",
+      syncIdNeededForCompletion: "20",
+    });
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "task-2", teamId: "team-1", title: "Confirmed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "25",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await waitForOutboxSize(storage, 0);
+
+      expect(await storage.getOutbox()).toHaveLength(0);
+      expect(
+        client.getIdentityMap<Record<string, unknown>>("Task").get("task-2")
+      ).toMatchObject({
+        id: "task-2",
+        title: "Confirmed",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("completes awaitingSync transactions when a resubscribe requires a fresh snapshot", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new ResubscribeBootstrapRequiredTransport();
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      await client.create("Task", {
+        id: "task-2",
+        teamId: "team-1",
+        title: "Local",
+      });
+
+      const outboxBeforeRecovery = await storage.getOutbox();
+      expect(outboxBeforeRecovery).toHaveLength(1);
+      expect(outboxBeforeRecovery[0]?.state).toBe("awaitingSync");
+
+      const syncWaiter = waitForSync(client, "25");
+      transport.closeCurrentSubscription();
+      await syncWaiter;
+      await waitForOutboxSize(storage, 0);
+
+      expect(transport.bootstrapCalls).toHaveLength(2);
+      expect(transport.subscribeCalls).toHaveLength(3);
+      expect(await storage.getOutbox()).toHaveLength(0);
+      expect(
+        client.getIdentityMap<Record<string, unknown>>("Task").get("task-2")
+      ).toMatchObject({
+        id: "task-2",
+        title: "Local",
+      });
     } finally {
       await client.stop();
     }
@@ -1436,6 +2061,7 @@ describe("reverse-done alignment", () => {
 
     try {
       await client.start();
+      await waitForSync(client, "10");
 
       const initialOutbox = await storage.getOutbox();
       expect(initialOutbox).toHaveLength(0);
@@ -1479,6 +2105,254 @@ describe("reverse-done alignment", () => {
         id: "task-1",
         teamId: "team-1",
         title: "Seed",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("serializes optimistic mutation payloads while keeping model values raw", async () => {
+    const serializer = {
+      deserialize(value: unknown): { deep: { count: number } } {
+        if (typeof value !== "string") {
+          throw new TypeError(
+            `expected serialized string, got ${typeof value}`
+          );
+        }
+        return JSON.parse(value) as { deep: { count: number } };
+      },
+      serialize(value: unknown): unknown {
+        return JSON.stringify(value);
+      },
+    };
+
+    class SerializedTask extends Model {
+      declare payload: { deep: { count: number } };
+    }
+
+    Property({ serializer })(SerializedTask.prototype, "payload");
+    ClientModel("SerializedTaskMutation")(SerializedTask);
+
+    const serializedSchema: SchemaDefinition = {
+      models: {
+        SerializedTaskMutation: {
+          fields: {
+            id: {},
+            payload: { serializer },
+          },
+          loadStrategy: "instant",
+        },
+      },
+    };
+
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+      },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema: serializedSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      const created = await client.create("SerializedTaskMutation", {
+        id: "task-1",
+        payload: { deep: { count: 1 } },
+      });
+
+      expect(created).toMatchObject({
+        id: "task-1",
+        payload: { deep: { count: 1 } },
+      });
+
+      let outbox = await storage.getOutbox();
+      expect(outbox[0]?.payload).toMatchObject({
+        id: "task-1",
+        payload: JSON.stringify({ deep: { count: 1 } }),
+      });
+
+      const taskMap = client.getIdentityMap<SerializedTask>(
+        "SerializedTaskMutation"
+      );
+      expect(taskMap.get("task-1")?.payload).toEqual({
+        deep: { count: 1 },
+      });
+
+      const updated = await client.update("SerializedTaskMutation", "task-1", {
+        payload: { deep: { count: 2 } },
+      });
+
+      expect(updated).toMatchObject({
+        id: "task-1",
+        payload: { deep: { count: 2 } },
+      });
+
+      outbox = await storage.getOutbox();
+      expect(outbox[1]?.payload).toEqual({
+        payload: JSON.stringify({ deep: { count: 2 } }),
+      });
+      expect(outbox[1]?.original).toEqual({
+        payload: JSON.stringify({ deep: { count: 1 } }),
+      });
+      expect(taskMap.get("task-1")?.payload).toEqual({
+        deep: { count: 2 },
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("materializes serializer-backed mutation results when optimistic updates are disabled", async () => {
+    const serializer = {
+      deserialize(value: unknown): { deep: { count: number } } {
+        if (typeof value !== "string") {
+          throw new TypeError(
+            `expected serialized string, got ${typeof value}`
+          );
+        }
+        return JSON.parse(value) as { deep: { count: number } };
+      },
+      serialize(value: unknown): unknown {
+        return JSON.stringify(value);
+      },
+    };
+
+    class NonOptimisticSerializedTask extends Model {
+      declare payload: { deep: { count: number } };
+    }
+
+    Property({ serializer })(NonOptimisticSerializedTask.prototype, "payload");
+    ClientModel("NonOptimisticSerializedTask")(NonOptimisticSerializedTask);
+
+    const serializedSchema: SchemaDefinition = {
+      models: {
+        NonOptimisticSerializedTask: {
+          fields: {
+            id: {},
+            payload: { serializer },
+          },
+          loadStrategy: "instant",
+        },
+      },
+    };
+
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+      },
+      fullRows: [
+        {
+          data: {
+            id: "task-1",
+            payload: JSON.stringify({ deep: { count: 1 } }),
+          },
+          modelName: "NonOptimisticSerializedTask",
+        },
+      ],
+    });
+
+    const client = createSyncClient({
+      batchMutations: false,
+      optimistic: false,
+      reactivity: noopReactivityAdapter,
+      schema: serializedSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      const updated = await client.update(
+        "NonOptimisticSerializedTask",
+        "task-1",
+        {
+          payload: { deep: { count: 2 } },
+        }
+      );
+
+      expect(updated).toMatchObject({
+        id: "task-1",
+        payload: { deep: { count: 2 } },
+      });
+
+      const outbox = await storage.getOutbox();
+      expect(outbox[0]?.payload).toEqual({
+        payload: JSON.stringify({ deep: { count: 2 } }),
+      });
+      expect(outbox[0]?.original).toEqual({
+        payload: JSON.stringify({ deep: { count: 1 } }),
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("deserializes schema-only serializer fields from bootstrap rows", async () => {
+    const serializer = {
+      deserialize(value: unknown): { deep: { count: number } } {
+        if (typeof value !== "string") {
+          throw new TypeError(
+            `expected serialized string, got ${typeof value}`
+          );
+        }
+        return JSON.parse(value) as { deep: { count: number } };
+      },
+      serialize(value: unknown): unknown {
+        return JSON.stringify(value);
+      },
+    };
+
+    const serializedSchema: SchemaDefinition = {
+      models: {
+        SchemaSerializedTask: {
+          fields: {
+            id: {},
+            payload: { serializer },
+          },
+          loadStrategy: "instant",
+        },
+      },
+    };
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+      },
+      fullRows: [
+        {
+          data: {
+            id: "task-1",
+            payload: JSON.stringify({ deep: { count: 1 } }),
+          },
+          modelName: "SchemaSerializedTask",
+        },
+      ],
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: serializedSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      expect(client.getCached("SchemaSerializedTask", "task-1")).toEqual({
+        id: "task-1",
+        payload: { deep: { count: 1 } },
       });
     } finally {
       await client.stop();
@@ -1736,6 +2610,100 @@ describe("reverse-done alignment", () => {
     }
   });
 
+  it("does not clear a later insert with the same model ID when confirming an earlier create", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+      startingSyncId: 50,
+    });
+
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      const firstTx: Transaction = {
+        action: "I",
+        clientId: client.clientId,
+        clientTxId: "first-create",
+        createdAt: Date.now(),
+        modelId: "task-2",
+        modelName: "Task",
+        payload: {
+          id: "task-2",
+          teamId: "team-1",
+          title: "First",
+        },
+        retryCount: 5,
+        state: "failed",
+      };
+      const secondTx: Transaction = {
+        action: "I",
+        clientId: client.clientId,
+        clientTxId: "second-create",
+        createdAt: Date.now(),
+        modelId: "task-2",
+        modelName: "Task",
+        payload: {
+          id: "task-2",
+          teamId: "team-1",
+          title: "Second",
+        },
+        retryCount: 5,
+        state: "failed",
+      };
+      await storage.addToOutbox(firstTx);
+      await storage.addToOutbox(secondTx);
+
+      const syncWaiter = waitForSync(client, "51");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "I",
+            clientTxId: firstTx.clientTxId,
+            data: {
+              id: "task-2",
+              teamId: "team-1",
+              title: "First",
+            },
+            id: "51",
+            modelId: "task-2",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "51",
+      });
+      await syncWaiter;
+      await waitForOutboxSize(storage, 1);
+
+      const outboxAfter = await storage.getOutbox();
+      expect(outboxAfter).toHaveLength(1);
+      expect(outboxAfter[0]?.clientTxId).toBe(secondTx.clientTxId);
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("completes awaiting outbox transactions when a packet only advances sync cursor", async () => {
     const storage = new InMemoryStorage();
     const rows: ModelRow[] = [
@@ -1861,6 +2829,400 @@ describe("reverse-done alignment", () => {
       expect(remainingOutbox[0]?.syncIdNeededForCompletion).toBe(secondSyncId);
     } finally {
       await client.stop();
+    }
+  });
+
+  it("applies empty sync-group updates and clears the previous group scope", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      transport.emitDelta({
+        actions: [
+          {
+            action: "S",
+            data: { subscribedSyncGroups: [] },
+            id: "60",
+            modelId: "sync-groups",
+            modelName: "SyncGroup",
+          },
+        ],
+        lastSyncId: "60",
+      });
+      await waitForSubscribeCount(transport, 2);
+      await sleep(SYNC_SETTLE_DELAY_MS);
+
+      const meta = (await storage.getMeta()) as {
+        firstSyncId?: string;
+        subscribedSyncGroups?: string[];
+      };
+      expect(meta.firstSyncId).toBe("60");
+      expect(meta.subscribedSyncGroups).toEqual([]);
+      expect(transport.subscribeCalls).toHaveLength(2);
+      expect(transport.subscribeCalls.at(-1)?.groups).toEqual([]);
+
+      const taskMap = client.getIdentityMap<Record<string, unknown>>("Task");
+      expect(taskMap.get("task-1")).toBeUndefined();
+      expect(await storage.get("Task", "task-1")).toBeNull();
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("re-subscribes live deltas after a clean close and reconnect", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new ReconnectableTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      transport.setConnectionState("disconnected");
+      transport.closeCurrentSubscription();
+      await Promise.resolve();
+      transport.setConnectionState("connected");
+      await waitForSubscribeCount(transport, 2);
+
+      const syncWaiter = waitForSync(client, "11");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            clientId: "remote-client",
+            data: { title: "Remote" },
+            id: "11",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "11",
+      });
+      await syncWaiter;
+
+      const taskMap = client.getIdentityMap<Record<string, unknown>>("Task");
+      expect(taskMap.get("task-1")).toMatchObject({
+        id: "task-1",
+        title: "Remote",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("tears down transport connection listeners on stop and rebinds once on restart", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new ReconnectableTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    const observedStates: ConnectionState[] = [];
+    client.onConnectionStateChange((state) => {
+      observedStates.push(state);
+    });
+
+    try {
+      expect(transport.getConnectionListenerCount()).toBe(1);
+
+      await client.start();
+      expect(transport.getConnectionListenerCount()).toBe(1);
+
+      await client.stop();
+      expect(transport.getConnectionListenerCount()).toBe(0);
+
+      const eventCountAfterStop = observedStates.length;
+      transport.setConnectionState("disconnected");
+      transport.setConnectionState("connected");
+      await Promise.resolve();
+
+      expect(observedStates).toHaveLength(eventCountAfterStop);
+      expect(client.connectionState).toBe("disconnected");
+
+      await client.start();
+      expect(transport.getConnectionListenerCount()).toBe(1);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("cancels partial sync-group bootstrap when stopped mid-stream", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Seed" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+    });
+    const resumePartial = createDeferred<undefined>();
+    const partialReady = createDeferred<undefined>();
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "partial") {
+        return originalBootstrap(options);
+      }
+
+      return (async function* generate() {
+        yield {
+          data: { id: "task-2", teamId: "team-2", title: "Team 2" },
+          modelName: "Task",
+        };
+        partialReady.resolve();
+        await resumePartial.promise;
+        yield {
+          data: { id: "task-3", teamId: "team-2", title: "Team 2 later" },
+          modelName: "Task",
+        };
+      })();
+    }) as TestTransport["bootstrap"];
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      transport.emitDelta({
+        actions: [
+          {
+            action: "S",
+            data: { subscribedSyncGroups: ["team-1", "team-2"] },
+            id: "60",
+            modelId: "sync-groups",
+            modelName: "SyncGroup",
+          },
+        ],
+        lastSyncId: "60",
+      });
+
+      await partialReady.promise;
+      const stopPromise = client.stop();
+      resumePartial.resolve();
+      await stopPromise;
+
+      expect(await storage.get("Task", "task-2")).toMatchObject({
+        id: "task-2",
+        teamId: "team-2",
+        title: "Team 2",
+      });
+      expect(await storage.get("Task", "task-3")).toBeNull();
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("keeps pending tx targets alive during delta batch eviction", async () => {
+    const storage = new InMemoryStorage();
+    const rows: ModelRow[] = [
+      {
+        data: { id: "task-0", teamId: "team-1", title: "Zero" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "task-1", teamId: "team-1", title: "One" },
+        modelName: "Task",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: rows,
+      startingSyncId: 50,
+    });
+
+    const client = createSyncClient({
+      batchMutations: false,
+      identityMapMaxSize: 2,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      await client.update("Task", "task-1", { title: "Updated" });
+      client.getCached("Task", "task-0");
+
+      const task1Before = client
+        .getIdentityMap<Record<string, unknown>>("Task")
+        .get("task-1");
+      if (!task1Before) {
+        throw new Error("Expected task-1 to be cached before delta");
+      }
+
+      const syncWaiter = waitForSync(client, "11");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "I",
+            clientId: "remote-client",
+            data: {
+              id: "task-2",
+              teamId: "team-1",
+              title: "Two",
+            },
+            id: "11",
+            modelId: "task-2",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "11",
+      });
+      await syncWaiter;
+
+      const task1After = client.getCached<Record<string, unknown>>(
+        "Task",
+        "task-1"
+      );
+      expect(task1After).toBe(task1Before);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("does not recreate missing models from partial pending replays", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: [],
+    });
+    const identityMaps = new IdentityMapRegistry(noopReactivityAdapter);
+    const orchestrator = new SyncOrchestrator(
+      {
+        reactivity: noopReactivityAdapter,
+        schema,
+        storage,
+        transport,
+      },
+      identityMaps
+    );
+    const replayPending = (
+      orchestrator as unknown as {
+        applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void;
+      }
+    ).applyPendingTransactionsToIdentityMaps.bind(orchestrator);
+
+    try {
+      replayPending([
+        {
+          action: "U",
+          clientId: "client-1",
+          clientTxId: "tx-update",
+          createdAt: Date.now(),
+          modelId: "task-1",
+          modelName: "Task",
+          original: { title: "Seed" },
+          payload: { title: "Local only" },
+          retryCount: 0,
+          state: "queued",
+        },
+        {
+          action: "A",
+          clientId: "client-1",
+          clientTxId: "tx-archive",
+          createdAt: Date.now(),
+          modelId: "task-2",
+          modelName: "Task",
+          original: { archivedAt: null },
+          payload: { archivedAt: Date.now() },
+          retryCount: 0,
+          state: "queued",
+        },
+      ]);
+
+      const taskMap = identityMaps.getMap<Record<string, unknown>>("Task");
+      expect(taskMap.get("task-1")).toBeUndefined();
+      expect(taskMap.get("task-2")).toBeUndefined();
+    } finally {
+      await orchestrator.reset();
     }
   });
 
@@ -2025,6 +3387,178 @@ describe("reverse-done alignment", () => {
       const latestSubscribe = transport.subscribeCalls.at(-1);
       expect(latestSubscribe?.groups).toEqual(["team-1", "team-2"]);
       expect(latestSubscribe?.afterSyncId).toBe("60");
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("does not synthesize partial models from pending updates without a base row", async () => {
+    const storage = new InMemoryStorage();
+    await storage.addToOutbox({
+      action: "U",
+      clientId: "client-1",
+      clientTxId: "tx-1",
+      createdAt: Date.now(),
+      modelId: "task-1",
+      modelName: "Task",
+      original: { title: "Seed" },
+      payload: { title: "Local only" },
+      retryCount: 0,
+      state: "queued",
+    });
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await sleep(SYNC_SETTLE_DELAY_MS);
+
+      expect(client.getCached("Task", "task-1")).toBeNull();
+      expect(await storage.get("Task", "task-1")).toBeNull();
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("re-attaches the transport listener across stop/start without dropping public listeners", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new ReconnectableTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+    });
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+    const connectionStates: ConnectionState[] = [];
+    const unsubscribe = client.onConnectionStateChange((state) => {
+      connectionStates.push(state);
+    });
+
+    try {
+      expect(transport.getConnectionListenerCount()).toBe(1);
+
+      await client.start();
+      expect(transport.getConnectionListenerCount()).toBe(1);
+
+      await client.stop();
+      expect(transport.getConnectionListenerCount()).toBe(0);
+
+      await client.start();
+      expect(transport.getConnectionListenerCount()).toBe(1);
+
+      transport.setConnectionState("disconnected");
+      transport.setConnectionState("connected");
+      await sleep(SYNC_SETTLE_DELAY_MS);
+
+      expect(client.connectionState).toBe("connected");
+      expect(connectionStates).toContain("disconnected");
+      expect(connectionStates).toContain("connected");
+    } finally {
+      unsubscribe();
+      await client.stop();
+    }
+  });
+
+  it("returns canonical model instances when a plain modelFactory is configured", async () => {
+    class TaskModel {
+      kind: string;
+      id = "";
+      title = "";
+
+      constructor(modelName: string, data: Record<string, unknown> = {}) {
+        this.kind = modelName;
+        Object.assign(this, data);
+      }
+    }
+
+    type TaskInstance = Record<string, unknown> & TaskModel;
+
+    const modelFactorySchema: SchemaDefinition = {
+      models: {
+        Task: {
+          fields: {
+            id: {},
+            title: {},
+          },
+          loadStrategy: "partial",
+        },
+      },
+    };
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      batchRows: [
+        {
+          data: { id: "task-3", title: "Batch" },
+          modelName: "Task",
+        },
+      ],
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+    });
+    const client = createSyncClient({
+      batchMutations: false,
+      modelFactory: (modelName: string, data: Record<string, unknown> = {}) =>
+        new TaskModel(modelName, data) as TaskInstance,
+      reactivity: noopReactivityAdapter,
+      schema: modelFactorySchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await storage.put("Task", {
+        id: "task-2",
+        title: "Stored",
+      });
+
+      const created = await client.create<TaskInstance>("Task", {
+        id: "task-1",
+        title: "Created",
+      } as TaskInstance);
+      expect(created).toBeInstanceOf(TaskModel);
+      expect(created).toBe(client.getCached<TaskInstance>("Task", "task-1"));
+
+      const updated = await client.update<TaskInstance>("Task", "task-1", {
+        title: "Updated",
+      });
+      expect(updated).toBe(created);
+      expect(updated.title).toBe("Updated");
+
+      const loaded = await client.get<TaskInstance>("Task", "task-2");
+      expect(loaded).toBeInstanceOf(TaskModel);
+      expect(loaded).toBe(client.getCached<TaskInstance>("Task", "task-2"));
+
+      const batchLoaded = await client.ensureModel<TaskInstance>(
+        "Task",
+        "task-3"
+      );
+      expect(batchLoaded).toBeInstanceOf(TaskModel);
+      expect(batchLoaded).toBe(
+        client.getCached<TaskInstance>("Task", "task-3")
+      );
     } finally {
       await client.stop();
     }

@@ -15,6 +15,7 @@ export class YjsTransportAdapter implements YjsTransport {
     (state: YjsTransportConnectionState) => void
   >();
   private connectionState: YjsTransportConnectionState;
+  private closed = false;
 
   constructor(
     sendFn: (message: ClientMessage) => void,
@@ -25,11 +26,18 @@ export class YjsTransportAdapter implements YjsTransport {
   }
 
   send(message: ClientMessage): void {
+    if (this.closed) {
+      throw new Error("Yjs transport is closed");
+    }
     this.sendFn(message);
   }
 
   // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
   onMessage(callback: (message: ServerMessage) => void): () => void {
+    if (this.closed) {
+      // oxlint-disable-next-line no-empty-function -- closed transports have nothing to unsubscribe
+      return () => {};
+    }
     this.callbacks.add(callback);
     return () => {
       this.callbacks.delete(callback);
@@ -37,6 +45,9 @@ export class YjsTransportAdapter implements YjsTransport {
   }
 
   handleIncoming(message: ServerMessage): void {
+    if (this.closed) {
+      return;
+    }
     for (const callback of this.callbacks) {
       // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
       callback(message);
@@ -47,6 +58,12 @@ export class YjsTransportAdapter implements YjsTransport {
     // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
     callback: (state: YjsTransportConnectionState) => void
   ): () => void {
+    if (this.closed) {
+      // oxlint-disable-next-line prefer-await-to-callbacks -- synchronous listener contract
+      callback("disconnected");
+      // oxlint-disable-next-line no-empty-function -- closed transports have nothing to unsubscribe
+      return () => {};
+    }
     this.connectionStateCallbacks.add(callback);
     // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
     callback(this.connectionState);
@@ -69,5 +86,16 @@ export class YjsTransportAdapter implements YjsTransport {
 
   isConnected(): boolean {
     return this.connectionState === "connected";
+  }
+
+  dispose(): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.handleConnectionStateChange("disconnected");
+    this.closed = true;
+    this.callbacks.clear();
+    this.connectionStateCallbacks.clear();
   }
 }

@@ -26,7 +26,7 @@ const client = createSyncClient({
   transport: createGraphQLTransport({
     endpoint: "https://api.example.com/graphql",
     syncEndpoint: "https://api.example.com/sync",
-    wsEndpoint: "wss://api.example.com/sync",
+    wsEndpoint: "wss://api.example.com/sync/ws",
     auth: { getAccessToken: async () => "your-token" },
   }),
   reactivity: createMobXReactivity(),

@@ -6,10 +6,6 @@
     "dev": "vite --port 3002",
     "build": "vite build",
     "start": "vite preview --port 3002",
-    "lint": "npm exec -- ultracite check",
-    "lint:fix": "npm exec -- ultracite fix",
-    "format": "npm exec -- ultracite fix",
-    "format:check": "npm exec -- ultracite check",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
@@ -39,11 +35,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.3.0",
-    "lefthook": "^2.1.4",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
     "typescript": "^5.9.3",
-    "ultracite": "^7.3.2",
     "vite": "^8.0.1"
   }
 }

@@ -12,15 +12,4 @@ export {
   DEFAULT_PERSISTED_YJS_PREFIX,
 } from "./persistence.js";
 export { YjsPresenceManager } from "./presence-manager.js";
-export type {
-  ClientMessage,
-  ServerMessage,
-  YjsTransport,
-  YjsTransportConnectionState,
-} from "./types.js";
-export {
-  isLiveEditingErrorMessage,
-  isSessionStateMessage,
-  isYjsSyncStep2Message,
-  isYjsUpdateMessage,
-} from "./types.js";
+export * from "./types.js";

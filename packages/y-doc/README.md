@@ -4,7 +4,7 @@ Yjs CRDT utilities and integration for collaborative editing.
 
 ## Overview
 
-sync-y-doc provides Yjs document management and protocol utilities:
+`@stratasync/y-doc` provides Yjs document management and protocol utilities:
 
 - **Document management**: Create and manage Yjs documents for collaborative fields
 - **Awareness protocol**: Presence and cursor tracking across clients
@@ -14,31 +14,51 @@ sync-y-doc provides Yjs document management and protocol utilities:
 ## Installation
 
 ```bash
-npm install @stratasync/y-doc
+npm install @stratasync/y-doc yjs
 ```
 
-Dependency: `yjs` ^13.6.21
+`yjs` is a peer dependency, so install it alongside `@stratasync/y-doc`.
 
 ## Usage
 
 ```typescript
-import { createYjsManager } from "@stratasync/y-doc";
+import { YjsDocumentManager } from "@stratasync/y-doc";
+import type { DocumentKey } from "@stratasync/y-doc";
+import * as Y from "yjs";
 
-const yjsManager = createYjsManager();
+const documentManager = new YjsDocumentManager({
+  clientId: "client-123",
+  connId: "conn-456",
+});
 
-// Create a document for a collaborative field
-const doc = yjsManager.getOrCreateDoc("Task", taskId, "description");
+const taskId = "task-123";
+
+const docKey: DocumentKey = {
+  entityType: "Task",
+  entityId: taskId,
+  fieldName: "description",
+};
+
+const doc = documentManager.getDocument(docKey);
+const fragment = doc.getXmlFragment("prosemirror");
+
+const paragraph = new Y.XmlElement("paragraph");
+const text = new Y.XmlText();
+text.insert(0, "Hello");
+paragraph.insert(0, [text]);
+fragment.insert(0, [paragraph]);
 
 // Encode state for transport
 const update = Y.encodeStateAsUpdate(doc);
 
-// Apply remote update
-Y.applyUpdate(doc, remoteUpdate);
+// In practice, this buffer comes from the server.
+Y.applyUpdate(doc, update);
 ```
 
 ## Concepts
 
 - **One Yjs document per collaborative field** (e.g., `Task.description` gets its own doc)
+- **ProseMirror fragment**: `YjsDocumentManager` reads and seeds the `prosemirror` fragment
 - **Awareness**: Separate protocol for presence (cursors, selections, user info)
 - **Binary encoding**: Yjs uses efficient binary encoding, not JSON
 - **Conflict-free**: CRDT guarantees eventual consistency without server coordination

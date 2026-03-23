@@ -158,6 +158,32 @@ describe(sendRestMutations, () => {
     expect(result.results[0]?.error).toBe("Conflict");
   });
 
+  it("surfaces invalid REST batches as structured validation errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          clientTxId: "tx-1",
+          details: [{ field: "payload", message: "invalid" }],
+          error: "Invalid transaction",
+        },
+        { status: 400 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendRestMutations({
+        auth: createAuthProvider(null),
+        batch: createBatch([createTransaction()]),
+        endpoint: ENDPOINT,
+      })
+    ).rejects.toMatchObject({
+      clientTxId: "tx-1",
+      code: "INVALID_MUTATION_BATCH",
+      message: "Invalid transaction",
+    });
+  });
+
   it("uses refreshToken fallback when access token is missing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({
@@ -313,6 +339,49 @@ describe(sendMutations, () => {
         mutationBuilder: simpleMutationBuilder,
       })
     ).rejects.toThrow("GraphQL errors: Internal error");
+  });
+
+  it("prefers GraphQL errors when data is omitted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        errors: [{ message: "Validation failed" }],
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendMutations({
+        auth: createAuthProvider(null),
+        batch: createBatch([createTransaction()]),
+        endpoint: "https://api.example.com/graphql",
+        mutationBuilder: simpleMutationBuilder,
+      })
+    ).rejects.toThrow("GraphQL errors: Validation failed");
+  });
+
+  it("fails GraphQL mutation results that omit syncId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          t0: { success: true },
+        },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendMutations({
+      auth: createAuthProvider(null),
+      batch: createBatch([createTransaction()]),
+      endpoint: "https://api.example.com/graphql",
+      mutationBuilder: simpleMutationBuilder,
+    });
+
+    expect(result.success).toBeFalsy();
+    expect(result.results[0]).toMatchObject({
+      clientTxId: "tx-1",
+      error: "Mutation response is missing syncId",
+      success: false,
+    });
   });
 
   it("uses refreshToken fallback for GraphQL mutations", async () => {

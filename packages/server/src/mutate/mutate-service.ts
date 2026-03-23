@@ -55,6 +55,9 @@ const isSyncDedupUniqueConstraintError = (error: unknown): boolean => {
   );
 };
 
+const formatWarningMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 interface ProcessedTransactionSuccess {
   success: true;
   result: TransactionResult;
@@ -70,9 +73,9 @@ type ProcessedTransactionResult =
   | ProcessedTransactionSuccess
   | ProcessedTransactionFailure;
 
-interface CreateSyncActionResult {
-  syncAction: SyncActionRow | null;
-  duplicateId: bigint | null;
+interface TransactionWorkResult {
+  data: Record<string, unknown>;
+  syncAction: SyncActionRow;
 }
 
 type ProcessAction = ReturnType<typeof mapGraphQLAction>;
@@ -80,6 +83,7 @@ type ProcessAction = ReturnType<typeof mapGraphQLAction>;
 interface PreparedTransaction {
   action: ProcessAction;
   canonicalModelId: string;
+  modelConfig: SyncModelConfig | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ type ModelLookup = (
 
 export class MutateService {
   private readonly dao: SyncDao;
-  private readonly db: unknown;
+  private readonly db: SyncDb;
   private readonly logger: SyncLogger;
   private readonly modelHandlers: Map<
     string,
@@ -118,7 +122,7 @@ export class MutateService {
     models: Record<string, SyncModelConfig>,
     logger: SyncLogger = noopLogger
   ) {
-    this.db = db;
+    this.db = db as SyncDb;
     this.dao = dao;
     this.logger = logger;
     this.modelConfigs = models;
@@ -190,7 +194,21 @@ export class MutateService {
   /**
    * Resolve the groupId for a sync action.
    */
+  private async lookupModelRecord(
+    db: SyncDb,
+    modelName: string,
+    modelId: string
+  ): Promise<Record<string, unknown> | null> {
+    const lookup = this.modelDelegates[modelName];
+    if (!lookup) {
+      return null;
+    }
+
+    return await lookup(db, modelId);
+  }
+
   private async resolveGroupId(
+    db: SyncDb,
     modelName: string,
     modelId: string,
     action: string,
@@ -205,14 +223,12 @@ export class MutateService {
       return modelId;
     }
 
-    // Try payload first
-    const payloadValue = payload[groupKey];
-    if (typeof payloadValue === "string" && payloadValue.length > 0) {
-      return payloadValue;
-    }
-
-    // For insert, the group key is required in payload
     if (action === "I") {
+      const payloadValue = payload[groupKey];
+      if (typeof payloadValue === "string" && payloadValue.length > 0) {
+        return payloadValue;
+      }
+
       this.logger.warn(
         { groupKey, modelName },
         "Missing group key in insert payload"
@@ -220,30 +236,21 @@ export class MutateService {
       throw new Error("Invalid mutation: missing required group identifier");
     }
 
-    // For update/delete/archive/unarchive, look up from DB
-    const record = await this.lookupGroupId(modelName, modelId, groupKey);
-    if (!record) {
-      this.logger.warn(
-        { groupKey, modelId, modelName },
-        "Cannot resolve group for mutation"
-      );
-      throw new Error("Invalid mutation: record not found");
-    }
-    return record;
-  }
-
-  private async lookupGroupId(
-    modelName: string,
-    modelId: string,
-    groupKey: string
-  ): Promise<string | null> {
-    const lookup = this.modelDelegates[modelName];
-    if (!lookup) {
-      return null;
+    const record = await this.lookupModelRecord(db, modelName, modelId);
+    if (record) {
+      return (record[groupKey] as string | null | undefined) ?? null;
     }
 
-    const row = await lookup(this.db, modelId);
-    return (row as Record<string, unknown> | null)?.[groupKey] as string | null;
+    const payloadValue = payload[groupKey];
+    if (typeof payloadValue === "string" && payloadValue.length > 0) {
+      return payloadValue;
+    }
+
+    this.logger.warn(
+      { groupKey, modelId, modelName },
+      "Cannot resolve group for mutation"
+    );
+    throw new Error("Invalid mutation: record not found");
   }
 
   private static validateGroupAccess(
@@ -302,21 +309,46 @@ export class MutateService {
     return {
       action,
       canonicalModelId,
+      modelConfig: modelConfig ?? null,
     };
   }
 
+  private async ensureMutationTargetExists(
+    db: SyncDb,
+    tx: TransactionInput,
+    prepared: PreparedTransaction
+  ): Promise<void> {
+    if (prepared.action === "I") {
+      return;
+    }
+
+    if (prepared.modelConfig?.mutate.kind !== "standard") {
+      return;
+    }
+
+    const row = await this.lookupModelRecord(
+      db,
+      tx.modelName,
+      prepared.canonicalModelId
+    );
+    if (!row) {
+      throw new Error("Invalid mutation: record not found");
+    }
+  }
+
   private async applyModelMutation(
+    db: SyncDb,
     tx: TransactionInput,
     prepared: PreparedTransaction
   ): Promise<Record<string, unknown>> {
     const handler = this.modelHandlers.get(tx.modelName);
 
     if (!handler) {
-      return tx.payload;
+      throw new Error(`Unknown model: ${tx.modelName}`);
     }
 
     return await handler(
-      this.db,
+      db,
       prepared.canonicalModelId,
       tx.payload,
       prepared.action
@@ -324,11 +356,13 @@ export class MutateService {
   }
 
   private async resolveAuthorizedGroupId(
+    db: SyncDb,
     context: SyncUserContext,
     tx: TransactionInput,
     prepared: PreparedTransaction
   ): Promise<string | null> {
     const groupId = await this.resolveGroupId(
+      db,
       tx.modelName,
       prepared.canonicalModelId,
       prepared.action,
@@ -387,49 +421,39 @@ export class MutateService {
 
   private static createSuccessResult(
     tx: TransactionInput,
-    syncId: bigint
+    syncId: bigint,
+    warnings?: string[]
   ): TransactionResult {
-    return {
+    const result: TransactionResult = {
       clientTxId: tx.clientTxId,
       success: true,
       syncId: serializeSyncId(syncId),
     };
+
+    if (warnings && warnings.length > 0) {
+      result.warnings = warnings;
+    }
+
+    return result;
   }
 
-  private async createSyncActionWithDeduplication(
+  private static async createSyncActionInTransaction(
+    dao: SyncDao,
     tx: TransactionInput,
     action: string,
     canonicalModelId: string,
     data: Record<string, unknown>,
     groupId: string | null
-  ): Promise<CreateSyncActionResult> {
-    try {
-      const syncAction = await this.dao.createSyncAction({
-        action,
-        clientId: tx.clientId,
-        clientTxId: tx.clientTxId,
-        data,
-        groupId,
-        model: tx.modelName,
-        modelId: canonicalModelId,
-      });
-      return {
-        duplicateId: null,
-        syncAction: syncAction as unknown as SyncActionRow,
-      };
-    } catch (error) {
-      if (!isSyncDedupUniqueConstraintError(error)) {
-        throw error;
-      }
-      const duplicate = await this.dao.findSyncActionByClientTx(
-        tx.clientId,
-        tx.clientTxId
-      );
-      if (!duplicate) {
-        throw error;
-      }
-      return { duplicateId: duplicate.id, syncAction: null };
-    }
+  ): Promise<SyncActionRow> {
+    return (await dao.createSyncAction({
+      action,
+      clientId: tx.clientId,
+      clientTxId: tx.clientTxId,
+      data,
+      groupId,
+      model: tx.modelName,
+      modelId: canonicalModelId,
+    })) as unknown as SyncActionRow;
   }
 
   private async processTransaction(
@@ -450,60 +474,58 @@ export class MutateService {
         );
       }
 
-      const prepared = this.prepareTransaction(tx);
-      const data = await this.applyModelMutation(tx, prepared);
-      const groupId = await this.resolveAuthorizedGroupId(
-        context,
-        tx,
-        prepared
-      );
-
-      const createResult = await this.createSyncActionWithDeduplication(
-        tx,
-        prepared.action,
-        prepared.canonicalModelId,
-        data,
-        groupId
-      );
-
-      if (createResult.duplicateId !== null) {
-        return MutateService.createDuplicateTransactionResult(
+      const workResult = await this.db.transaction(async (txDb) => {
+        const txDao = this.dao.withDb(txDb);
+        const prepared = this.prepareTransaction(tx);
+        await this.ensureMutationTargetExists(txDb, tx, prepared);
+        const groupId = await this.resolveAuthorizedGroupId(
+          txDb,
+          context,
           tx,
-          createResult.duplicateId,
-          this.logger
+          prepared
         );
-      }
+        const data = await this.applyModelMutation(txDb, tx, prepared);
+        const syncAction = await MutateService.createSyncActionInTransaction(
+          txDao,
+          tx,
+          prepared.action,
+          prepared.canonicalModelId,
+          data,
+          groupId
+        );
 
-      const { syncAction } = createResult;
-      if (!syncAction) {
-        throw new Error("Expected syncAction after transaction creation");
-      }
+        return {
+          data,
+          syncAction,
+        } satisfies TransactionWorkResult;
+      });
 
       this.logger.debug(
         {
-          action: prepared.action,
-          modelId: prepared.canonicalModelId,
+          action: workResult.syncAction.action,
+          modelId: workResult.syncAction.modelId,
           modelName: tx.modelName,
-          syncId: serializeSyncId(syncAction.id),
+          syncId: serializeSyncId(workResult.syncAction.id),
         },
         "Transaction processed"
       );
 
-      MutateService.publishSyncAction(syncAction, onAction);
-
-      // Fire onAfterMutation hook
+      const warnings: string[] = [];
       const modelConfig = this.modelConfigs[tx.modelName];
       if (modelConfig?.mutate.onAfterMutation) {
         try {
           await modelConfig.mutate.onAfterMutation({
-            action: prepared.action,
-            data,
-            modelId: prepared.canonicalModelId,
+            action: workResult.syncAction.action as ModelAction,
+            data: workResult.data,
+            modelId: workResult.syncAction.modelId,
             modelName: tx.modelName,
             payload: tx.payload,
-            syncAction: { id: syncAction.id },
+            syncAction: { id: workResult.syncAction.id },
           });
         } catch (hookError) {
+          warnings.push(
+            `onAfterMutation hook failed: ${formatWarningMessage(hookError)}`
+          );
           this.logger.warn(
             { error: hookError, modelName: tx.modelName },
             "onAfterMutation hook failed"
@@ -511,12 +533,32 @@ export class MutateService {
         }
       }
 
+      MutateService.publishSyncAction(workResult.syncAction, onAction);
+
       return {
-        result: MutateService.createSuccessResult(tx, syncAction.id),
+        result: MutateService.createSuccessResult(
+          tx,
+          workResult.syncAction.id,
+          warnings
+        ),
         success: true,
-        syncId: syncAction.id,
+        syncId: workResult.syncAction.id,
       };
     } catch (error) {
+      if (isSyncDedupUniqueConstraintError(error)) {
+        const duplicate = await this.dao.findSyncActionByClientTx(
+          tx.clientId,
+          tx.clientTxId
+        );
+        if (duplicate) {
+          return MutateService.createDuplicateTransactionResult(
+            tx,
+            duplicate.id,
+            this.logger
+          );
+        }
+      }
+
       this.logger.error(
         {
           clientTxId: tx.clientTxId,

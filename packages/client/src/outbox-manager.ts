@@ -21,6 +21,21 @@ import type { StorageAdapter, TransportAdapter } from "./types.js";
 
 const MAX_RETRY_COUNT = 5;
 
+interface InvalidMutationBatchError extends Error {
+  code: "INVALID_MUTATION_BATCH";
+  clientTxId: string;
+  details?: unknown;
+}
+
+const isInvalidMutationBatchError = (
+  error: unknown
+): error is InvalidMutationBatchError =>
+  error instanceof Error &&
+  "code" in error &&
+  error.code === "INVALID_MUTATION_BATCH" &&
+  "clientTxId" in error &&
+  typeof error.clientTxId === "string";
+
 /**
  * Options for the outbox manager
  */
@@ -245,7 +260,7 @@ export class OutboxManager {
     return version === this.lifecycleVersion;
   }
 
-  private waitForInflightSends(): Promise<void> {
+  waitForInflightSends(): Promise<void> {
     return this.sendQueue;
   }
 
@@ -274,6 +289,13 @@ export class OutboxManager {
       }
       await this.handleMutateResult(transactions, result, version);
     } catch (error) {
+      if (
+        this.isLifecycleCurrent(version) &&
+        isInvalidMutationBatchError(error)
+      ) {
+        await this.handleInvalidMutationBatch(transactions, error, version);
+        return;
+      }
       await this.handleTransportFailure(transactions, error, version);
       throw error;
     }
@@ -329,6 +351,62 @@ export class OutboxManager {
     }
   }
 
+  private async handleInvalidMutationBatch(
+    transactions: Transaction[],
+    error: InvalidMutationBatchError,
+    version: number
+  ): Promise<void> {
+    const rejectedTx = transactions.find(
+      (tx) => tx.clientTxId === error.clientTxId
+    );
+    if (!rejectedTx) {
+      await this.handleTransportFailure(transactions, error, version);
+      throw error;
+    }
+
+    const remainingTransactions = transactions.filter(
+      (tx) => tx.clientTxId !== error.clientTxId
+    );
+
+    rejectedTx.state = "failed";
+    rejectedTx.lastError = error.message;
+    await this.storage.updateOutboxTransaction(rejectedTx.clientTxId, {
+      lastError: rejectedTx.lastError,
+      state: "failed",
+    });
+    if (!this.isLifecycleCurrent(version)) {
+      return;
+    }
+    this.onTransactionRejected?.(rejectedTx);
+    await this.removeRejectedTransaction(rejectedTx);
+    if (!this.isLifecycleCurrent(version)) {
+      return;
+    }
+    this.onTransactionStateChange?.(rejectedTx);
+
+    for (const tx of remainingTransactions) {
+      tx.state = "queued";
+      tx.lastError = undefined;
+      await this.storage.updateOutboxTransaction(tx.clientTxId, {
+        lastError: undefined,
+        state: "queued",
+      });
+      if (!this.isLifecycleCurrent(version)) {
+        return;
+      }
+      this.onTransactionStateChange?.(tx);
+    }
+
+    if (remainingTransactions.length > 0) {
+      await this.sendBatch(remainingTransactions, version);
+    }
+  }
+
+  private async removeRejectedTransaction(tx: Transaction): Promise<void> {
+    await this.storage.removeFromOutbox(tx.clientTxId);
+    this.localClientTxIds.delete(tx.clientTxId);
+  }
+
   /**
    * Handles the result of a mutation batch
    */
@@ -360,7 +438,9 @@ export class OutboxManager {
           (highestSyncId === ZERO_SYNC_ID ? undefined : highestSyncId);
         tx.state = "awaitingSync";
         tx.syncIdNeededForCompletion = syncIdNeededForCompletion;
+        tx.lastError = undefined;
         await this.storage.updateOutboxTransaction(tx.clientTxId, {
+          lastError: undefined,
           state: "awaitingSync",
           syncIdNeededForCompletion,
         });
@@ -374,6 +454,7 @@ export class OutboxManager {
           state: "failed",
         });
         this.onTransactionRejected?.(tx);
+        await this.removeRejectedTransaction(tx);
       }
 
       if (!this.isLifecycleCurrent(version)) {

@@ -1,5 +1,6 @@
 import { toInstantEpoch } from "../utils/dates.js";
 import { parseTemporalInput } from "./field-codecs.js";
+import { assertMutationTargetAffected } from "./write-results.js";
 
 interface ArchiveMutationOptions {
   db: unknown;
@@ -10,7 +11,7 @@ interface ArchiveMutationOptions {
     db: unknown,
     id: string,
     data: Record<string, unknown>
-  ) => Promise<void>;
+  ) => Promise<unknown>;
 }
 
 export const handleArchiveMutation = async (
@@ -22,14 +23,23 @@ export const handleArchiveMutation = async (
       options.payload.archivedAt,
       "archivedAt"
     );
+    if (archivedAt === null) {
+      throw new Error("archivedAt is required");
+    }
 
-    await options.updateById(options.db, options.modelId, { archivedAt });
+    const updateResult = await options.updateById(options.db, options.modelId, {
+      archivedAt,
+    });
+    assertMutationTargetAffected(updateResult);
 
     return {
       archivedAt: toInstantEpoch(archivedAt),
     };
   }
 
-  await options.updateById(options.db, options.modelId, { archivedAt: null });
+  const updateResult = await options.updateById(options.db, options.modelId, {
+    archivedAt: null,
+  });
+  assertMutationTargetAffected(updateResult);
   return { archivedAt: null };
 };

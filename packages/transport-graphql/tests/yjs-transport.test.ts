@@ -1,3 +1,8 @@
+import {
+  createInsertTransaction,
+  createTransactionBatch,
+} from "@stratasync/core";
+
 import { GraphQLTransportAdapter } from "../src/adapter";
 import type { TransportOptions } from "../src/types";
 import { YjsTransportAdapter } from "../src/yjs-transport";
@@ -142,9 +147,62 @@ describe(YjsTransportAdapter, () => {
     expect(states).toEqual(["disconnected", "connecting", "connected"]);
     expect(adapter.isConnected()).toBeTruthy();
   });
+
+  it("rejects sends after disposal", () => {
+    const send = vi.fn();
+    const adapter = new YjsTransportAdapter(send, "connected");
+
+    adapter.dispose();
+
+    expect(() =>
+      adapter.send({
+        clientId: "client-1",
+        connId: "conn-1",
+        entityId: "task-1",
+        entityType: "Task",
+        fieldName: "description",
+        state: "start",
+        type: "doc_view",
+      })
+    ).toThrow("Yjs transport is closed");
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
 describe(GraphQLTransportAdapter, () => {
+  it("normalizes sync endpoints before posting REST mutations", async () => {
+    const tx = createInsertTransaction("client-1", "Task", "task-1", {
+      title: "Test",
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        lastSyncId: "1",
+        results: [{ clientTxId: tx.clientTxId, success: true, syncId: "1" }],
+        success: true,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transport = new GraphQLTransportAdapter({
+      auth: {
+        getAccessToken: () => "token",
+      },
+      endpoint: "https://example.com/graphql",
+      syncEndpoint: "https://example.com/sync/mutate",
+      webSocketFactory: MockWebSocket as unknown as typeof WebSocket,
+      wsEndpoint: "wss://example.com/ws",
+    });
+
+    await transport.mutate(createTransactionBatch([tx]));
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://example.com/sync/mutate"
+    );
+
+    await transport.close();
+  });
+
   it("opens a single websocket for one subscribe call", async () => {
     const transport = createTransport();
     const subscription = transport.subscribe({ afterSyncId: "0" });
@@ -241,5 +299,123 @@ describe(GraphQLTransportAdapter, () => {
 
     subscription.unsubscribe();
     await transport.close();
+  });
+
+  it("drops adapter connection listeners on close", async () => {
+    const transport = createTransport();
+    const states: string[] = [];
+
+    transport.onConnectionStateChange((state) => {
+      states.push(state);
+    });
+
+    const subscription = transport.subscribe({ afterSyncId: "0" });
+    await flush();
+    await transport.close();
+
+    const restartedSubscription = transport.subscribe({ afterSyncId: "1" });
+    await flush();
+    lastSocket().simulateOpen();
+    await flush();
+
+    expect(states).toEqual(["connecting", "disconnected"]);
+
+    subscription.unsubscribe();
+    restartedSubscription.unsubscribe();
+    await transport.close();
+  });
+
+  it("detaches the old yjs transport listener on close", async () => {
+    const transport = createTransport();
+    const firstTransport = transport.getYjsTransport();
+    const firstMessages: unknown[] = [];
+    firstTransport.onMessage((message) => {
+      firstMessages.push(message);
+    });
+
+    firstTransport.send({
+      clientId: "client-1",
+      connId: "conn-1",
+      entityId: "task-1",
+      entityType: "Task",
+      fieldName: "description",
+      state: "start",
+      type: "doc_view",
+    });
+    await flush();
+
+    await transport.close();
+
+    const secondTransport = transport.getYjsTransport();
+    const secondMessages: unknown[] = [];
+    secondTransport.onMessage((message) => {
+      secondMessages.push(message);
+    });
+    expect(secondTransport).not.toBe(firstTransport);
+
+    secondTransport.send({
+      clientId: "client-2",
+      connId: "conn-2",
+      entityId: "task-2",
+      entityType: "Task",
+      fieldName: "description",
+      state: "start",
+      type: "doc_view",
+    });
+    await flush();
+    lastSocket().simulateOpen();
+    await flush();
+
+    lastSocket().simulateMessage(
+      JSON.stringify({
+        clientId: "client-2",
+        connId: "conn-2",
+        entityId: "task-2",
+        entityType: "Task",
+        fieldName: "description",
+        payload: "AQID",
+        seq: 1,
+        type: "yjs_update",
+      })
+    );
+    await flush();
+
+    expect(firstMessages).toEqual([]);
+    expect(secondMessages).toHaveLength(1);
+
+    await transport.close();
+  });
+
+  it("rejects sends from stale yjs transport handles after close", async () => {
+    const transport = createTransport();
+    const firstTransport = transport.getYjsTransport();
+
+    firstTransport.send({
+      clientId: "client-1",
+      connId: "conn-1",
+      entityId: "task-1",
+      entityType: "Task",
+      fieldName: "description",
+      state: "start",
+      type: "doc_view",
+    });
+    await flush();
+
+    expect(instances).toHaveLength(1);
+
+    await transport.close();
+
+    expect(() =>
+      firstTransport.send({
+        clientId: "client-1",
+        connId: "conn-1",
+        entityId: "task-1",
+        entityType: "Task",
+        fieldName: "description",
+        state: "start",
+        type: "doc_view",
+      })
+    ).toThrow("Yjs transport is closed");
+    expect(instances).toHaveLength(1);
   });
 });

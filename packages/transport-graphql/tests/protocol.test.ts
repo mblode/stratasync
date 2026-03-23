@@ -15,6 +15,9 @@ describe("sync protocol helpers", () => {
     expect(normalizeSyncEndpoint("https://api.example.com/sync/deltas")).toBe(
       "https://api.example.com/sync"
     );
+    expect(normalizeSyncEndpoint("https://api.example.com/sync/mutate")).toBe(
+      "https://api.example.com/sync"
+    );
   });
 
   it("joins sync URLs without double slashes", () => {
@@ -91,5 +94,38 @@ describe("delta packet parsing", () => {
         },
       ])
     ).toThrow("Sync action syncId/id must be a string");
+  });
+
+  it("ignores malformed action entries and sanitizes invalid payload fields", () => {
+    const packet = parseDeltaPacket({
+      actions: [
+        null,
+        "bad-action",
+        {
+          action: "I",
+          createdAt: "not-a-date",
+          data: ["not-an-object"],
+          id: "7",
+          modelId: "task-1",
+          modelName: "Task",
+        },
+      ],
+      lastSyncId: "7",
+    });
+
+    expect(packet).not.toBeNull();
+    if (!packet) {
+      return;
+    }
+
+    expect(packet.actions).toHaveLength(1);
+    expect(packet.actions[0]).toMatchObject({
+      action: "I",
+      data: {},
+      id: "7",
+      modelId: "task-1",
+      modelName: "Task",
+    });
+    expect(packet.actions[0]?.createdAt).toBeUndefined();
   });
 });

@@ -25,17 +25,15 @@
     "dev": "turbo run dev",
     "typecheck": "turbo run check-types",
     "test": "turbo run test",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint:fix",
-    "format": "turbo run format",
-    "format:check": "turbo run format:check",
+    "lint": "oxfmt --check . && oxlint $(git ls-files '*.ts' '*.tsx' '*.js' '*.jsx')",
+    "lint:fix": "oxfmt --write . && oxlint --fix $(git ls-files '*.ts' '*.tsx' '*.js' '*.jsx')",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "check-types": "turbo run check-types",
-    "check": "ultracite check",
-    "fix": "ultracite fix",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "release": "turbo run build --filter='./packages/*' && changeset publish",
-    "prepare": "lefthook install || true"
+    "prepare": "[ -n \"$CI\" ] || lefthook install"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",

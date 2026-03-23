@@ -3,7 +3,7 @@ import { maxSyncId, ZERO_SYNC_ID } from "@stratasync/core";
 
 import { parseSyncId } from "./utils.js";
 
-const SYNC_ENDPOINT_SUFFIXES = ["/bootstrap", "/batch", "/deltas"];
+const SYNC_ENDPOINT_SUFFIXES = ["/bootstrap", "/batch", "/deltas", "/mutate"];
 const TRAILING_SLASH_RE = /\/+$/;
 
 /**
@@ -75,7 +75,10 @@ const parseSyncAction = (raw: Record<string, unknown>): SyncAction => {
   const createdAtRaw = raw.createdAt;
   let createdAt: Date | undefined;
   if (typeof createdAtRaw === "string" || typeof createdAtRaw === "number") {
-    createdAt = new Date(createdAtRaw);
+    const parsedDate = new Date(createdAtRaw);
+    if (!Number.isNaN(parsedDate.getTime())) {
+      createdAt = parsedDate;
+    }
   }
 
   const groupsRaw = raw.groups;
@@ -84,10 +87,16 @@ const parseSyncAction = (raw: Record<string, unknown>): SyncAction => {
     : undefined;
 
   const groupId = typeof raw.groupId === "string" ? raw.groupId : undefined;
+  const data =
+    typeof raw.data === "object" &&
+    raw.data !== null &&
+    !Array.isArray(raw.data)
+      ? (raw.data as Record<string, unknown>)
+      : {};
 
   const result: SyncAction = {
     action: normalizeAction(actionRaw),
-    data: (raw.data as Record<string, unknown>) ?? {},
+    data,
     id: parsedSyncId,
     modelId,
     modelName,
@@ -146,9 +155,12 @@ export const parseDeltaPacket = (raw: unknown): DeltaPacket | null => {
   }
 
   if (Array.isArray(payload.actions)) {
-    const actions = payload.actions.map((action) =>
-      parseSyncAction(action as Record<string, unknown>)
-    );
+    const actions = payload.actions
+      .filter(
+        (action): action is Record<string, unknown> =>
+          typeof action === "object" && action !== null
+      )
+      .map((action) => parseSyncAction(action));
     const lastSyncIdRaw = payload.lastSyncId;
     const lastSyncId =
       // oxlint-disable-next-line no-array-reduce

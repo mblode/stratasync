@@ -10,7 +10,13 @@ export const getModelKey = (modelName: string, id: string): string =>
 export const getModelData = (
   value: Record<string, unknown>
 ): Record<string, unknown> => {
-  const candidate = value as { toJSON?: () => Record<string, unknown> };
+  const candidate = value as {
+    toJSON?: () => Record<string, unknown>;
+    toRawJSON?: () => Record<string, unknown>;
+  };
+  if (typeof candidate?.toRawJSON === "function") {
+    return candidate.toRawJSON();
+  }
   if (typeof candidate?.toJSON === "function") {
     return candidate.toJSON();
   }

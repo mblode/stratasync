@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import type { StorageAdapter, StorageMeta } from "@stratasync/client";
 import type {
   ModelRegistrySnapshot,
@@ -29,6 +31,7 @@ class MemoryStorage implements StorageAdapter {
   opened = false;
   closed = false;
   cleared = false;
+  clearOptions: { preserveOutbox?: boolean } | null = null;
   openOptions: {
     name?: string;
     userId?: string;
@@ -37,6 +40,7 @@ class MemoryStorage implements StorageAdapter {
     schema?: SchemaDefinition | ModelRegistrySnapshot;
   } | null = null;
   batches: BatchOp[][] = [];
+  persistedModels = new Map<string, boolean>();
 
   constructor(meta: StorageMeta) {
     this.meta = meta;
@@ -101,13 +105,17 @@ class MemoryStorage implements StorageAdapter {
   }
 
   getModelPersistence(
-    _modelName: string
+    modelName: string
   ): ReturnType<StorageAdapter["getModelPersistence"]> {
-    return Promise.reject(new Error("Not implemented"));
+    return Promise.resolve({
+      modelName,
+      persisted: this.persistedModels.get(modelName) ?? false,
+    });
   }
 
-  setModelPersistence(_modelName: string, _persisted: boolean): Promise<void> {
-    return Promise.reject(new Error("Not implemented"));
+  setModelPersistence(modelName: string, persisted: boolean): Promise<void> {
+    this.persistedModels.set(modelName, persisted);
+    return Promise.resolve();
   }
 
   getOutbox(): Promise<Transaction[]> {
@@ -160,8 +168,9 @@ class MemoryStorage implements StorageAdapter {
     return Promise.reject(new Error("Not implemented"));
   }
 
-  clear(): Promise<void> {
+  clear(options?: { preserveOutbox?: boolean }): Promise<void> {
     this.cleared = true;
+    this.clearOptions = options ?? null;
     return Promise.resolve();
   }
 
@@ -172,13 +181,19 @@ class MemoryStorage implements StorageAdapter {
 
 const encoder = new TextEncoder();
 
-const createNdjsonResponse = (lines: string[], status = 200): Response => {
+const createNdjsonResponse = (
+  lines: string[],
+  status = 200,
+  close = true
+): Response => {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       for (const line of lines) {
         controller.enqueue(encoder.encode(`${line}\n`));
       }
-      controller.close();
+      if (close) {
+        controller.close();
+      }
     },
   });
 
@@ -199,6 +214,55 @@ afterEach(() => {
 });
 
 describe(prefetchBootstrap, () => {
+  it("preserves rows that contain metadata-like or control-like fields", async () => {
+    const rowWithMetadataLikeField = JSON.stringify({
+      __class: "Task",
+      id: "task-1",
+      lastSyncId: "shadowed",
+    });
+    const rowWithEndType = JSON.stringify({
+      __class: "Task",
+      id: "task-2",
+      type: "end",
+    });
+    const metadataLine = `_metadata_=${JSON.stringify({
+      lastSyncId: "10",
+      subscribedSyncGroups: [],
+    })}`;
+
+    stubFetch([rowWithMetadataLikeField, rowWithEndType, metadataLine]);
+
+    const snapshot = await prefetchBootstrap({
+      endpoint: "https://api.example.com/sync",
+    });
+
+    expect(snapshot.rows).toEqual([
+      {
+        data: {
+          id: "task-1",
+          lastSyncId: "shadowed",
+        },
+        modelName: "Task",
+      },
+      {
+        data: {
+          id: "task-2",
+          type: "end",
+        },
+        modelName: "Task",
+      },
+    ]);
+    expect(snapshot.lastSyncId).toBe("10");
+  });
+
+  it("surfaces server error frames as bootstrap errors", async () => {
+    stubFetch([JSON.stringify({ message: "Bad token", type: "error" })]);
+
+    await expect(
+      prefetchBootstrap({ endpoint: "https://api.example.com/sync" })
+    ).rejects.toThrow("Bootstrap server error: Bad token");
+  });
+
   it("uses firstSyncId from metadata and normalizes lastSyncId", async () => {
     const metadataLine = JSON.stringify({
       _metadata_: {
@@ -262,6 +326,66 @@ describe(prefetchBootstrap, () => {
       expect(url.searchParams.get("schemaHash")).toBe("schema-hash");
     }
   });
+
+  it("aborts stalled body reads after the configured timeout", async () => {
+    const metadataLine = `_metadata_=${JSON.stringify({
+      lastSyncId: 1,
+      subscribedSyncGroups: [],
+    })}`;
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(createNdjsonResponse([metadataLine], 200, false))
+    );
+
+    const result = await Promise.race([
+      prefetchBootstrap({
+        endpoint: "https://api.example.com/sync",
+        timeout: 10,
+      }).then(
+        () => "resolved",
+        (error) => error
+      ),
+      delay(100, "pending"),
+    ]);
+
+    expect(result).not.toBe("pending");
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe(
+      "Bootstrap prefetch timed out after 10ms"
+    );
+  });
+
+  it("normalizes timeouts before response headers arrive", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, options?: RequestInit) =>
+          // oxlint-disable-next-line avoid-new -- simulating a never-resolving fetch
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () =>
+                reject(
+                  new DOMException("The operation was aborted.", "AbortError")
+                ),
+              {
+                once: true,
+              }
+            );
+          })
+      )
+    );
+
+    await expect(
+      prefetchBootstrap({
+        endpoint: "https://api.example.com/sync",
+        timeout: 10,
+      })
+    ).rejects.toThrow("Bootstrap prefetch timed out after 10ms");
+  });
 });
 
 describe("bootstrap snapshot utilities", () => {
@@ -290,6 +414,16 @@ describe("bootstrap snapshot utilities", () => {
     });
     const decoded = await decodeBootstrapSnapshot(encoded);
     expect(decoded).toEqual(snapshot);
+  });
+
+  it("rejects unsupported bootstrap payload encodings", async () => {
+    await expect(
+      deserializeBootstrapSnapshot({
+        data: "{}",
+        encoding: "brotli-base64",
+        version: 1,
+      } as unknown as Parameters<typeof deserializeBootstrapSnapshot>[0])
+    ).rejects.toThrow("Unsupported bootstrap payload encoding: brotli-base64");
   });
 
   it("flags stale snapshots using maxAge", () => {
@@ -370,7 +504,9 @@ describe(seedStorageFromBootstrap, () => {
     expect(result).toEqual({ applied: true, rowCount: 3 });
     expect(storage.opened).toBeTruthy();
     expect(storage.cleared).toBeTruthy();
+    expect(storage.clearOptions).toEqual({ preserveOutbox: true });
     expect(storage.batches.length).toBe(2);
+    expect(storage.persistedModels.get("Task")).toBeTruthy();
     expect(storage.meta.schemaHash).toBe(schemaHash);
     expect(storage.meta.lastSyncId).toBe("10");
     expect(storage.meta.firstSyncId).toBe("4");
@@ -378,6 +514,62 @@ describe(seedStorageFromBootstrap, () => {
     expect(storage.meta.bootstrapComplete).toBeTruthy();
     expect(storage.meta.lastSyncAt).toBe(1_700_000_000_000);
     expect(storage.meta.clientId).toBe("client-1");
+    expect(storage.persistedModels.get("Task")).toBeTruthy();
     expect(storage.closed).toBeTruthy();
+  });
+
+  it("marks bootstrap models persisted even when storage stays open", async () => {
+    const schema: SchemaDefinition = { models: { Task: { name: "Task" } } };
+    const schemaHash = computeSchemaHash(schema);
+    const storage = new MemoryStorage({
+      clientId: "client-1",
+      lastSyncId: "0",
+    });
+
+    const result = await seedStorageFromBootstrap({
+      closeAfter: false,
+      schema,
+      snapshot: {
+        fetchedAt: 1_700_000_000_000,
+        groups: [],
+        lastSyncId: "10",
+        rows: [{ data: { id: "task-1" }, modelName: "Task" }],
+        schemaHash,
+        version: 1,
+      },
+      storage,
+    });
+
+    expect(result).toEqual({ applied: true, rowCount: 1 });
+    expect(storage.persistedModels.get("Task")).toBeTruthy();
+    expect(storage.closed).toBeFalsy();
+  });
+
+  it("treats snapshot objects with stray encoding properties as snapshots", async () => {
+    const schema: SchemaDefinition = { models: { Task: { name: "Task" } } };
+    const schemaHash = computeSchemaHash(schema);
+    const storage = new MemoryStorage({
+      clientId: "client-1",
+      lastSyncId: "0",
+    });
+    const snapshot = {
+      encoding: "json" as const,
+      fetchedAt: 1_700_000_000_000,
+      groups: [],
+      lastSyncId: "10",
+      rows: [{ data: { id: "task-1" }, modelName: "Task" }],
+      schemaHash,
+      version: 1 as const,
+    };
+
+    const result = await seedStorageFromBootstrap({
+      schema,
+      snapshot,
+      storage,
+    });
+
+    expect(result).toEqual({ applied: true, rowCount: 1 });
+    expect(storage.batches).toHaveLength(1);
+    expect(storage.meta.lastSyncId).toBe("10");
   });
 });

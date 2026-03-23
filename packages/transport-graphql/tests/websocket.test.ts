@@ -330,7 +330,7 @@ describe(WebSocketManager, () => {
     await manager.close();
   });
 
-  it("keeps retrying subscribe after error and recovers without re-subscribing", async () => {
+  it("stops subscribe retries after the retry budget is exhausted", async () => {
     let token: string | null = null;
     const manager = createManager({
       getAccessToken: () => token,
@@ -362,21 +362,13 @@ describe(WebSocketManager, () => {
     const subscribeMessages = socket.sent.filter((message) =>
       message.includes('"type":"subscribe"')
     );
-    expect(subscribeMessages.length).toBeGreaterThan(0);
-    expect(subscribeMessages.at(-1)).toContain('"token":"recovered-token"');
-
-    socket.simulateMessage(
-      JSON.stringify({ afterSyncId: "0", groups: [], type: "subscribed" })
-    );
-    await flush();
-
-    expect(manager.getConnectionState()).toBe("connected");
+    expect(subscribeMessages).toHaveLength(0);
 
     subscription.unsubscribe();
     await manager.close();
   });
 
-  it("returns to connected after subscribe recovers from error", async () => {
+  it("allows a fresh subscription after terminal subscribe failure", async () => {
     let token: string | null = null;
     const manager = createManager({
       getAccessToken: () => token,
@@ -393,6 +385,7 @@ describe(WebSocketManager, () => {
     await connectPromise;
 
     const initialSubscription = manager.subscribe({ afterSyncId: "0" });
+    const initialIterator = initialSubscription[Symbol.asyncIterator]();
     await flush();
 
     // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
@@ -401,6 +394,10 @@ describe(WebSocketManager, () => {
     });
     await flush();
     expect(manager.getConnectionState()).toBe("error");
+
+    await expect(initialIterator.next()).rejects.toMatchObject({
+      code: "AUTH_TOKEN_MISSING",
+    });
 
     token = "recovered-token";
     const recoverySubscription = manager.subscribe({ afterSyncId: "0" });
@@ -419,8 +416,88 @@ describe(WebSocketManager, () => {
     expect(manager.getConnectionState()).toBe("connected");
     expect(states).toContain("connected");
 
-    initialSubscription.unsubscribe();
     recoverySubscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("preserves subscribe retry budget across reconnects", async () => {
+    const manager = createManager();
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+
+    await flush();
+    lastSocket().simulateOpen();
+    await flush();
+
+    for (let attempt = 0; attempt < retryConfig.maxRetries; attempt += 1) {
+      const socket = lastSocket();
+      socket.simulateMessage(
+        JSON.stringify({ message: "Invalid token", type: "error" })
+      );
+      await flush();
+      socket.simulateClose();
+      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+      await new Promise((resolve) => {
+        setTimeout(resolve, retryConfig.baseDelay + 5);
+      });
+      await flush();
+      lastSocket().simulateOpen();
+      await flush();
+    }
+
+    lastSocket().simulateMessage(
+      JSON.stringify({ message: "Invalid token", type: "error" })
+    );
+    await flush();
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "SUBSCRIBE_ERROR",
+    });
+
+    await manager.close();
+  });
+
+  it("propagates bootstrap-required errors without retrying subscribe", async () => {
+    const manager = createManager();
+
+    const connectPromise = manager.connect();
+    await flush();
+    const socket = lastSocket();
+    socket.simulateOpen();
+    await connectPromise;
+
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+    await flush();
+
+    socket.simulateMessage(
+      JSON.stringify({
+        code: "BOOTSTRAP_REQUIRED",
+        message: "A fresh bootstrap is required before subscribing to deltas",
+        type: "error",
+      })
+    );
+    await flush();
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "BOOTSTRAP_REQUIRED",
+    });
+
+    const subscribeCount = socket.sent.filter((message) =>
+      message.includes('"type":"subscribe"')
+    ).length;
+
+    // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+    await new Promise((resolve) => {
+      setTimeout(resolve, retryConfig.baseDelay * 2);
+    });
+    await flush();
+
+    const retriedSubscribeCount = socket.sent.filter((message) =>
+      message.includes('"type":"subscribe"')
+    ).length;
+    expect(retriedSubscribeCount).toBe(subscribeCount);
+
     await manager.close();
   });
 
@@ -700,6 +777,63 @@ describe(WebSocketManager, () => {
     await manager.close();
   });
 
+  it("resolves a pending iterator when unsubscribe is called", async () => {
+    const manager = createManager();
+
+    const connectPromise = manager.connect();
+    await flush();
+    lastSocket().simulateOpen();
+    await connectPromise;
+
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+    const nextPromise = iterator.next();
+
+    await flush();
+    subscription.unsubscribe();
+
+    await expect(nextPromise).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+
+    await manager.close();
+  });
+
+  it("resolves pending iterators when the manager closes", async () => {
+    const manager = createManager();
+
+    const connectPromise = manager.connect();
+    await flush();
+    lastSocket().simulateOpen();
+    await connectPromise;
+
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+    const nextPromise = iterator.next();
+
+    await flush();
+    await manager.close();
+
+    await expect(nextPromise).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+    subscription.unsubscribe();
+  });
+
+  it("rejects concurrent subscriptions on the same manager", async () => {
+    const manager = createManager();
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+
+    expect(() => manager.subscribe({ afterSyncId: "1" })).toThrow(
+      "only one active delta subscription"
+    );
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
   it("rejects numeric subscribe sync IDs before sending", async () => {
     const manager = createManager();
     const connectPromise = manager.connect();
@@ -707,14 +841,18 @@ describe(WebSocketManager, () => {
     lastSocket().simulateOpen();
     await connectPromise;
 
-    expect(() =>
-      manager.subscribe({ afterSyncId: 5 as unknown as string })
-    ).not.toThrow();
+    const subscription = manager.subscribe({
+      afterSyncId: 5 as unknown as string,
+    });
+    const iterator = subscription[Symbol.asyncIterator]();
 
     await flush();
 
     expect(lastSocket().sent).toHaveLength(0);
     expect(manager.getConnectionState()).toBe("error");
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "INVALID_SUBSCRIPTION_CURSOR",
+    });
 
     await manager.close();
   });

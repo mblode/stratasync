@@ -79,7 +79,7 @@ export class ModelRegistry {
       ModelRegistry.registerPropertyMap(modelName, pending);
     }
 
-    ModelRegistry.__schemaHash = computeSchemaHash(ModelRegistry.snapshot());
+    ModelRegistry.__schemaHash = "";
   }
 
   /**

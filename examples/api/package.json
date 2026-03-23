@@ -8,10 +8,6 @@
     "start": "node dist/server.js",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
-    "lint": "npm exec -- ultracite check",
-    "lint:fix": "npm exec -- ultracite fix",
-    "format": "npm exec -- ultracite fix",
-    "format:check": "npm exec -- ultracite check",
     "check-types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -26,11 +22,7 @@
   "devDependencies": {
     "@types/node": "^25.5.0",
     "drizzle-kit": "^0.31.10",
-    "lefthook": "^2.1.4",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "ultracite": "^7.3.2"
+    "typescript": "^5.9.3"
   }
 }

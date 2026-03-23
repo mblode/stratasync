@@ -153,7 +153,11 @@ export const useYjsDocument = (
       return;
     }
 
+    const currentDocKey = docKeyRef.current;
+
     try {
+      setError(null);
+
       // Get Yjs document manager from client if available
       const yjsManager = client.yjs;
       if (!yjsManager) {
@@ -161,7 +165,6 @@ export const useYjsDocument = (
         return;
       }
 
-      const currentDocKey = docKeyRef.current;
       const currentOptions = optionsRef.current;
 
       // Get or create document
@@ -174,7 +177,6 @@ export const useYjsDocument = (
 
       // Connect with options
       yjsManager.documentManager.connect(currentDocKey, {
-        editing: currentOptions.editing,
         initialContent: currentOptions.initialContent,
       });
 
@@ -216,6 +218,25 @@ export const useYjsDocument = (
       isConnectedRef.current = true;
       connectedDocKeyRef.current = currentDocKey;
     } catch (connectError) {
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      connectedDocKeyRef.current = null;
+      isConnectedRef.current = false;
+      setDoc(null);
+      setContent("");
+      setConnectionState("disconnected");
+      setSessionState({ active: false, participants: [] });
+
+      const yjsManager = client.yjs;
+      if (yjsManager) {
+        try {
+          yjsManager.presenceManager.stopViewing(currentDocKey);
+          yjsManager.documentManager.disconnect(currentDocKey);
+        } catch {
+          /* noop */
+        }
+      }
+
       setError(
         connectError instanceof Error
           ? connectError
@@ -230,6 +251,7 @@ export const useYjsDocument = (
     }
 
     try {
+      setError(null);
       const yjsManager = client.yjs;
       const connectedDocKey = connectedDocKeyRef.current ?? docKeyRef.current;
       if (yjsManager) {

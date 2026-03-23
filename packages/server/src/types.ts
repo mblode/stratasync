@@ -69,6 +69,7 @@ export interface TransactionResult {
   success: boolean;
   syncId?: string;
   error?: string;
+  warnings?: string[];
 }
 
 /**

@@ -25,10 +25,11 @@ Wrap your app with `SyncProvider`:
 
 ```tsx
 import { SyncProvider } from "@stratasync/react";
+import { client } from "./sync-client";
 
 function App() {
   return (
-    <SyncProvider config={syncConfig}>
+    <SyncProvider client={client}>
       <YourApp />
     </SyncProvider>
   );
@@ -44,9 +45,7 @@ function App() {
 const task = useModel("Task", taskId);
 
 // Single model with loading state (no Suspense)
-const { data: task, isLoading } = useQuery("Task", {
-  where: (i) => i.id === taskId,
-});
+const { data: task, isLoading } = useModelState("Task", taskId);
 
 // Filtered query
 const { data: tasks, isLoading } = useQuery("Task", {
@@ -61,8 +60,8 @@ const { data } = useQuery("Task", { skip: !workspaceId });
 ### Connection State
 
 ```typescript
-const { state, isReady, isSyncing, isOffline } = useConnectionState();
-// state: "idle" | "loading" | "syncing" | "error"
+const { status, lastSyncId, backlog, error } = useConnectionState();
+// status: "disconnected" | "connecting" | "bootstrapping" | "syncing" | "error"
 ```
 
 ### Collaborative Editing (Yjs)

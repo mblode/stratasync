@@ -1,4 +1,3 @@
-// oxlint-disable no-use-before-define -- handleFocusIn/handleFocusOut defined within getRef closure
 /**
  * React hook for Yjs presence management.
  * Handles focus/blur signaling based on component visibility and focus state.
@@ -6,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useSyncClientInstance, useSyncReady } from "./use-sync-client.js";
+import { useSyncClientInstance } from "./use-sync-client.js";
 import type { DocumentKey } from "./use-yjs-document.js";
 
 /**
@@ -77,16 +76,19 @@ export const useYjsPresence = (
 ): UseYjsPresenceResult => {
   const { trackFocus = false, trackVisibility = false, skip = false } = options;
   const client = useSyncClientInstance();
-  const isReady = useSyncReady();
 
   const docKeyRef = useRef(docKey);
   const previousDocKeyRef = useRef(docKey);
+  const optionsRef = useRef({ skip, trackFocus, trackVisibility });
   docKeyRef.current = docKey;
+  optionsRef.current = { skip, trackFocus, trackVisibility };
 
   const elementRef = useRef<HTMLElement | null>(null);
   const isViewingRef = useRef(false);
   const isEditingRef = useRef(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const focusInHandlerRef = useRef<EventListener | null>(null);
+  const focusOutHandlerRef = useRef<EventListener | null>(null);
   const [presenceState, setPresenceState] = useState({
     isEditing: false,
     isViewing: false,
@@ -131,7 +133,7 @@ export const useYjsPresence = (
   }, [getPresenceManager, updatePresenceState]);
 
   const startViewing = useCallback(() => {
-    if (!isReady || skip || isViewingRef.current) {
+    if (skip || isViewingRef.current) {
       return;
     }
 
@@ -140,7 +142,7 @@ export const useYjsPresence = (
       presenceManager.startViewing(docKeyRef.current);
       syncPresenceState();
     }
-  }, [isReady, skip, getPresenceManager, syncPresenceState]);
+  }, [skip, getPresenceManager, syncPresenceState]);
 
   const stopViewing = useCallback(() => {
     if (!isViewingRef.current) {
@@ -155,11 +157,10 @@ export const useYjsPresence = (
   }, [getPresenceManager, syncPresenceState]);
 
   const focus = useCallback(() => {
-    if (!isReady || skip) {
+    if (skip) {
       return;
     }
 
-    // Start viewing if not already
     if (!isViewingRef.current) {
       startViewing();
     }
@@ -173,7 +174,7 @@ export const useYjsPresence = (
       presenceManager.focus(docKeyRef.current);
       syncPresenceState();
     }
-  }, [isReady, skip, getPresenceManager, startViewing, syncPresenceState]);
+  }, [skip, getPresenceManager, startViewing, syncPresenceState]);
 
   const blur = useCallback(() => {
     if (!isEditingRef.current) {
@@ -186,6 +187,109 @@ export const useYjsPresence = (
       syncPresenceState();
     }
   }, [getPresenceManager, syncPresenceState]);
+
+  const startViewingRef = useRef(startViewing);
+  const stopViewingRef = useRef(stopViewing);
+  const focusRef = useRef(focus);
+  const blurRef = useRef(blur);
+
+  startViewingRef.current = startViewing;
+  stopViewingRef.current = stopViewing;
+  focusRef.current = focus;
+  blurRef.current = blur;
+
+  const detachTrackedElement = useCallback(
+    (element: HTMLElement | null = elementRef.current) => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+
+      if (element && focusInHandlerRef.current) {
+        element.removeEventListener("focusin", focusInHandlerRef.current);
+      }
+
+      if (element && focusOutHandlerRef.current) {
+        element.removeEventListener("focusout", focusOutHandlerRef.current);
+      }
+
+      focusInHandlerRef.current = null;
+      focusOutHandlerRef.current = null;
+    },
+    []
+  );
+
+  const refCallback = useCallback(
+    (element: HTMLElement | null) => {
+      const previousElement = elementRef.current;
+
+      if (previousElement && previousElement !== element) {
+        detachTrackedElement(previousElement);
+
+        if (!element) {
+          if (isEditingRef.current) {
+            blurRef.current();
+          }
+          if (isViewingRef.current) {
+            stopViewingRef.current();
+          }
+        }
+      }
+
+      elementRef.current = element;
+
+      const currentOptions = optionsRef.current;
+      if (!element || currentOptions.skip) {
+        return;
+      }
+
+      const handleFocusIn: EventListener = () => {
+        focusRef.current();
+      };
+
+      const handleFocusOut: EventListener = (event) => {
+        const focusEvent = event as FocusEvent;
+        if (
+          elementRef.current &&
+          !elementRef.current.contains(focusEvent.relatedTarget as Node | null)
+        ) {
+          blurRef.current();
+        }
+      };
+
+      if (currentOptions.trackFocus) {
+        focusInHandlerRef.current = handleFocusIn;
+        focusOutHandlerRef.current = handleFocusOut;
+        element.addEventListener("focusin", handleFocusIn);
+        element.addEventListener("focusout", handleFocusOut);
+      }
+
+      if (
+        currentOptions.trackVisibility &&
+        typeof IntersectionObserver !== "undefined"
+      ) {
+        observerRef.current = new IntersectionObserver(
+          (entries) => {
+            const isVisible = entries[0]?.isIntersecting ?? false;
+            if (isVisible && !isViewingRef.current) {
+              startViewingRef.current();
+            } else if (!isVisible && isViewingRef.current) {
+              stopViewingRef.current();
+            }
+          },
+          { threshold: 0.1 }
+        );
+
+        observerRef.current.observe(element);
+      }
+    },
+    [detachTrackedElement]
+  );
+
+  const getRef = useCallback(
+    <T extends HTMLElement>() => refCallback as (element: T | null) => void,
+    [refCallback]
+  );
 
   useEffect(() => {
     syncPresenceState();
@@ -215,7 +319,7 @@ export const useYjsPresence = (
       presenceManager.stopViewing(previousDocKey);
     }
 
-    if (!skip && isReady) {
+    if (!skip) {
       if (wasEditing) {
         presenceManager.focus(docKey);
       } else if (wasViewing) {
@@ -227,88 +331,58 @@ export const useYjsPresence = (
   }, [
     docKey,
     getPresenceManager,
-    isReady,
     skip,
     syncPresenceState,
     updatePresenceState,
   ]);
 
-  // Create ref callback for tracking
-  const getRef = useCallback(<T extends HTMLElement>() => {
-    return (element: T | null) => {
-      // Clean up previous element
-      if (elementRef.current && elementRef.current !== element) {
-        if (observerRef.current) {
-          observerRef.current.disconnect();
-          observerRef.current = null;
+  useEffect(() => {
+    const currentElement = elementRef.current;
+
+    if (!currentElement) {
+      if (skip) {
+        detachTrackedElement(null);
+        if (isEditingRef.current) {
+          blur();
         }
-        elementRef.current.removeEventListener("focusin", handleFocusIn);
-        elementRef.current.removeEventListener("focusout", handleFocusOut);
+        if (isViewingRef.current) {
+          stopViewing();
+        }
       }
+      return;
+    }
 
-      elementRef.current = element;
+    detachTrackedElement(currentElement);
 
-      if (!element || skip) {
-        return;
-      }
-
-      // Set up focus tracking
-      if (trackFocus) {
-        element.addEventListener("focusin", handleFocusIn);
-        element.addEventListener("focusout", handleFocusOut);
-      }
-
-      // Set up visibility tracking
-      if (trackVisibility && typeof IntersectionObserver !== "undefined") {
-        observerRef.current = new IntersectionObserver(
-          (entries) => {
-            const isVisible = entries[0]?.isIntersecting ?? false;
-            if (isVisible && !isViewingRef.current) {
-              startViewing();
-            } else if (!isVisible && isViewingRef.current) {
-              stopViewing();
-            }
-          },
-          { threshold: 0.1 }
-        );
-        observerRef.current.observe(element);
-      }
-    };
-
-    const handleFocusIn = () => {
-      focus();
-    };
-
-    const handleFocusOut = (event: FocusEvent) => {
-      // Only blur if focus is leaving the container entirely
-      if (
-        elementRef.current &&
-        !elementRef.current.contains(event.relatedTarget as Node)
-      ) {
+    if (skip) {
+      if (isEditingRef.current) {
         blur();
-      }
-    };
-  }, [
-    skip,
-    trackFocus,
-    trackVisibility,
-    focus,
-    blur,
-    startViewing,
-    stopViewing,
-  ]);
-
-  // Clean up on unmount
-  useEffect(
-    () => () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
       }
       if (isViewingRef.current) {
         stopViewing();
       }
+      return;
+    }
+
+    refCallback(currentElement);
+  }, [
+    skip,
+    trackFocus,
+    trackVisibility,
+    detachTrackedElement,
+    refCallback,
+    blur,
+    stopViewing,
+  ]);
+
+  useEffect(
+    () => () => {
+      detachTrackedElement();
+      if (isViewingRef.current) {
+        stopViewingRef.current();
+      }
     },
-    [stopViewing]
+    [detachTrackedElement]
   );
 
   return {

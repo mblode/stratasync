@@ -19,6 +19,22 @@ export const MAX_RETRY_COUNT = 5;
 const hasTransactionStore = (db: IDBPDatabase): boolean =>
   db.objectStoreNames.contains(TRANSACTION_STORE);
 
+const compareTransactions = (a: Transaction, b: Transaction): number => {
+  const createdAtDiff = a.createdAt - b.createdAt;
+  if (createdAtDiff !== 0) {
+    return createdAtDiff;
+  }
+
+  const batchIndexDiff =
+    (a.batchIndex ?? Number.MAX_SAFE_INTEGER) -
+    (b.batchIndex ?? Number.MAX_SAFE_INTEGER);
+  if (batchIndexDiff !== 0) {
+    return batchIndexDiff;
+  }
+
+  return a.clientTxId.localeCompare(b.clientTxId);
+};
+
 /**
  * Gets all transactions from the outbox
  */
@@ -28,7 +44,11 @@ export const getAllTransactions = (
   if (!hasTransactionStore(db)) {
     return Promise.resolve([]);
   }
-  return db.getAll(TRANSACTION_STORE) as Promise<Transaction[]>;
+  return db
+    .getAllFromIndex(TRANSACTION_STORE, "byCreatedAt")
+    .then((transactions) =>
+      (transactions as Transaction[]).toSorted(compareTransactions)
+    );
 };
 
 /**
@@ -84,10 +104,13 @@ export const updateTransaction = async (
   if (!hasTransactionStore(db)) {
     return;
   }
-  const tx = await db.get(TRANSACTION_STORE, clientTxId);
-  if (tx) {
-    await db.put(TRANSACTION_STORE, { ...tx, ...updates });
+  const tx = db.transaction(TRANSACTION_STORE, "readwrite");
+  const store = tx.objectStore(TRANSACTION_STORE);
+  const existing = (await store.get(clientTxId)) as Transaction | undefined;
+  if (existing) {
+    await store.put({ ...existing, ...updates });
   }
+  await tx.done;
 };
 
 /**
@@ -111,14 +134,24 @@ export const markTransactionFailed = async (
   clientTxId: string,
   error: string
 ): Promise<void> => {
-  const tx = await getTransaction(db, clientTxId);
-  if (tx) {
-    await updateTransaction(db, clientTxId, {
-      lastError: error,
-      retryCount: tx.retryCount + 1,
-      state: "failed",
-    });
+  if (!hasTransactionStore(db)) {
+    return;
   }
+
+  const tx = db.transaction(TRANSACTION_STORE, "readwrite");
+  const store = tx.objectStore(TRANSACTION_STORE);
+  const existing = (await store.get(clientTxId)) as Transaction | undefined;
+
+  if (existing) {
+    await store.put({
+      ...existing,
+      lastError: error,
+      retryCount: existing.retryCount + 1,
+      state: "failed",
+    } satisfies Transaction);
+  }
+
+  await tx.done;
 };
 
 /**
@@ -128,20 +161,30 @@ export const requeueTransaction = async (
   db: IDBPDatabase,
   clientTxId: string
 ): Promise<boolean> => {
-  const tx = await getTransaction(db, clientTxId);
-  if (!tx) {
+  if (!hasTransactionStore(db)) {
     return false;
   }
 
-  if (tx.retryCount >= MAX_RETRY_COUNT) {
+  const tx = db.transaction(TRANSACTION_STORE, "readwrite");
+  const store = tx.objectStore(TRANSACTION_STORE);
+  const existing = (await store.get(clientTxId)) as Transaction | undefined;
+  if (!existing) {
+    await tx.done;
     return false;
   }
 
-  await updateTransaction(db, clientTxId, {
-    retryCount: tx.retryCount + 1,
+  if (existing.retryCount >= MAX_RETRY_COUNT) {
+    await tx.done;
+    return false;
+  }
+
+  await store.put({
+    ...existing,
+    retryCount: existing.retryCount + 1,
     state: "queued",
-  });
+  } satisfies Transaction);
 
+  await tx.done;
   return true;
 };
 

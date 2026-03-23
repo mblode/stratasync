@@ -48,26 +48,23 @@ describe(resolvePublishedDeltaGroups, () => {
     expect(resolvePublishedDeltaGroups("g1", ["g2", "g3"])).toEqual(["g1"]);
   });
 
-  it("returns fallbackGroups when groupId is null", () => {
-    expect(resolvePublishedDeltaGroups(null, ["g2", "g3"])).toEqual([
-      "g2",
-      "g3",
-    ]);
+  it("returns an empty group list when groupId is null", () => {
+    expect(resolvePublishedDeltaGroups(null, ["g2", "g3"])).toEqual([]);
   });
 
-  it("returns fallbackGroups when groupId is undefined", () => {
-    expect(resolvePublishedDeltaGroups(undefined, ["g2"])).toEqual(["g2"]);
+  it("returns an empty group list when groupId is undefined", () => {
+    expect(resolvePublishedDeltaGroups(undefined, ["g2"])).toEqual([]);
   });
 
-  it("returns fallbackGroups when groupId is empty string", () => {
-    expect(resolvePublishedDeltaGroups("", ["g2"])).toEqual(["g2"]);
+  it("returns an empty group list when groupId is empty string", () => {
+    expect(resolvePublishedDeltaGroups("", ["g2"])).toEqual([]);
   });
 
-  it("returns a copy of fallbackGroups, not the same reference", () => {
+  it("returns a new empty array", () => {
     const fallback = ["g1"];
     const result = resolvePublishedDeltaGroups(null, fallback);
     expect(result).not.toBe(fallback);
-    expect(result).toEqual(fallback);
+    expect(result).toEqual([]);
   });
 });
 

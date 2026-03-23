@@ -21,8 +21,8 @@ import {
   getMetadata,
   getModelPersistence as getModelPersistenceMeta,
   initializeMetadata,
+  mergeMetadata,
   META_STORE,
-  setMetadata,
   setModelPersistence as setModelPersistenceMeta,
 } from "./stores/meta.js";
 import {
@@ -39,6 +39,7 @@ import type {
   ModelPersistenceMeta,
   PartialIndexEntry,
   StorageAdapter,
+  StorageIndexKey,
   StorageMeta,
   StorageOptions,
 } from "./types.js";
@@ -68,7 +69,7 @@ interface SyncDBSchema extends IDBSchema {
     };
   };
   _sync_action: {
-    key: number;
+    key: string;
     value: SyncAction;
   };
   [key: string]: {
@@ -87,6 +88,14 @@ interface PartialIndexDBSchema extends IDBSchema {
 
 type StoreHandle = ReturnType<IDBPDatabase<unknown>["createObjectStore"]>;
 type RegistryModel = ReturnType<ModelRegistry["getAllModels"]>[number];
+interface StoreLayoutHandle {
+  index: (name: string) => {
+    keyPath: string | string[] | null;
+    unique: boolean;
+  };
+  indexNames: DOMStringList;
+  keyPath: string | string[] | null;
+}
 
 /**
  * IndexedDB storage adapter implementation
@@ -102,9 +111,14 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     string,
     IDBPDatabase<PartialIndexDBSchema>
   >();
+  private readonly partialDbPromises = new Map<
+    string,
+    Promise<IDBPDatabase<PartialIndexDBSchema>>
+  >();
   private readonly databaseManager = new DatabaseManager();
 
   async open(options: StorageOptions): Promise<void> {
+    await this.close();
     this.initializeRegistry(options);
 
     const userId = options.userId ?? "anonymous";
@@ -163,29 +177,41 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   }
 
   private async openDatabase(): Promise<void> {
-    try {
-      this.db = await this.openDatabaseWithSchemaVersion(
-        this.schemaVersion,
-        true
-      );
-    } catch (error) {
-      if (!IndexedDbStorageAdapter.isVersionError(error)) {
-        throw error;
+    let includeBlockingHandlers = true;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let opened: IDBPDatabase<unknown>;
+
+      try {
+        opened = await this.openDatabaseWithSchemaVersion(
+          this.schemaVersion,
+          includeBlockingHandlers
+        );
+      } catch (error) {
+        if (!IndexedDbStorageAdapter.isVersionError(error)) {
+          throw error;
+        }
+
+        const existingVersion = await this.getExistingDatabaseVersion();
+        this.schemaVersion = existingVersion + 1;
+        this.populateStoreNames();
+        includeBlockingHandlers = false;
+        continue;
       }
 
-      const existingVersion = await this.getExistingDatabaseVersion();
-      this.schemaVersion = existingVersion + 1;
-      // Recompute store name hashes for the updated schemaVersion. Without
-      // this, the storeNames map still holds hashes for the original version,
-      // the upgrade creates stores with those stale names, and syncDatabaseInfo
-      // persists the new (higher) schemaVersion. On the next open the computed
-      // hashes won't match the actual store names → "Unknown model store".
+      if (this.databaseHasExpectedLayout(opened)) {
+        this.db = opened;
+        return;
+      }
+
+      const nextSchemaVersion = opened.version + 1;
+      opened.close();
+      this.schemaVersion = nextSchemaVersion;
       this.populateStoreNames();
-      this.db = await this.openDatabaseWithSchemaVersion(
-        this.schemaVersion,
-        false
-      );
+      includeBlockingHandlers = false;
     }
+
+    throw new Error("Failed to open database with expected schema layout.");
   }
 
   private async openDatabaseWithSchemaVersion(
@@ -214,6 +240,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       blocking: () => {
         // This connection is blocking an upgrade in another tab
         this.db?.close();
+        this.db = null;
       },
     })) as IDBPDatabase<unknown>;
   }
@@ -247,7 +274,10 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       return;
     }
 
-    if (existingInfo.schemaHash !== this.schemaHash) {
+    if (
+      existingInfo.schemaHash !== this.schemaHash ||
+      existingInfo.schemaVersion !== this.schemaVersion
+    ) {
       await this.databaseManager.saveDatabase({
         ...existingInfo,
         schemaHash: this.schemaHash,
@@ -300,7 +330,10 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       if (!modelName) {
         continue;
       }
-      const storeName = this.storeNames.get(modelName) ?? modelName;
+      const storeName = this.storeNames.get(modelName);
+      if (!storeName) {
+        continue;
+      }
       if (db.objectStoreNames.contains(storeName)) {
         continue;
       }
@@ -316,6 +349,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     const primaryKey = model.primaryKey ?? "id";
     const store = db.createObjectStore(storeName, { keyPath: primaryKey });
     IndexedDbStorageAdapter.createFieldIndexes(store, model);
+    IndexedDbStorageAdapter.createRelationIndexes(store, model);
     IndexedDbStorageAdapter.createGroupIndex(store, model);
     IndexedDbStorageAdapter.createModelIndexes(store, model);
   }
@@ -327,6 +361,24 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     for (const [fieldName, field] of Object.entries(model.fields ?? {})) {
       if (field.indexed) {
         store.createIndex(fieldName, fieldName);
+      }
+    }
+  }
+
+  private static createRelationIndexes(
+    store: StoreHandle,
+    model: RegistryModel
+  ): void {
+    for (const [relationName, relation] of Object.entries(
+      model.relations ?? {}
+    )) {
+      if (!relation.indexed) {
+        continue;
+      }
+
+      const indexName = relation.foreignKey ?? relationName;
+      if (!store.indexNames.contains(indexName)) {
+        store.createIndex(indexName, indexName);
       }
     }
   }
@@ -357,15 +409,141 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
   }
 
-  async close(): Promise<void> {
+  private static getExpectedIndexes(model: RegistryModel): {
+    keyPath: string | string[];
+    name: string;
+    unique: boolean;
+  }[] {
+    const indexes = new Map<
+      string,
+      { keyPath: string | string[]; name: string; unique: boolean }
+    >();
+
+    for (const [fieldName, field] of Object.entries(model.fields ?? {})) {
+      if (field.indexed) {
+        indexes.set(fieldName, {
+          keyPath: fieldName,
+          name: fieldName,
+          unique: false,
+        });
+      }
+    }
+
+    for (const [relationName, relation] of Object.entries(
+      model.relations ?? {}
+    )) {
+      if (relation.indexed) {
+        const indexName = relation.foreignKey ?? relationName;
+        indexes.set(indexName, {
+          keyPath: indexName,
+          name: indexName,
+          unique: false,
+        });
+      }
+    }
+
+    if (model.groupKey) {
+      indexes.set(model.groupKey, {
+        keyPath: model.groupKey,
+        name: model.groupKey,
+        unique: false,
+      });
+    }
+
+    for (const index of model.indexes ?? []) {
+      const name = index.fields.join("_");
+      indexes.set(name, {
+        keyPath: index.fields,
+        name,
+        unique: index.unique ?? false,
+      });
+    }
+
+    return [...indexes.values()];
+  }
+
+  private static normalizeKeyPath(
+    keyPath: string | string[] | null
+  ): string | null {
+    if (Array.isArray(keyPath)) {
+      return keyPath.join(",");
+    }
+    return keyPath;
+  }
+
+  private databaseHasExpectedLayout(db: IDBPDatabase<unknown>): boolean {
+    if (
+      !db.objectStoreNames.contains(META_STORE) ||
+      !db.objectStoreNames.contains(TRANSACTION_STORE) ||
+      !db.objectStoreNames.contains(SYNC_ACTION_STORE)
+    ) {
+      return false;
+    }
+
+    if (!this.registry) {
+      return true;
+    }
+
+    for (const model of this.registry.getAllModels()) {
+      const modelName = model.name ?? "";
+      if (!modelName) {
+        continue;
+      }
+
+      const storeName = this.storeNames.get(modelName);
+      if (!storeName || !db.objectStoreNames.contains(storeName)) {
+        return false;
+      }
+
+      const tx = db.transaction(storeName, "readonly");
+      const store = tx.objectStore(storeName) as StoreLayoutHandle;
+      const expectedKeyPath = model.primaryKey ?? "id";
+      const actualKeyPath = IndexedDbStorageAdapter.normalizeKeyPath(
+        store.keyPath
+      );
+
+      if (actualKeyPath !== expectedKeyPath) {
+        return false;
+      }
+
+      for (const expectedIndex of IndexedDbStorageAdapter.getExpectedIndexes(
+        model
+      )) {
+        if (!store.indexNames.contains(expectedIndex.name)) {
+          return false;
+        }
+
+        const actualIndex = store.index(expectedIndex.name);
+        const actualIndexKeyPath = IndexedDbStorageAdapter.normalizeKeyPath(
+          actualIndex.keyPath
+        );
+        const expectedIndexKeyPath = IndexedDbStorageAdapter.normalizeKeyPath(
+          expectedIndex.keyPath
+        );
+
+        if (
+          actualIndexKeyPath !== expectedIndexKeyPath ||
+          actualIndex.unique !== expectedIndex.unique
+        ) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  close(): Promise<void> {
     for (const db of this.partialDbs.values()) {
       db.close();
     }
     this.partialDbs.clear();
+    this.partialDbPromises.clear();
 
-    await this.databaseManager.close();
+    this.databaseManager.close();
     this.db?.close();
-    this.db = null;
+    this.resetState();
+    return Promise.resolve();
   }
 
   async get<T>(modelName: string, id: string): Promise<T | null> {
@@ -399,7 +577,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   getByIndex<T>(
     modelName: string,
     indexName: string,
-    key: string
+    key: StorageIndexKey
   ): Promise<T[]> {
     const db = this.ensureOpen();
     const storeName = this.getStoreName(modelName);
@@ -437,12 +615,10 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
 
   async setMeta(updates: Partial<StorageMeta>): Promise<void> {
     const db = this.ensureOpen();
-    const current = await getMetadata(db);
-    await setMetadata(db, {
-      ...current,
+    await mergeMetadata(db, (current) => ({
       ...updates,
       schemaHash: updates.schemaHash ?? (current.schemaHash || this.schemaHash),
-    });
+    }));
   }
 
   getModelPersistence(modelName: string): Promise<ModelPersistenceMeta> {
@@ -524,10 +700,11 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
     const tx = db.transaction(SYNC_ACTION_STORE, "readwrite");
     const store = tx.objectStore(SYNC_ACTION_STORE);
+    const writes: Promise<unknown>[] = [];
     for (const action of actions) {
-      await store.put(action);
+      writes.push(store.put(action));
     }
-    await tx.done;
+    await Promise.all([...writes, tx.done]);
   }
 
   async getSyncActions(
@@ -562,6 +739,12 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     const db = this.ensureOpen();
     const preserveOutbox = options?.preserveOutbox === true;
 
+    for (const partialDb of this.partialDbs.values()) {
+      const partialTx = partialDb.transaction(PARTIAL_INDEX_STORE, "readwrite");
+      await partialTx.objectStore(PARTIAL_INDEX_STORE).clear();
+      await partialTx.done;
+    }
+
     const storeNames = [
       META_STORE,
       SYNC_ACTION_STORE,
@@ -584,12 +767,6 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
 
     await Promise.all([...promises, tx.done]);
-
-    for (const partialDb of this.partialDbs.values()) {
-      const partialTx = partialDb.transaction(PARTIAL_INDEX_STORE, "readwrite");
-      await partialTx.objectStore(PARTIAL_INDEX_STORE).clear();
-      await partialTx.done;
-    }
   }
 
   count(modelName: string): Promise<number> {
@@ -603,6 +780,16 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       throw new Error("Database not open. Call open() first.");
     }
     return this.db;
+  }
+
+  private resetState(): void {
+    this.db = null;
+    this.registry = null;
+    this.dbName = "";
+    this.schemaVersion = 1;
+    this.schemaHash = "";
+    this.storeNames.clear();
+    this.partialDbPromises.clear();
   }
 
   private getStoreName(modelName: string): string {
@@ -655,27 +842,49 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
   }
 
-  private async getPartialDb(
+  private getPartialDb(
     modelName: string
   ): Promise<IDBPDatabase<PartialIndexDBSchema>> {
     const existing = this.partialDbs.get(modelName);
     if (existing) {
-      return existing;
+      return Promise.resolve(existing);
     }
 
-    const storeName = this.storeNames.get(modelName) ?? modelName;
-    const dbName = computePartialDatabaseName(storeName);
+    const pending = this.partialDbPromises.get(modelName);
+    if (pending) {
+      return pending;
+    }
 
-    const db = await openDB<PartialIndexDBSchema>(dbName, 1, {
-      upgrade: (database) => {
-        if (!database.objectStoreNames.contains(PARTIAL_INDEX_STORE)) {
-          database.createObjectStore(PARTIAL_INDEX_STORE);
-        }
-      },
+    const storeName = this.storeNames.get(modelName);
+    if (!storeName) {
+      throw new Error(`Unknown model store: ${modelName}`);
+    }
+
+    const dbName = computePartialDatabaseName({
+      storeName,
+      workspaceDatabaseName: this.dbName,
     });
 
-    this.partialDbs.set(modelName, db);
-    return db;
+    const openPromise = (async (): Promise<
+      IDBPDatabase<PartialIndexDBSchema>
+    > => {
+      try {
+        const db = await openDB<PartialIndexDBSchema>(dbName, 1, {
+          upgrade: (database) => {
+            if (!database.objectStoreNames.contains(PARTIAL_INDEX_STORE)) {
+              database.createObjectStore(PARTIAL_INDEX_STORE);
+            }
+          },
+        });
+        this.partialDbs.set(modelName, db);
+        return db;
+      } finally {
+        this.partialDbPromises.delete(modelName);
+      }
+    })();
+
+    this.partialDbPromises.set(modelName, openPromise);
+    return openPromise;
   }
 }
 

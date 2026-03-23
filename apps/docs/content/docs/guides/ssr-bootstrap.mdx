@@ -209,7 +209,7 @@ export function Providers({
       transport: createGraphQLTransport({
         endpoint: "/api/graphql",
         syncEndpoint: "/api/sync",
-        wsEndpoint: "wss://api.example.com/sync",
+        wsEndpoint: "wss://api.example.com/sync/ws",
         auth: { getAccessToken: async () => "token" },
       }),
       reactivity: createMobXReactivity(),

@@ -63,5 +63,10 @@ export const computeWorkspaceDatabaseName = (params: {
   return `ss_${hash32(`${userId}:${version}:${userVersion}`)}`;
 };
 
-export const computePartialDatabaseName = (storeName: string): string =>
-  `${storeName}_partial`;
+export const computePartialDatabaseName = (params: {
+  storeName: string;
+  workspaceDatabaseName: string;
+}): string => {
+  const { storeName, workspaceDatabaseName } = params;
+  return `${workspaceDatabaseName}_${storeName}_partial`;
+};

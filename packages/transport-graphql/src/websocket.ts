@@ -10,14 +10,24 @@ import { maxSyncId } from "@stratasync/core";
 
 import { parseDeltaPacket } from "./protocol.js";
 import type { AuthProvider, RetryConfig } from "./types.js";
-import { calculateBackoff, parseSyncId, resolveAuthToken } from "./utils.js";
+import {
+  calculateBackoff,
+  createTransportError,
+  notifyAuthError,
+  parseSyncId,
+  resolveAuthToken,
+} from "./utils.js";
 
 interface SubscriptionState {
-  options: SubscribeOptions;
-  queue: DeltaPacket[];
-  resolve: ((result: IteratorResult<DeltaPacket>) => void) | null;
   closed: boolean;
+  error: Error | null;
   lastSyncId: SyncId;
+  options: SubscribeOptions;
+  pending: {
+    resolve: (result: IteratorResult<DeltaPacket>) => void;
+    reject: (error: unknown) => void;
+  } | null;
+  queue: DeltaPacket[];
 }
 
 /**
@@ -42,6 +52,7 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private subscribeRetryAttempts = 0;
   private subscribeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastSubscribeError: Error | null = null;
   private readonly retryConfig: RetryConfig;
   private shouldReconnect = true;
 
@@ -98,7 +109,6 @@ export class WebSocketManager {
 
       socket.addEventListener("open", () => {
         this.reconnectAttempts = 0;
-        this.subscribeRetryAttempts = 0;
         if (this.subscribeRetryTimer) {
           clearTimeout(this.subscribeRetryTimer);
           this.subscribeRetryTimer = null;
@@ -151,12 +161,19 @@ export class WebSocketManager {
    * Subscribes to delta updates
    */
   subscribe(options: SubscribeOptions): DeltaSubscription {
+    if (this.hasActiveSubscription()) {
+      throw new Error(
+        "WebSocketManager supports only one active delta subscription"
+      );
+    }
+
     const state: SubscriptionState = {
       closed: false,
+      error: null,
       lastSyncId: options.afterSyncId,
       options,
+      pending: null,
       queue: [],
-      resolve: null,
     };
 
     this.subscriptions.add(state);
@@ -175,6 +192,10 @@ export class WebSocketManager {
 
     const iterator: AsyncIterator<DeltaPacket> = {
       next: () => {
+        if (state.error) {
+          return Promise.reject(state.error);
+        }
+
         if (state.closed && state.queue.length === 0) {
           return Promise.resolve({
             done: true,
@@ -188,13 +209,13 @@ export class WebSocketManager {
         }
 
         // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-        return new Promise((resolve) => {
-          state.resolve = resolve;
+        return new Promise((resolve, reject) => {
+          state.pending = { reject, resolve };
         });
       },
       return: () => {
         this.subscriptions.delete(state);
-        state.closed = true;
+        WebSocketManager.closeSubscription(state);
         return Promise.resolve({
           done: true,
           value: undefined as unknown as DeltaPacket,
@@ -202,7 +223,7 @@ export class WebSocketManager {
       },
       throw: (error) => {
         this.subscriptions.delete(state);
-        state.closed = true;
+        WebSocketManager.failSubscription(state, error);
         return Promise.reject(error);
       },
     };
@@ -211,7 +232,7 @@ export class WebSocketManager {
       [Symbol.asyncIterator]: () => iterator,
       unsubscribe: () => {
         this.subscriptions.delete(state);
-        state.closed = true;
+        WebSocketManager.closeSubscription(state);
       },
     };
   }
@@ -297,6 +318,12 @@ export class WebSocketManager {
       this.subscribeRetryTimer = null;
     }
     this.subscribeRetryAttempts = 0;
+    this.lastSubscribeError = null;
+    this.pendingMessages.length = 0;
+    for (const subscription of this.subscriptions) {
+      WebSocketManager.closeSubscription(subscription);
+    }
+    this.subscriptions.clear();
     if (this.socket) {
       this.socket.close();
       this.socket = null;
@@ -326,6 +353,55 @@ export class WebSocketManager {
     }
   }
 
+  private hasActiveSubscription(): boolean {
+    for (const subscription of this.subscriptions) {
+      if (!subscription.closed) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static closeSubscription(subscription: SubscriptionState): void {
+    if (subscription.closed) {
+      return;
+    }
+
+    subscription.closed = true;
+    if (subscription.pending) {
+      subscription.pending.resolve({
+        done: true,
+        value: undefined as unknown as DeltaPacket,
+      });
+      subscription.pending = null;
+    }
+  }
+
+  private static failSubscription(
+    subscription: SubscriptionState,
+    error: unknown
+  ): void {
+    if (subscription.closed) {
+      return;
+    }
+
+    const failure = error instanceof Error ? error : new Error(String(error));
+    subscription.closed = true;
+    subscription.error = failure;
+    if (subscription.pending) {
+      subscription.pending.reject(failure);
+      subscription.pending = null;
+    }
+  }
+
+  private failSubscriptions(error: unknown): void {
+    const subscriptions = [...this.subscriptions];
+    this.subscriptions.clear();
+    for (const subscription of subscriptions) {
+      WebSocketManager.failSubscription(subscription, error);
+    }
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.retryConfig.maxRetries) {
       this.setConnectionState("error");
@@ -352,16 +428,22 @@ export class WebSocketManager {
       return;
     }
 
-    const hasExceededRetryLimit =
-      this.subscribeRetryAttempts >= this.retryConfig.maxRetries;
-    if (hasExceededRetryLimit) {
+    if (this.subscribeRetryAttempts >= this.retryConfig.maxRetries) {
       this.setConnectionState("error");
+      this.failSubscriptions(
+        this.lastSubscribeError ??
+          createTransportError("Subscription retry limit exceeded", {
+            code: "SUBSCRIBE_RETRY_LIMIT",
+            retryable: false,
+          })
+      );
+      return;
     }
 
-    const backoffAttempt = hasExceededRetryLimit
-      ? Math.max(this.retryConfig.maxRetries - 1, 0)
-      : this.subscribeRetryAttempts;
-    const delay = calculateBackoff(backoffAttempt, this.retryConfig);
+    const delay = calculateBackoff(
+      this.subscribeRetryAttempts,
+      this.retryConfig
+    );
     this.subscribeRetryAttempts += 1;
 
     this.subscribeRetryTimer = setTimeout(() => {
@@ -446,11 +528,27 @@ export class WebSocketManager {
     } catch {
       this.setSubscribedReady(false);
       this.setConnectionState("error");
+      this.lastSubscribeError = createTransportError(
+        "Subscribe afterSyncId must be a string-encoded integer",
+        {
+          code: "INVALID_SUBSCRIPTION_CURSOR",
+          retryable: false,
+        }
+      );
+      this.subscriptions.delete(subscription);
+      WebSocketManager.failSubscription(subscription, this.lastSubscribeError);
       return;
     }
 
     const token = await resolveAuthToken(this.auth);
     if (!token) {
+      this.lastSubscribeError = createTransportError(
+        "Subscribe token missing",
+        {
+          code: "AUTH_TOKEN_MISSING",
+          retryable: true,
+        }
+      );
       this.scheduleSubscribeRetry();
       return;
     }
@@ -466,7 +564,6 @@ export class WebSocketManager {
       type: "subscribe",
     };
 
-    this.subscribeRetryAttempts = 0;
     this.setSubscribedReady(false);
     socket.send(JSON.stringify(message));
   }
@@ -490,15 +587,28 @@ export class WebSocketManager {
         this.subscribeRetryTimer = null;
       }
       this.subscribeRetryAttempts = 0;
+      this.lastSubscribeError = null;
       this.setConnectionState("connected");
       this.setSubscribedReady(true);
       this.flushPendingMessages();
       return;
     }
 
-    if (WebSocketManager.isSubscribeErrorMessage(parsed)) {
+    const subscribeError = WebSocketManager.parseSubscribeErrorMessage(parsed);
+    if (subscribeError) {
       this.setSubscribedReady(false);
       this.setConnectionState("error");
+      this.lastSubscribeError = createTransportError(subscribeError.message, {
+        code: subscribeError.code ?? "SUBSCRIBE_ERROR",
+        retryable: subscribeError.code !== "BOOTSTRAP_REQUIRED",
+      });
+      if (WebSocketManager.isAuthSubscribeError(subscribeError)) {
+        notifyAuthError(this.auth, this.lastSubscribeError);
+      }
+      if (subscribeError.code === "BOOTSTRAP_REQUIRED") {
+        this.failSubscriptions(this.lastSubscribeError);
+        return;
+      }
       this.scheduleSubscribeRetry();
       return;
     }
@@ -522,9 +632,9 @@ export class WebSocketManager {
         packet.lastSyncId
       );
 
-      if (subscription.resolve) {
-        subscription.resolve({ done: false, value: packet });
-        subscription.resolve = null;
+      if (subscription.pending) {
+        subscription.pending.resolve({ done: false, value: packet });
+        subscription.pending = null;
       } else {
         subscription.queue.push(packet);
       }
@@ -564,11 +674,39 @@ export class WebSocketManager {
     return (message as Record<string, unknown>).type === "subscribed";
   }
 
-  private static isSubscribeErrorMessage(message: unknown): boolean {
+  private static parseSubscribeErrorMessage(message: unknown): {
+    code?: string;
+    message: string;
+  } | null {
     if (typeof message !== "object" || message === null) {
-      return false;
+      return null;
     }
-    return (message as Record<string, unknown>).type === "error";
+
+    const record = message as Record<string, unknown>;
+    if (record.type !== "error") {
+      return null;
+    }
+
+    return {
+      code: typeof record.code === "string" ? record.code : undefined,
+      message:
+        typeof record.message === "string"
+          ? record.message
+          : "Subscription failed",
+    };
+  }
+
+  private static isAuthSubscribeError(error: {
+    code?: string;
+    message: string;
+  }): boolean {
+    const message = error.message.toLowerCase();
+    return (
+      error.code === "UNAUTHORIZED" ||
+      message.includes("auth") ||
+      message.includes("token") ||
+      message.includes("unauthorized")
+    );
   }
 }
 

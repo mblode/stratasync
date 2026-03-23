@@ -11,8 +11,12 @@ export {
   usePendingCount,
   useSync,
 } from "./hooks/use-connection-state.js";
-export { useModel, useModelState } from "./hooks/use-model.js";
-export { useQuery, useQueryAll } from "./hooks/use-query.js";
+export {
+  useModel,
+  useModelState,
+  useModelSuspense,
+} from "./hooks/use-model.js";
+export { useQuery, useQueryAll, useQueryCount } from "./hooks/use-query.js";
 export {
   useSyncClient,
   useSyncClientInstance,
@@ -26,6 +30,11 @@ export type {
   YjsSessionState,
 } from "./hooks/use-yjs-document.js";
 export { useYjsDocument } from "./hooks/use-yjs-document.js";
+export type {
+  UseYjsPresenceOptions,
+  UseYjsPresenceResult,
+} from "./hooks/use-yjs-presence.js";
+export { useYjsPresence } from "./hooks/use-yjs-presence.js";
 export { SyncProvider } from "./provider.js";
 export type {
   SyncContextValue,

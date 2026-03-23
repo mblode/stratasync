@@ -6,6 +6,7 @@ export type {
   QueryOptions,
   QueryResult,
   StorageAdapter,
+  StorageIndexKey,
   StorageMeta,
   StorageOptions,
   SyncClient,

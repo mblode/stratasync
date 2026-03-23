@@ -34,6 +34,8 @@ const BatchRequestSchema = z.union([
   BatchRequestGroupSchema,
 ]);
 
+const MAX_BATCH_REQUESTS = 100;
+
 /**
  * POST /sync/batch - Batch load request body
  */
@@ -44,7 +46,11 @@ export const BatchLoadBodySchema = z.object({
     .optional(),
   requests: z
     .array(BatchRequestSchema)
-    .min(1, "At least one request is required"),
+    .min(1, "At least one request is required")
+    .max(
+      MAX_BATCH_REQUESTS,
+      `At most ${MAX_BATCH_REQUESTS} requests are allowed`
+    ),
 });
 
 export type BatchLoadBody = z.infer<typeof BatchLoadBodySchema>;
@@ -78,10 +84,12 @@ const TransactionSchema = z.object({
   action: TransactionActionSchema,
   clientId: z.string().min(1, "Client ID is required"),
   clientTxId: z.string().min(1, "Client transaction ID is required"),
-  modelId: z.string().uuid("Model ID must be a valid UUID"),
+  modelId: z.string().min(1, "Model ID is required"),
   modelName: z.string().min(1, "Model name is required"),
   payload: z.record(z.string(), z.unknown()),
 });
+
+const MAX_MUTATE_TRANSACTIONS = 100;
 
 /**
  * POST /sync/mutate - Mutate request body
@@ -90,7 +98,11 @@ export const MutateBodySchema = z.object({
   batchId: z.string().min(1, "Batch ID is required"),
   transactions: z
     .array(TransactionSchema)
-    .min(1, "At least one transaction is required"),
+    .min(1, "At least one transaction is required")
+    .max(
+      MAX_MUTATE_TRANSACTIONS,
+      `At most ${MAX_MUTATE_TRANSACTIONS} transactions are allowed`
+    ),
 });
 
 export type MutateBody = z.infer<typeof MutateBodySchema>;

@@ -192,6 +192,104 @@ test("applyDeltas upserts archive state when the row is missing", async () => {
   );
 });
 
+test("applyDeltas advances sync state for unknown models", async () => {
+  const rows = new Map<string, Record<string, unknown>>();
+  const target = {
+    delete(modelName: string, id: string): void {
+      rows.delete(`${modelName}:${id}`);
+    },
+    get(modelName: string, id: string): Record<string, unknown> | null {
+      return rows.get(`${modelName}:${id}`) ?? null;
+    },
+    patch(): void {
+      assert.fail("patch should not be called for unknown models");
+    },
+    put(): void {
+      assert.fail("put should not be called for unknown models");
+    },
+  };
+  const registry = {
+    hasModel(): boolean {
+      return false;
+    },
+  };
+
+  const result = await applyDeltas(
+    {
+      actions: [
+        {
+          action: "U",
+          data: { title: "Ignored" },
+          id: "42",
+          modelId: "task-unknown",
+          modelName: "UnknownTask",
+        },
+      ],
+      lastSyncId: "42",
+    },
+    target,
+    registry
+  );
+
+  assert.equal(result.lastSyncId, "42");
+  assert.equal(result.skipped, 1);
+  assert.equal(rows.size, 0);
+});
+
+test("applyDeltas skips missing updates instead of creating partial records", async () => {
+  const rows = new Map<string, Record<string, unknown>>();
+  const target = {
+    delete(modelName: string, id: string): void {
+      rows.delete(`${modelName}:${id}`);
+    },
+    get(modelName: string, id: string): Record<string, unknown> | null {
+      return rows.get(`${modelName}:${id}`) ?? null;
+    },
+    patch(
+      modelName: string,
+      id: string,
+      changes: Record<string, unknown>
+    ): void {
+      const key = `${modelName}:${id}`;
+      const existing = rows.get(key);
+      if (!existing) {
+        return;
+      }
+      rows.set(key, { ...existing, ...changes });
+    },
+    put(modelName: string, id: string, data: Record<string, unknown>): void {
+      rows.set(`${modelName}:${id}`, { ...data });
+    },
+  };
+  const registry = {
+    hasModel(modelName: string): boolean {
+      return modelName === "Task";
+    },
+  };
+
+  const result = await applyDeltas(
+    {
+      actions: [
+        {
+          action: "U",
+          data: { title: "Partial update" },
+          id: "5",
+          modelId: "task-missing",
+          modelName: "Task",
+        },
+      ],
+      lastSyncId: "5",
+    },
+    target,
+    registry
+  );
+
+  assert.equal(rows.has("Task:task-missing"), false);
+  assert.equal(result.lastSyncId, "5");
+  assert.equal(result.skipped, 1);
+  assert.equal(result.updates, 0);
+});
+
 test("rebase detects remote archive conflicts against local unarchive", () => {
   const result = rebaseTransactions(
     [

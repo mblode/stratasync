@@ -34,6 +34,7 @@ export const ClientModel =
     );
     assignIfDefined(metadata, "schemaVersion", options.schemaVersion);
     assignIfDefined(metadata, "tableName", options.tableName);
+    assignIfDefined(metadata, "groupKey", options.groupKey);
 
     ModelRegistry.registerModel(modelName, modelConstructor, metadata);
     return modelConstructor;
@@ -54,22 +55,37 @@ export const Property =
     makeObservableProperty(target, name);
   };
 
+const defineReferenceModelMetadata = (
+  metadata: PropertyMetadata,
+  resolveReferenceModelName: () => string
+): void => {
+  Object.defineProperty(metadata, "referenceModel", {
+    configurable: true,
+    enumerable: true,
+    get: resolveReferenceModelName,
+  });
+};
+
 const createReferenceDecorator =
   (
-    refModelName: string,
+    modelFactory: () => ModelConstructor,
     inverseProperty: string | undefined,
     options: ReferenceOptions
   ): ((target: object, propertyKey: string | symbol) => void) =>
   (target: object, propertyKey: string | symbol): void => {
+    const resolveReferenceModelName = (): string => {
+      const ctor = modelFactory();
+      return ModelRegistry.getModelName(ctor) ?? ctor.name;
+    };
     const name = propertyKey.toString();
     const referenceId = options.foreignKey ?? `${name}Id`;
     const indexed = options.indexed ?? (inverseProperty ? true : undefined);
 
     const referenceMeta: PropertyMetadata = {
       foreignKey: referenceId,
-      referenceModel: refModelName,
       type: "reference",
     };
+    defineReferenceModelMetadata(referenceMeta, resolveReferenceModelName);
 
     assignIfDefined(referenceMeta, "inverseProperty", inverseProperty);
     assignIfDefined(referenceMeta, "lazy", options.lazy);
@@ -79,9 +95,9 @@ const createReferenceDecorator =
 
     const referenceModelMeta: PropertyMetadata = {
       foreignKey: referenceId,
-      referenceModel: refModelName,
       type: "referenceModel",
     };
+    defineReferenceModelMetadata(referenceModelMeta, resolveReferenceModelName);
 
     assignIfDefined(referenceModelMeta, "inverseProperty", inverseProperty);
     assignIfDefined(referenceModelMeta, "lazy", options.lazy);
@@ -93,14 +109,19 @@ const createReferenceDecorator =
     ModelRegistry.registerProperty(target, name, referenceModelMeta);
 
     makeObservableProperty(target, referenceId);
-    makeCachedReferenceModelProperty(target, name, referenceId, refModelName);
+    makeCachedReferenceModelProperty(
+      target,
+      name,
+      referenceId,
+      resolveReferenceModelName
+    );
   };
 
 export const Reference = (
   modelFactory: () => ModelConstructor,
   inverseProperty?: string,
   options: ReferenceOptions = {}
-) => createReferenceDecorator(modelFactory().name, inverseProperty, options);
+) => createReferenceDecorator(modelFactory, inverseProperty, options);
 
 export const OneToMany =
   (options: ReferenceCollectionOptions = {}) =>

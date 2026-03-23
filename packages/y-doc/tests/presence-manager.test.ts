@@ -324,6 +324,63 @@ describe(YjsPresenceManager, () => {
       ]);
     });
 
+    it("should not replay presence twice when a retry timer is pending", () => {
+      vi.useFakeTimers();
+      transport = createMockTransport();
+      manager = new YjsPresenceManager({
+        clientId: "test-client",
+        connId: "test-conn",
+        liveEditingRetry: {
+          baseDelayMs: 100,
+          jitter: 0,
+          maxDelayMs: 100,
+          maxRetries: 3,
+        },
+      });
+      manager.setTransport(transport);
+
+      manager.startViewing(testDocKey);
+      manager.focus(testDocKey);
+      transport.sentMessages.length = 0;
+
+      transport.triggerMessage({
+        code: "SUBSCRIBE_REQUIRED",
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        error: "subscription required",
+        fieldName: testDocKey.fieldName,
+        type: "live_editing_error",
+      });
+
+      transport.triggerConnectionState("disconnected");
+      transport.triggerConnectionState("connected");
+
+      expect(transport.sentMessages).toEqual([
+        {
+          clientId: "test-client",
+          connId: "test-conn",
+          entityId: "test-task-123",
+          entityType: "Task",
+          fieldName: "description",
+          state: "start",
+          type: "doc_view",
+        },
+        {
+          clientId: "test-client",
+          connId: "test-conn",
+          entityId: "test-task-123",
+          entityType: "Task",
+          fieldName: "description",
+          state: "focus",
+          type: "doc_focus",
+        },
+      ]);
+
+      vi.advanceTimersByTime(100);
+
+      expect(transport.sentMessages).toHaveLength(2);
+    });
+
     it("should replay only viewing state when not editing", () => {
       manager.startViewing(testDocKey);
 
@@ -343,6 +400,73 @@ describe(YjsPresenceManager, () => {
           type: "doc_view",
         },
       ]);
+    });
+  });
+
+  describe("session state listeners", () => {
+    it("should preserve listeners across stop and start viewing cycles", () => {
+      const callback = vi.fn();
+
+      manager.startViewing(testDocKey);
+      manager.onSessionStateChange(testDocKey, callback);
+
+      transport.triggerMessage({
+        active: true,
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        participants: [{ isEditing: true, userId: "user-1" }],
+        type: "session_state",
+      });
+
+      expect(callback).toHaveBeenCalledWith({
+        active: true,
+        participants: [{ isEditing: true, userId: "user-1" }],
+      });
+
+      callback.mockClear();
+      manager.stopViewing(testDocKey);
+      manager.startViewing(testDocKey);
+
+      transport.triggerMessage({
+        active: false,
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        participants: [],
+        type: "session_state",
+      });
+
+      expect(callback).toHaveBeenCalledWith({
+        active: false,
+        participants: [],
+      });
+    });
+
+    it("should remove empty callback sets after unsubscribe", () => {
+      manager.startViewing(testDocKey);
+
+      const keyString = `${testDocKey.entityType}:${testDocKey.entityId}:${testDocKey.fieldName}`;
+      const callback = vi.fn();
+      const unsubscribe = manager.onSessionStateChange(testDocKey, callback);
+
+      expect(
+        (
+          manager as unknown as {
+            sessionStateCallbacks: Map<string, Set<(state: unknown) => void>>;
+          }
+        ).sessionStateCallbacks.has(keyString)
+      ).toBeTruthy();
+
+      unsubscribe();
+
+      expect(
+        (
+          manager as unknown as {
+            sessionStateCallbacks: Map<string, Set<(state: unknown) => void>>;
+          }
+        ).sessionStateCallbacks.has(keyString)
+      ).toBeFalsy();
     });
   });
 

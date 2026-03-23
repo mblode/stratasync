@@ -30,9 +30,6 @@ export interface BootstrapStreamOptions {
 /**
  * Creates a bootstrap stream that yields model rows
  */
-// oxlint-disable-next-line func-style -- generators require function declaration
-// oxlint-disable-next-line require-yields
-// oxlint-disable-next-line func-style
 // oxlint-disable-next-line func-style, require-yields -- generators require function declaration
 export async function* createBootstrapStream(
   opts: BootstrapStreamOptions
@@ -64,7 +61,7 @@ export async function* createBootstrapStream(
 
   let metadata: BootstrapMetadata | null = null;
 
-  for await (const line of readNdjsonLines(response.body)) {
+  for await (const line of readNdjsonLines(response.body, opts.timeoutMs)) {
     const parsed = parseBootstrapLine(line);
 
     if (parsed?.type === "meta") {
@@ -127,7 +124,7 @@ export async function* createBatchLoadStream(
     throw new Error("Batch load response has no body");
   }
 
-  for await (const line of readNdjsonLines(response.body)) {
+  for await (const line of readNdjsonLines(response.body, opts.timeoutMs)) {
     const parsed = parseBootstrapLine(line);
     if (parsed?.type === "row") {
       yield parsed.row;
@@ -175,7 +172,8 @@ const buildBootstrapUrl = (
 
 // oxlint-disable-next-line func-style -- generators require function declaration
 async function* readNdjsonLines(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
+  timeoutMs?: number
 ): AsyncGenerator<string, void, unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -183,7 +181,7 @@ async function* readNdjsonLines(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunkWithTimeout(reader, timeoutMs);
 
       if (done) {
         break;
@@ -209,6 +207,33 @@ async function* readNdjsonLines(
     reader.releaseLock();
   }
 }
+
+const readChunkWithTimeout = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs?: number
+): Promise<ReadableStreamReadResult<Uint8Array>> => {
+  if (timeoutMs === undefined) {
+    return reader.read();
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      reader.read(),
+      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Stream read timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 const finalizeBootstrapMetadata = (
   metadata: BootstrapMetadata | null,
@@ -257,6 +282,15 @@ const parseBootstrapLine = (line: string): ParsedBootstrapLine | null => {
     };
   }
 
+  const modelName = resolveModelName(parsed);
+  if (modelName) {
+    const { __class, ...data } = parsed;
+    return {
+      row: { data, modelName },
+      type: "row",
+    };
+  }
+
   if (isBootstrapMetadata(parsed)) {
     return { metadata: normalizeBootstrapMetadata(parsed), type: "meta" };
   }
@@ -273,16 +307,7 @@ const parseBootstrapLine = (line: string): ParsedBootstrapLine | null => {
     return null;
   }
 
-  const modelName = resolveModelName(parsed);
-  if (!modelName) {
-    throw new Error("Bootstrap row is missing __class");
-  }
-
-  const { __class, ...data } = parsed;
-  return {
-    row: { data, modelName },
-    type: "row",
-  };
+  throw new Error("Bootstrap row is missing __class");
 };
 
 const isBootstrapMetadata = (parsed: Record<string, unknown>): boolean =>

@@ -9,6 +9,7 @@ import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
 import { safeJsonStringify } from "../delta/delta-publisher.js";
 import type { SyncActionOutput } from "../types.js";
+import { AsyncMutex } from "../utils/async-mutex.js";
 import {
   dedupeSyncGroups,
   resolveRequestedSyncGroups,
@@ -46,11 +47,11 @@ interface DeltaMessage {
 
 interface ClientState {
   authenticated: boolean;
+  closed: boolean;
   userId: string | null;
   groups: string[];
   afterSyncId: string;
   unsubscribe: (() => void) | null;
-  subscribePromise: Promise<void> | null;
   replaying: boolean;
   bufferedActions: {
     action: SyncActionOutput;
@@ -59,6 +60,7 @@ interface ClientState {
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const MAX_BUFFERED_ACTIONS = 10_000;
 const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 
 const hasGroupOverlap = (
@@ -190,6 +192,10 @@ const bufferOrSendLiveDelta = (
     action: SyncActionOutput
   ) => void
 ): void => {
+  if (state.closed) {
+    return;
+  }
+
   if (!hasGroupOverlap(state.groups, groups)) {
     return;
   }
@@ -200,6 +206,23 @@ const bufferOrSendLiveDelta = (
   }
 
   if (state.replaying) {
+    if (state.bufferedActions.length >= MAX_BUFFERED_ACTIONS) {
+      state.closed = true;
+      unsubscribeClient(state);
+      resetClientAuthState(state);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(
+          JSON.stringify({
+            code: "BUFFER_OVERFLOW",
+            message: "Replay buffer limit exceeded",
+            type: "error",
+          })
+        );
+        ws.close(4008, "Replay buffer limit exceeded");
+      }
+      return;
+    }
+
     state.bufferedActions.push({ action, groups });
     return;
   }
@@ -241,6 +264,10 @@ const replaySyncActions = async (
   let replayCursor = state.afterSyncId;
 
   while (true) {
+    if (state.closed || ws.readyState !== ws.OPEN) {
+      return;
+    }
+
     const actions = await syncDao.getSyncActions(
       parseSyncIdString(replayCursor),
       state.groups,
@@ -293,7 +320,13 @@ const flushBufferedActions = (
     compareSyncActionOutput(left.action, right.action)
   );
 
+  const seenSyncIds = new Set<string>();
   for (const entry of state.bufferedActions) {
+    if (seenSyncIds.has(entry.action.syncId)) {
+      continue;
+    }
+    seenSyncIds.add(entry.action.syncId);
+
     if (!hasGroupOverlap(state.groups, entry.groups)) {
       continue;
     }
@@ -346,8 +379,12 @@ export const registerSyncWebsocket = (
           reply.code(401).send({ error: "Token required" });
           return;
         }
-        const payload = await auth.verifyToken(token);
-        if (!payload) {
+        try {
+          const payload = await auth.verifyToken(token);
+          if (!payload) {
+            reply.code(401).send({ error: "Invalid token" });
+          }
+        } catch {
           reply.code(401).send({ error: "Invalid token" });
         }
       },
@@ -359,14 +396,36 @@ export const registerSyncWebsocket = (
         afterSyncId: "0",
         authenticated: false,
         bufferedActions: [],
+        closed: false,
         groups: [],
         replaying: false,
-        subscribePromise: null,
         unsubscribe: null,
         userId: null,
       };
+      const messageMutex = new AsyncMutex();
+      let cleanupPerformed = false;
+      let awaitingPong = false;
 
       const heartbeatInterval = setInterval(() => {
+        if (clientState.closed) {
+          return;
+        }
+
+        if (socket.readyState !== socket.OPEN) {
+          return;
+        }
+
+        if (awaitingPong) {
+          logger.warn(
+            { connId: connectionId },
+            "WebSocket heartbeat timed out"
+          );
+          socket.close(1011, "Heartbeat timeout");
+          return;
+        }
+
+        awaitingPong = true;
+
         if (socket.readyState === socket.OPEN) {
           socket.ping();
         }
@@ -383,6 +442,10 @@ export const registerSyncWebsocket = (
         state: ClientState,
         action: SyncActionOutput
       ): void => {
+        if (state.closed) {
+          return;
+        }
+
         const { syncId } = action;
         if (parseSyncIdString(syncId) <= parseSyncIdString(state.afterSyncId)) {
           return;
@@ -415,6 +478,23 @@ export const registerSyncWebsocket = (
         }
       };
 
+      const sendSocketError = (message: string, code?: string): void => {
+        if (socket.readyState !== socket.OPEN) {
+          return;
+        }
+
+        socket.send(
+          JSON.stringify({
+            ...(code ? { code } : {}),
+            message,
+            type: "error",
+          })
+        );
+      };
+
+      const getEarliestSyncId = async (): Promise<bigint | null> =>
+        await syncDao.getEarliestSyncId();
+
       const handleSubscribe = async (
         ws: WebSocket,
         state: ClientState,
@@ -429,14 +509,35 @@ export const registerSyncWebsocket = (
           await hooks.onSubscribe(ws, getConnectionContext(), previousContext);
         }
 
-        const payload = await auth.verifyToken(msg.token);
+        let payload;
+        try {
+          payload = await auth.verifyToken(msg.token);
+        } catch {
+          sendSocketError("Invalid token");
+          return;
+        }
         if (!payload) {
-          ws.send(JSON.stringify({ message: "Invalid token", type: "error" }));
+          sendSocketError("Invalid token");
           return;
         }
 
-        const dbGroups = await syncDao.getUserGroups(payload.userId);
+        let resolvedGroups: string[];
+        let dbGroups: string[];
+        try {
+          [resolvedGroups, dbGroups] = await Promise.all([
+            auth.resolveGroups(payload.userId),
+            syncDao.getUserGroups(payload.userId),
+          ]);
+        } catch (error) {
+          logger.error({ error }, "WebSocket group resolution failed");
+          sendSocketError("Failed to resolve sync groups");
+          if (socket.readyState === socket.OPEN) {
+            socket.close(1011, "Failed to resolve sync groups");
+          }
+          return;
+        }
         const authorizedGroups = dedupeSyncGroups([
+          ...resolvedGroups,
           ...dbGroups,
           payload.userId,
         ]);
@@ -462,36 +563,42 @@ export const registerSyncWebsocket = (
           groups,
           msg.afterSyncId ?? "0"
         );
+
+        const earliestSyncId = await getEarliestSyncId();
+        if (
+          earliestSyncId !== null &&
+          parseSyncIdString(state.afterSyncId) > 0n &&
+          earliestSyncId > 0n &&
+          parseSyncIdString(state.afterSyncId) < earliestSyncId
+        ) {
+          unsubscribeClient(state);
+          resetClientAuthState(state);
+          sendSocketError(
+            "A fresh bootstrap is required before subscribing to deltas",
+            "BOOTSTRAP_REQUIRED"
+          );
+          return;
+        }
+
         installDeltaSubscription(ws, state, deltaSubscriber, sendDeltaAction);
-        sendSubscribedMessage(ws, state);
         try {
           await replaySyncActions(syncDao, ws, state, sendDeltaAction);
-          flushBufferedActions(ws, state, sendDeltaAction);
-        } catch (replayError) {
-          state.replaying = false;
-          state.bufferedActions = [];
-          throw replayError;
-        }
-      };
-
-      const handleSubscribeMessage = async (
-        ws: WebSocket,
-        state: ClientState,
-        msg: SubscribeMessage
-      ): Promise<void> => {
-        if (state.subscribePromise) {
-          await state.subscribePromise;
-        }
-
-        const subscribePromise = handleSubscribe(ws, state, msg);
-        state.subscribePromise = subscribePromise;
-
-        try {
-          await subscribePromise;
-        } finally {
-          if (state.subscribePromise === subscribePromise) {
-            state.subscribePromise = null;
+          if (state.closed) {
+            return;
           }
+          flushBufferedActions(ws, state, sendDeltaAction);
+          if (state.closed) {
+            return;
+          }
+          sendSubscribedMessage(ws, state);
+        } catch (replayError) {
+          unsubscribeClient(state);
+          resetClientAuthState(state);
+          sendSocketError("Replay failed");
+          if (socket.readyState === socket.OPEN) {
+            socket.close(1011, "Replay failed");
+          }
+          logger.warn({ error: replayError }, "WebSocket replay failed");
         }
       };
 
@@ -499,7 +606,7 @@ export const registerSyncWebsocket = (
         message: Record<string, unknown>
       ): Promise<boolean> => {
         if (isSubscribeMessage(message)) {
-          await handleSubscribeMessage(socket, clientState, message);
+          await handleSubscribe(socket, clientState, message);
           return true;
         }
 
@@ -531,24 +638,22 @@ export const registerSyncWebsocket = (
       };
 
       socket.on("message", async (data: Buffer | ArrayBuffer | Buffer[]) => {
-        try {
-          const message: unknown = JSON.parse(data.toString());
-          if (!isRecord(message)) {
-            return;
-          }
+        await messageMutex.runExclusive(async () => {
+          try {
+            const message: unknown = JSON.parse(data.toString());
+            if (!isRecord(message)) {
+              return;
+            }
 
-          if (await maybeHandleSubscribeFrame(message)) {
-            return;
-          }
+            if (await maybeHandleSubscribeFrame(message)) {
+              return;
+            }
 
-          if (clientState.subscribePromise) {
-            await clientState.subscribePromise;
+            await maybeHandleHookMessage(message);
+          } catch (error) {
+            logger.warn({ error }, "WebSocket message handling error");
           }
-
-          await maybeHandleHookMessage(message);
-        } catch (error) {
-          logger.warn({ error }, "WebSocket message handling error");
-        }
+        });
       });
 
       const safeRunOnClose = async (): Promise<void> => {
@@ -563,6 +668,12 @@ export const registerSyncWebsocket = (
       };
 
       const cleanupWebSocket = (): void => {
+        if (cleanupPerformed) {
+          return;
+        }
+        cleanupPerformed = true;
+        clientState.closed = true;
+        awaitingPong = false;
         clearInterval(heartbeatInterval);
         if (clientState.unsubscribe) {
           clientState.unsubscribe();
@@ -571,6 +682,9 @@ export const registerSyncWebsocket = (
         safeRunOnClose();
       };
 
+      socket.on("pong", () => {
+        awaitingPong = false;
+      });
       socket.on("close", cleanupWebSocket);
 
       socket.on("error", (error) => {

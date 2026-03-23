@@ -14,6 +14,9 @@ interface ItemSnapshot {
   updatedAt: unknown;
 }
 
+const includesModelId = <T>(items: T[], modelId: string): boolean =>
+  items.some((item) => (item as Record<string, unknown>).id === modelId);
+
 const captureSnapshots = <T>(items: T[]): ItemSnapshot[] =>
   items.map((item) => {
     const record = item as Record<string, unknown>;
@@ -193,6 +196,38 @@ export const useQuery = <T>(
   // Use ref to track options to avoid infinite loops
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const optionsVersionRef = useRef(0);
+  const optionsSnapshotRef = useRef({
+    includeArchived: options.includeArchived,
+    limit: options.limit,
+    offset: options.offset,
+    orderBy: options.orderBy,
+    skip: options.skip,
+    where: options.where,
+  });
+
+  const nextOptionsSnapshot = {
+    includeArchived: options.includeArchived,
+    limit: options.limit,
+    offset: options.offset,
+    orderBy: options.orderBy,
+    skip: options.skip,
+    where: options.where,
+  };
+  const previousOptionsSnapshot = optionsSnapshotRef.current;
+  if (
+    previousOptionsSnapshot.includeArchived !==
+      nextOptionsSnapshot.includeArchived ||
+    previousOptionsSnapshot.limit !== nextOptionsSnapshot.limit ||
+    previousOptionsSnapshot.offset !== nextOptionsSnapshot.offset ||
+    previousOptionsSnapshot.orderBy !== nextOptionsSnapshot.orderBy ||
+    previousOptionsSnapshot.skip !== nextOptionsSnapshot.skip ||
+    previousOptionsSnapshot.where !== nextOptionsSnapshot.where
+  ) {
+    optionsVersionRef.current += 1;
+    optionsSnapshotRef.current = nextOptionsSnapshot;
+  }
+  const optionsVersion = optionsVersionRef.current;
 
   // Track current data for structural equality checks (avoids unnecessary re-renders)
   const dataRef = useRef<T[]>(initial.data);
@@ -256,6 +291,19 @@ export const useQuery = <T>(
       snapshotsRef.current = [];
       setData([]);
     }
+    hasDataRef.current = false;
+    if (totalCountRef.current !== undefined) {
+      totalCountRef.current = undefined;
+      setTotalCount(undefined);
+    }
+    if (hasMoreRef.current !== false) {
+      hasMoreRef.current = false;
+      setHasMore(false);
+    }
+    if (errorRef.current !== null) {
+      errorRef.current = null;
+      setError(null);
+    }
     if (isLoadingRef.current !== false) {
       isLoadingRef.current = false;
       setIsLoading(false);
@@ -297,7 +345,9 @@ export const useQuery = <T>(
         return;
       }
 
-      applyResult(result.data, result.totalCount, result.hasMore);
+      applyResult(result.data, result.totalCount, result.hasMore, {
+        forceDataUpdate: true,
+      });
     } catch (queryError) {
       if (requestVersion !== requestVersionRef.current) {
         return;
@@ -318,20 +368,35 @@ export const useQuery = <T>(
   }, [client, modelName, applyResult, clearSkipped]);
 
   // Synchronous refresh: reads identity map and updates React state immediately
-  const refreshSync = useCallback(() => {
-    if (optionsRef.current.skip) {
-      clearSkipped();
-      return;
-    }
+  const refreshSync = useCallback(
+    (
+      refreshOptions: {
+        changedModelId?: string;
+        forceDataUpdate?: boolean;
+      } = {}
+    ) => {
+      if (optionsRef.current.skip) {
+        clearSkipped();
+        return;
+      }
 
-    const map = client.getIdentityMap<T & Record<string, unknown>>(modelName);
-    const result = querySyncFromMap(
-      map,
-      buildSyncQueryOptions(optionsRef.current)
-    );
+      const map = client.getIdentityMap<T & Record<string, unknown>>(modelName);
+      const result = querySyncFromMap(
+        map,
+        buildSyncQueryOptions(optionsRef.current)
+      );
 
-    applyResult(result.data as T[], result.totalCount, result.hasMore);
-  }, [client, modelName, applyResult, clearSkipped]);
+      const forceDataUpdate =
+        refreshOptions.forceDataUpdate ||
+        (refreshOptions.changedModelId !== undefined &&
+          includesModelId(result.data, refreshOptions.changedModelId));
+
+      applyResult(result.data as T[], result.totalCount, result.hasMore, {
+        forceDataUpdate,
+      });
+    },
+    [client, modelName, applyResult, clearSkipped]
+  );
 
   useEffect(() => {
     if (isReady && !options.skip) {
@@ -341,6 +406,14 @@ export const useQuery = <T>(
       clearSkipped();
     }
   }, [isReady, options.skip, executeQuery, clearSkipped]);
+
+  useEffect(() => {
+    if (optionsVersion === 0 || !isReady || options.skip) {
+      return;
+    }
+
+    refreshSync();
+  }, [optionsVersion, isReady, options.skip, refreshSync]);
 
   useEffect(
     () => () => {
@@ -354,6 +427,7 @@ export const useQuery = <T>(
       return;
     }
 
+    let active = true;
     const unsubscribe = client.onEvent((event) => {
       // Coalesce rapid modelChange events (e.g. a delta packet with many
       // actions for the same model type) into a single refreshSync call.
@@ -364,13 +438,17 @@ export const useQuery = <T>(
       ) {
         pendingRefreshRef.current = true;
         queueMicrotask(() => {
+          if (!active) {
+            return;
+          }
           pendingRefreshRef.current = false;
-          refreshSync();
+          refreshSync({ changedModelId: event.modelId });
         });
       }
     });
 
     return () => {
+      active = false;
       unsubscribe();
       pendingRefreshRef.current = false;
     };
@@ -393,3 +471,22 @@ export const useQueryAll = <T>(
   modelName: string,
   options: Omit<UseQueryOptions<T>, "limit" | "offset"> = {}
 ): UseQueryResult<T> => useQuery<T>(modelName, options);
+
+export const useQueryCount = <T>(
+  modelName: string,
+  where?: (item: T) => boolean
+): {
+  count: number;
+  isLoading: boolean;
+  error: Error | null;
+} => {
+  const { data, error, isLoading, totalCount } = useQueryAll<T>(modelName, {
+    where,
+  });
+
+  return {
+    count: totalCount ?? data.length,
+    error,
+    isLoading,
+  };
+};

@@ -84,6 +84,12 @@ export interface ModelMetadata {
   schemaVersion?: number;
   /** Optional table name override */
   tableName?: string;
+  /** Primary key field name (defaults to id) */
+  primaryKey?: string;
+  /** Sync-group key field name (optional) */
+  groupKey?: string;
+  /** Composite indexes */
+  indexes?: ModelIndexDefinition[];
 }
 
 /**

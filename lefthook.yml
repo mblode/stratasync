@@ -1,7 +1,12 @@
 pre-commit:
   parallel: true
   jobs:
-    - name: ultracite
+    - name: oxfmt
       glob: "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}"
-      run: npx ultracite fix {staged_files}
+      run: npx oxfmt --write {staged_files}
       stage_fixed: true
+    - name: oxlint
+      glob: "*.{js,jsx,ts,tsx}"
+      run: npx oxlint --fix {staged_files}
+      stage_fixed: true
+      fail_text: "Lint errors found that could not be auto-fixed."

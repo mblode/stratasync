@@ -15,28 +15,23 @@ Manages Y.Doc instances for collaborative text editing, handles the Yjs sync pro
 ## Installation
 
 ```bash
-npm install @stratasync/y-doc
+npm install @stratasync/y-doc yjs
 ```
 
-`@stratasync/y-doc` has no peer dependencies. It bundles `yjs` ^13.6.21 as a direct dependency.
+`yjs` is a peer dependency, so install it alongside `@stratasync/y-doc`.
 
 ## Package exports
 
-Four categories of exports:
+The root barrel re-exports the managers, persistence helpers, public types from `types.ts`, and the type guards.
 
 ```ts
 import {
-  // Document management
   YjsDocumentManager,
-
-  // Presence
   YjsPresenceManager,
-
-  // Persistence helpers
+  clearPersistedYjsDocuments,
+  createPersistedYjsPrefix,
   toDocumentKeyString,
   fromDocumentKeyString,
-
-  // Type guards
   isYjsSyncStep2Message,
   isYjsUpdateMessage,
   isSessionStateMessage,
@@ -44,27 +39,24 @@ import {
 } from "@stratasync/y-doc";
 
 import type {
-  // Document management
-  DocumentKey,
-  DocumentConnectionState,
   ConnectOptions,
-  YjsDocumentManagerConfig,
-  YjsTransport,
-
-  // Presence
-  SessionParticipant,
-  SessionState,
-
-  // Messages
-  ClientMessage,
-  ServerMessage,
+  DocumentConnectionState,
+  DocumentKey,
   DocViewMessage,
   DocFocusMessage,
+  LiveEditingErrorCode,
+  LiveEditingErrorMessage,
+  SessionParticipant,
+  SessionState,
+  YjsDocumentManagerConfig,
+  YjsTransport,
+  ClientMessage,
+  ServerMessage,
+  YjsTransportConnectionState,
   YjsSyncStep1Message,
   YjsSyncStep2Message,
   YjsUpdateMessage,
   YjsUpdateToServerMessage,
-  LiveEditingErrorMessage,
 } from "@stratasync/y-doc";
 ```
 

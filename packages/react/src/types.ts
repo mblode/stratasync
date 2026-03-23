@@ -39,6 +39,8 @@ export interface SyncStatusContextValue {
   isOffline: boolean;
   /** Client ID */
   clientId: string;
+  /** Promise that resolves when the current readiness cycle completes */
+  readyPromise: Promise<void>;
 }
 
 /**
