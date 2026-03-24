@@ -17,7 +17,7 @@ import type {
 import type { DeltaService } from "./delta/delta-service.js";
 import type { FieldSpec } from "./mutate/field-codecs.js";
 import type { MutateService } from "./mutate/mutate-service.js";
-import type { ModelAction } from "./types.js";
+import type { ModelAction, SyncUserContext } from "./types.js";
 
 export type { FieldSpec, FieldType } from "./mutate/field-codecs.js";
 
@@ -126,14 +126,22 @@ export interface StandardMutateConfig {
     db: unknown,
     modelId: string,
     payload: Record<string, unknown>,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    context?: SyncUserContext
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
   onBeforeUpdate?: (
     db: unknown,
     modelId: string,
     payload: Record<string, unknown>,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    context?: SyncUserContext
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  onBeforeDelete?: (
+    db: unknown,
+    modelId: string,
+    payload: Record<string, unknown>,
+    context?: SyncUserContext
+  ) => void | Promise<void>;
   onAfterMutation?: (ctx: MutationContext) => void | Promise<void>;
 }
 

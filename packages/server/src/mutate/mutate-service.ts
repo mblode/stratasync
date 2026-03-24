@@ -109,7 +109,8 @@ export class MutateService {
       db: unknown,
       modelId: string,
       payload: Record<string, unknown>,
-      action: ModelAction
+      action: ModelAction,
+      context?: SyncUserContext
     ) => Promise<Record<string, unknown>>
   >;
   private readonly modelGroupKeys: Record<string, string>;
@@ -178,6 +179,7 @@ export class MutateService {
               kind: "standard",
               onBeforeInsert: mutateConfig.onBeforeInsert,
               onBeforeUpdate: mutateConfig.onBeforeUpdate,
+              onBeforeDelete: mutateConfig.onBeforeDelete,
               updateFields: mutateConfig.updateFields,
             }
           : {
@@ -339,7 +341,8 @@ export class MutateService {
   private async applyModelMutation(
     db: SyncDb,
     tx: TransactionInput,
-    prepared: PreparedTransaction
+    prepared: PreparedTransaction,
+    context?: SyncUserContext
   ): Promise<Record<string, unknown>> {
     const handler = this.modelHandlers.get(tx.modelName);
 
@@ -351,7 +354,8 @@ export class MutateService {
       db,
       prepared.canonicalModelId,
       tx.payload,
-      prepared.action
+      prepared.action,
+      context
     );
   }
 
@@ -484,7 +488,7 @@ export class MutateService {
           tx,
           prepared
         );
-        const data = await this.applyModelMutation(txDb, tx, prepared);
+        const data = await this.applyModelMutation(txDb, tx, prepared, context);
         const syncAction = await MutateService.createSyncActionInTransaction(
           txDao,
           tx,
