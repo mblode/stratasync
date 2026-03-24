@@ -1,6 +1,7 @@
 /* eslint-disable react/no-danger -- shiki outputs pre-rendered HTML */
 import {
   BoltIcon,
+  ChevronRightIcon,
   EyeOpenIcon,
   HistoryIcon,
   LayersThreeIcon,
@@ -10,9 +11,10 @@ import {
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
-import { SyncDemoClient } from "@/components/demo/sync-demo-client";
+import { SyncDemo } from "@/components/demo/sync-demo";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
@@ -145,7 +147,7 @@ const Home = async () => {
     <div className="flex min-h-screen flex-col">
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
-          {/* Hero */}
+          {/* Hero — Promise */}
           <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
             <section className="py-16 text-center md:py-24">
@@ -153,8 +155,8 @@ const Home = async () => {
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
                   Sync that works offline.
                 </h1>
-                <p className="mx-auto mt-4 max-w-150 text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Inspired by Linear&apos;s sync engine. Open-source. Powers{" "}
+                <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
+                  Inspired by Linear&#8217;s sync engine. Open-source. Powers{" "}
                   <a
                     className="underline underline-offset-2 transition-colors hover:text-white"
                     href="https://donebear.com"
@@ -189,39 +191,89 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* Interactive demo */}
-          <SyncDemoClient />
-
-          {/* Features */}
+          {/* What you can build — Relevance */}
           <section className="py-16">
             <div className="container-wrapper">
-              <div className="mx-auto grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {features.map((feature) => (
-                  <div
-                    className="rounded-2xl border bg-background/50 p-6"
-                    key={feature.title}
-                  >
-                    <feature.icon className="mb-3 h-6 w-6 text-primary" />
-                    <h3 className="font-semibold font-sans text-lg">
-                      {feature.title}
-                    </h3>
-                    <p className="mt-1 text-muted-foreground text-sm">
-                      {feature.description}
-                    </p>
-                  </div>
-                ))}
+              <div className="mx-auto max-w-3xl space-y-4 text-center">
+                <h2 className="font-semibold font-sans text-xl tracking-tight">
+                  What you can build
+                </h2>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {[
+                    "Project management",
+                    "Collaborative docs",
+                    "Design tools",
+                    "Task lists",
+                    "CRM",
+                    "Team chat",
+                  ].map((item) => (
+                    <Badge
+                      className="px-4 py-2 text-sm"
+                      key={item}
+                      variant="outline"
+                    >
+                      {item}
+                    </Badge>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
 
-          {/* Code examples */}
+          {/* See it in action — Proof */}
+          <section className="py-16">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-3xl space-y-6">
+                <div className="space-y-2 text-center">
+                  <h2 className="font-semibold font-sans text-xl tracking-tight">
+                    See it in action
+                  </h2>
+                  <p className="mx-auto max-w-xl text-muted-foreground text-sm">
+                    Two devices, one shared state. Toggle offline, add todos,
+                    and watch changes sync in real-time.
+                  </p>
+                </div>
+                <SyncDemo />
+              </div>
+            </div>
+          </section>
+
+          {/* Why Strata Sync — Differentiation */}
+          <section className="py-16">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-5xl space-y-8">
+                <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
+                  Why Strata Sync
+                </h2>
+                <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+                  {features.map((feature) => (
+                    <div key={feature.title}>
+                      <feature.icon className="mb-3 h-6 w-6 text-primary" />
+                      <h3 className="font-semibold font-sans text-lg">
+                        {feature.title}
+                      </h3>
+                      <p className="mt-1 text-muted-foreground text-sm">
+                        {feature.description}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Get started — Experience */}
           <section className="py-16">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-10">
+                <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
+                  Get started in minutes
+                </h2>
+
                 <div className="space-y-3">
-                  <h2 className="font-semibold font-sans text-xl tracking-tight">
-                    Define your models
-                  </h2>
+                  <h3 className="font-medium text-muted-foreground text-sm">
+                    1. Define your models
+                  </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton
                       className="absolute top-3 right-3"
@@ -237,9 +289,9 @@ const Home = async () => {
                 </div>
 
                 <div className="space-y-3">
-                  <h2 className="font-semibold font-sans text-xl tracking-tight">
-                    Create the client
-                  </h2>
+                  <h3 className="font-medium text-muted-foreground text-sm">
+                    2. Create the client
+                  </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton
                       className="absolute top-3 right-3"
@@ -255,9 +307,9 @@ const Home = async () => {
                 </div>
 
                 <div className="space-y-3">
-                  <h2 className="font-semibold font-sans text-xl tracking-tight">
-                    Build reactive components
-                  </h2>
+                  <h3 className="font-medium text-muted-foreground text-sm">
+                    3. Build reactive components
+                  </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton
                       className="absolute top-3 right-3"
@@ -270,6 +322,34 @@ const Home = async () => {
                       dangerouslySetInnerHTML={{ __html: hooksHtml }}
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Final CTA — Convert */}
+          <section className="py-24">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-3xl text-center">
+                <h2 className="text-balance font-sans text-4xl font-medium tracking-tight">
+                  Ready to start building?
+                </h2>
+                <p className="mx-auto mt-4 max-w-xl text-balance text-muted-foreground">
+                  Add local-first sync to your app in minutes. Open-source, MIT
+                  licensed.
+                </p>
+                <div className="mt-6 flex flex-wrap justify-center gap-3">
+                  <Button asChild className="pr-1.5" size="lg">
+                    <a href="https://stratasync.dev/docs">
+                      <span>Get started</span>
+                      <ChevronRightIcon className="opacity-50" />
+                    </a>
+                  </Button>
+                  <Button asChild size="lg" variant="secondary">
+                    <a href="https://github.com/stratasync/stratasync">
+                      GitHub
+                    </a>
+                  </Button>
                 </div>
               </div>
             </div>

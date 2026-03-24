@@ -5,10 +5,10 @@ import { createSyncClient } from "@stratasync/client";
 import type { SyncClient } from "@stratasync/client";
 import type { SchemaDefinition } from "@stratasync/core";
 import { createMobXReactivity } from "@stratasync/mobx";
-import { createLocalStorage } from "@stratasync/storage-local";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DemoServer, DemoTransport } from "./demo-transport";
+import { InMemoryStorage } from "./in-memory-storage";
 import type { SyncAnimation } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -64,58 +64,16 @@ const SEED_ROWS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Create clients synchronously (no null state, no layout shift)
-// ---------------------------------------------------------------------------
-
-const clearDemoStorage = (prefix: string) => {
-  if (typeof window === "undefined") {return;}
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i += 1) {
-    const key = localStorage.key(i);
-    if (key?.startsWith(`${prefix}:`)) {
-      keysToRemove.push(key);
-    }
-  }
-  for (const key of keysToRemove) {
-    localStorage.removeItem(key);
-  }
-};
-
-const createDemoInfra = () => {
-  // Clear stale localStorage from previous sessions so the fresh
-  // in-memory DemoServer and localStorage stay in sync.
-  clearDemoStorage("demo-a");
-  clearDemoStorage("demo-b");
-
-  const server = new DemoServer(SEED_ROWS);
-  const transportA = new DemoTransport(server, "A");
-  const transportB = new DemoTransport(server, "B");
-  const reactivity = createMobXReactivity();
-
-  const clientA = createSyncClient({
-    dbName: "demo-a",
-    optimistic: true,
-    reactivity,
-    schema,
-    storage: createLocalStorage({ prefix: "demo-a" }),
-    transport: transportA,
-  });
-
-  const clientB = createSyncClient({
-    dbName: "demo-b",
-    optimistic: true,
-    reactivity,
-    schema,
-    storage: createLocalStorage({ prefix: "demo-b" }),
-    transport: transportB,
-  });
-
-  return { clientA, clientB, server, transportA, transportB };
-};
-
-// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
+
+interface DemoInfra {
+  clientA: SyncClient;
+  clientB: SyncClient;
+  server: DemoServer;
+  transportA: DemoTransport;
+  transportB: DemoTransport;
+}
 
 export interface DemoClients {
   clientA: SyncClient;
@@ -125,8 +83,8 @@ export interface DemoClients {
   activeSyncAnimations: SyncAnimation[];
 }
 
-export const useDemoClients = (): DemoClients => {
-  const [infra] = useState(createDemoInfra);
+export const useDemoClients = (): DemoClients | null => {
+  const [infra, setInfra] = useState<DemoInfra | null>(null);
   const [activeSyncAnimations, setActiveSyncAnimations] = useState<
     SyncAnimation[]
   >([]);
@@ -141,10 +99,48 @@ export const useDemoClients = (): DemoClients => {
     timers.current.add(id);
   }, []);
 
+  // Create infrastructure on client only
   useEffect(() => {
-    const { server, clientA, clientB, transportA, transportB } = infra;
+    const server = new DemoServer(SEED_ROWS);
+    const transportA = new DemoTransport(server, "A");
+    const transportB = new DemoTransport(server, "B");
+    const reactivity = createMobXReactivity();
 
-    server.onSyncFlow = (direction) => {
+    const clientA = createSyncClient({
+      dbName: "demo-a",
+      optimistic: true,
+      reactivity,
+      schema,
+      storage: new InMemoryStorage(),
+      transport: transportA,
+    });
+
+    const clientB = createSyncClient({
+      dbName: "demo-b",
+      optimistic: true,
+      reactivity,
+      schema,
+      storage: new InMemoryStorage(),
+      transport: transportB,
+    });
+
+    setInfra({ clientA, clientB, server, transportA, transportB });
+
+    return () => {
+      clientA.stop().then(undefined, () => {});
+      clientB.stop().then(undefined, () => {});
+      transportA.close().then(undefined, () => {});
+      transportB.close().then(undefined, () => {});
+    };
+  }, []);
+
+  // Wire up sync flow animations once infra is ready
+  useEffect(() => {
+    if (!infra) {
+      return;
+    }
+
+    infra.server.onSyncFlow = (direction) => {
       animationCounter.current += 1;
       const animId = `sync-${animationCounter.current}`;
       setActiveSyncAnimations((prev) => [...prev, { direction, id: animId }]);
@@ -155,17 +151,17 @@ export const useDemoClients = (): DemoClients => {
 
     const currentTimers = timers.current;
     return () => {
-      server.onSyncFlow = null;
-      clientA.stop().then(undefined, () => {});
-      clientB.stop().then(undefined, () => {});
-      transportA.close().then(undefined, () => {});
-      transportB.close().then(undefined, () => {});
+      infra.server.onSyncFlow = null;
       for (const t of currentTimers) {
         clearTimeout(t);
       }
       currentTimers.clear();
     };
   }, [infra, scheduleTimeout]);
+
+  if (!infra) {
+    return null;
+  }
 
   return { ...infra, activeSyncAnimations };
 };
