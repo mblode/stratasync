@@ -16,10 +16,10 @@ Scaffolds a complete local-first, server-sequenced sync app using Strata Sync. P
 
 ## Reference files
 
-| File                           | Purpose                                                                             |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| `references/client-setup.md`   | Next.js client: tsconfig, next.config, deps, model, client factory, providers, page |
-| `references/server-setup.md`   | Fastify server: docker-compose, drizzle schema, server entry, config                |
+| File                           | Purpose                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `references/client-setup.md`   | Next.js client: tsconfig, next.config, deps, model, client factory, providers, page                 |
+| `references/server-setup.md`   | Fastify server: docker-compose, drizzle schema, server entry, config                                |
 | `references/model-patterns.md` | Adding models, instance methods (.save/.delete/.archive), relations, load strategies, server config |
 
 ## Variables

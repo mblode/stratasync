@@ -88,7 +88,7 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: {{PROJECT_NAME}}
+      POSTGRES_DB: { { PROJECT_NAME } }
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
     volumes:

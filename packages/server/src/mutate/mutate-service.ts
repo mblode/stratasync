@@ -177,9 +177,9 @@ export class MutateService {
               delegate,
               insertFields: mutateConfig.insertFields,
               kind: "standard",
+              onBeforeDelete: mutateConfig.onBeforeDelete,
               onBeforeInsert: mutateConfig.onBeforeInsert,
               onBeforeUpdate: mutateConfig.onBeforeUpdate,
-              onBeforeDelete: mutateConfig.onBeforeDelete,
               updateFields: mutateConfig.updateFields,
             }
           : {

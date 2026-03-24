@@ -177,7 +177,13 @@ const handleUpdate = async (
   let updateData = buildUpdateData(payload, def.updateFields, def.insertFields);
 
   if (def.onBeforeUpdate) {
-    updateData = await def.onBeforeUpdate(db, modelId, payload, updateData, context);
+    updateData = await def.onBeforeUpdate(
+      db,
+      modelId,
+      payload,
+      updateData,
+      context
+    );
   }
 
   if (Object.keys(updateData).length === 0) {

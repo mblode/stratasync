@@ -57,11 +57,7 @@ const useCases = [
   },
 ];
 
-function UseCaseBadge({
-  item,
-}: {
-  item: (typeof useCases)[number];
-}) {
+const UseCaseBadge = ({ item }: { item: (typeof useCases)[number] }) => {
   const [open, setOpen] = useState(false);
   const isTouchRef = useRef(false);
 
@@ -76,16 +72,13 @@ function UseCaseBadge({
     }
   }, []);
 
-  const handleOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      if (isTouchRef.current && !nextOpen) {
-        setOpen(false);
-      } else if (!isTouchRef.current) {
-        setOpen(nextOpen);
-      }
-    },
-    [],
-  );
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (isTouchRef.current && !nextOpen) {
+      setOpen(false);
+    } else if (!isTouchRef.current) {
+      setOpen(nextOpen);
+    }
+  }, []);
 
   return (
     <HoverCard open={open} onOpenChange={handleOpenChange}>
@@ -112,7 +105,7 @@ function UseCaseBadge({
       </HoverCardContent>
     </HoverCard>
   );
-}
+};
 
 export const UseCaseBadges = () => (
   <div className="flex flex-wrap justify-center gap-3">
