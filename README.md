@@ -6,7 +6,7 @@ A local-first sync engine for TypeScript, React, and Next.js. Every read is inst
 
 ## Why Strata Sync
 
-Linear built a sync architecture that became the gold standard for local-first apps, but never open-sourced it. [Strata Sync](https://stratasync.dev) is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters. Powers [Done Bear](https://donebear.com).
+Linear built a sync architecture that became the gold standard for local-first apps, but never open-sourced it. [Strata Sync](https://stratasync.dev) is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
 
 ## Features
 
