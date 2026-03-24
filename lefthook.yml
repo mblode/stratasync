@@ -2,7 +2,7 @@ pre-commit:
   parallel: true
   jobs:
     - name: oxfmt
-      glob: "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}"
+      glob: "*.{js,jsx,ts,tsx,css,scss,md,mdx}"
       run: npx oxfmt --write {staged_files}
       stage_fixed: true
     - name: oxlint
