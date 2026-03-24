@@ -33,7 +33,8 @@ const getCheckboxState = (state: {
   return "unchecked";
 };
 
-const getCheckboxRender = (
+// eslint-disable-next-line react-perf/jsx-no-new-function-as-prop -- Base UI render callback must be inline
+const renderCheckbox = (
   renderProps: React.ComponentPropsWithRef<"span">,
   state: { checked: boolean; indeterminate: boolean }
 ) => <span {...renderProps} data-state={getCheckboxState(state)} />;
@@ -71,7 +72,7 @@ const Checkbox = React.forwardRef<
         indeterminate={resolvedIndeterminate}
         onCheckedChange={onCheckedChange}
         ref={ref}
-        render={getCheckboxRender}
+        render={renderCheckbox}
         {...props}
       >
         <CheckboxPrimitive.Indicator
