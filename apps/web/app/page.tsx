@@ -155,16 +155,7 @@ const Home = async () => {
                   Sync that works offline.
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Inspired by Linear&#8217;s sync engine. Open-source. Powers{" "}
-                  <a
-                    className="underline underline-offset-2 transition-colors hover:text-white"
-                    href="https://donebear.com"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    Done Bear
-                  </a>
-                  .
+                  Inspired by Linear&#8217;s sync engine. Open-source.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
