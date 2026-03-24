@@ -60,16 +60,9 @@
   --shadow-sm: var(--custom-shadow-sm);
   --shadow-md: var(--custom-shadow-md);
   --shadow-lg: var(--custom-shadow-lg);
-  --shadow-popover: var(--custom-shadow-popover);
 }
 
 :root {
-  --custom-shadow-popover:
-    0 24px 40px -12px oklch(0.255 0.078 116.06 / 0.08),
-    0 16px 28px -8px oklch(0.255 0.078 116.06 / 0.04),
-    0 4px 6px -2px oklch(0.255 0.078 116.06 / 0.04),
-    0 0 2px 0 oklch(0.255 0.078 116.06 / 0.04),
-    0 0 0 1px oklch(0.255 0.078 116.06 / 0.04);
   --header-height: 3.5rem;
   --footer-height: 3rem;
   --widget-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
