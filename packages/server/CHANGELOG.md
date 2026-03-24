@@ -1,5 +1,11 @@
 # @stratasync/server
 
+## 0.2.4
+
+### Patch Changes
+
+- c395205: Thread SyncUserContext through mutation lifecycle hooks (onBeforeInsert, onBeforeUpdate, onBeforeDelete) to enable permission checks and audit logging
+
 ## 0.2.3
 
 ### Patch Changes
