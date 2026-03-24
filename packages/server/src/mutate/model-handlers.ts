@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { InferInsertModel, SQL } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
-import type { ModelAction } from "../types.js";
+import type { ModelAction, SyncUserContext } from "../types.js";
 import { getColumn } from "../utils/sync-utils.js";
 import { handleArchiveMutation } from "./archive-mutation.js";
 import type { FieldSpec } from "./field-codecs.js";
@@ -100,14 +100,22 @@ export interface StandardModelDef {
     db: unknown,
     modelId: string,
     payload: Record<string, unknown>,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    context?: SyncUserContext
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
   onBeforeUpdate?: (
     db: unknown,
     modelId: string,
     payload: Record<string, unknown>,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    context?: SyncUserContext
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  onBeforeDelete?: (
+    db: unknown,
+    modelId: string,
+    payload: Record<string, unknown>,
+    context?: SyncUserContext
+  ) => void | Promise<void>;
 }
 
 export interface CompositeModelDef {
@@ -127,20 +135,22 @@ type ModelHandler = (
   db: unknown,
   modelId: string,
   payload: Record<string, unknown>,
-  action: ModelAction
+  action: ModelAction,
+  context?: SyncUserContext
 ) => Promise<Record<string, unknown>>;
 
 const handleInsert = async (
   db: unknown,
   def: ModelDef,
   modelId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  context?: SyncUserContext
 ): Promise<Record<string, unknown>> => {
   const hasId = def.kind === "standard";
   let data = buildInsertData(hasId ? modelId : null, payload, def.insertFields);
 
   if (def.kind === "standard" && def.onBeforeInsert) {
-    data = await def.onBeforeInsert(db, modelId, payload, data);
+    data = await def.onBeforeInsert(db, modelId, payload, data, context);
   }
 
   await def.delegate.insert(db, data);
@@ -153,7 +163,8 @@ const handleUpdate = async (
   db: unknown,
   def: ModelDef,
   modelId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  context?: SyncUserContext
 ): Promise<Record<string, unknown>> => {
   if (def.kind !== "standard" || !def.updateFields) {
     throw new Error("Update not configured for this model");
@@ -166,7 +177,7 @@ const handleUpdate = async (
   let updateData = buildUpdateData(payload, def.updateFields, def.insertFields);
 
   if (def.onBeforeUpdate) {
-    updateData = await def.onBeforeUpdate(db, modelId, payload, updateData);
+    updateData = await def.onBeforeUpdate(db, modelId, payload, updateData, context);
   }
 
   if (Object.keys(updateData).length === 0) {
@@ -184,8 +195,12 @@ const handleDelete = async (
   db: unknown,
   def: ModelDef,
   modelId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  context?: SyncUserContext
 ): Promise<Record<string, unknown>> => {
+  if (def.kind === "standard" && def.onBeforeDelete) {
+    await def.onBeforeDelete(db, modelId, payload, context);
+  }
   if (def.kind === "composite") {
     if (!def.delegate.deleteByPayload) {
       throw new Error("Composite delete delegate missing for this model");
@@ -216,20 +231,20 @@ const getStandardUpdateDelegate = (
 
 export const createModelHandler =
   (def: ModelDef): ModelHandler =>
-  (db, modelId, payload, action) => {
+  (db, modelId, payload, action, context) => {
     if (!def.actions.has(action)) {
       throw new Error(`Unsupported action "${action}" for this model`);
     }
 
     switch (action) {
       case "I": {
-        return handleInsert(db, def, modelId, payload);
+        return handleInsert(db, def, modelId, payload, context);
       }
       case "U": {
-        return handleUpdate(db, def, modelId, payload);
+        return handleUpdate(db, def, modelId, payload, context);
       }
       case "D": {
-        return handleDelete(db, def, modelId, payload);
+        return handleDelete(db, def, modelId, payload, context);
       }
       case "A": {
         if (def.kind !== "standard") {
