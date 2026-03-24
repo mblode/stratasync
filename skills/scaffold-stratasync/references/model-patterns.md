@@ -183,6 +183,36 @@ bootstrap: {
 
 ---
 
+## Instance methods
+
+Models have instance methods for mutations. Prefer these over `client.update()` / `client.delete()` for cleaner code.
+
+### .save() — update via property assignment
+
+```ts
+// Set properties directly, then persist
+item.title = "Updated title";
+item.completed = true;
+await item.save();
+```
+
+This is the idiomatic update pattern. Change tracking records original values automatically so the sync engine can compute deltas.
+
+### .delete() — delete from instance
+
+```ts
+await item.delete();
+```
+
+### .archive() / .unarchive() — soft delete
+
+```ts
+await item.archive();
+await item.unarchive();
+```
+
+---
+
 ## Common patterns
 
 ### Soft delete (archive)
@@ -199,7 +229,7 @@ updateFields: new Set(["title", "completed", "archivedAt"]),
 
 // Query non-archived items
 const { data } = useQuery<Todo>("Todo", {
-  filter: (item) => item.archivedAt === null,
+  where: (item) => item.archivedAt === null,
 });
 ```
 

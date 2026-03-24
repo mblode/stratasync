@@ -20,7 +20,7 @@ Scaffolds a complete local-first, server-sequenced sync app using Strata Sync. P
 | ------------------------------ | ----------------------------------------------------------------------------------- |
 | `references/client-setup.md`   | Next.js client: tsconfig, next.config, deps, model, client factory, providers, page |
 | `references/server-setup.md`   | Fastify server: docker-compose, drizzle schema, server entry, config                |
-| `references/model-patterns.md` | Adding models, relations, load strategies, server config                            |
+| `references/model-patterns.md` | Adding models, instance methods (.save/.delete/.archive), relations, load strategies, server config |
 
 ## Variables
 
@@ -60,7 +60,8 @@ Scaffolds a complete local-first, server-sequenced sync app using Strata Sync. P
   - `server/package.json`
   - `server/tsconfig.json`
   - `server/docker-compose.yml`
-  - `server/.env` (copy from `.env.example` template)
+  - `server/.env.example`
+  - `server/.env` (copy from `.env.example`)
   - `server/drizzle.config.ts`
   - `server/src/db/schema.ts`
   - `server/src/config.ts`
@@ -82,7 +83,7 @@ Write all client sync files per `references/client-setup.md`:
 
 - [ ] Write `src/app/page.tsx` per `references/client-setup.md` § Example page
 - [ ] Includes: create form, toggle, delete, sync status display
-- [ ] Uses `useQuery`, `useSyncClientInstance`, `useConnectionState`, `observer`
+- [ ] Uses `useQuery`, `useSyncClient`, `useConnectionState`, `observer`, and instance `.save()` / `.delete()` methods
 - [ ] All components marked `"use client"`
 
 ### Phase 6: Start and verify

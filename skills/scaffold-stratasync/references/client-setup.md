@@ -266,7 +266,7 @@ import {
   useConnectionState,
   useIsOffline,
   useQuery,
-  useSyncClientInstance,
+  useSyncClient,
 } from "@stratasync/react";
 import { observer } from "mobx-react-lite";
 import type { FormEvent } from "react";
@@ -288,7 +288,7 @@ const {{MODEL_NAME}}Item = observer(
     onToggle,
   }: {
     item: {{MODEL_NAME}};
-    onRemove: (id: string) => void;
+    onRemove: (item: {{MODEL_NAME}}) => void;
     onToggle: (item: {{MODEL_NAME}}) => void;
   }) => {
     const handleToggle = useCallback(() => {
@@ -296,8 +296,8 @@ const {{MODEL_NAME}}Item = observer(
     }, [onToggle, item]);
 
     const handleRemove = useCallback(() => {
-      onRemove(item.id);
-    }, [onRemove, item.id]);
+      onRemove(item);
+    }, [onRemove, item]);
 
     return (
       <article data-completed={item.completed} key={item.id}>
@@ -325,7 +325,7 @@ const {{MODEL_NAME}}Item = observer(
 );
 
 const ExamplePage = observer(function ExamplePage() {
-  const client = useSyncClientInstance();
+  const { client } = useSyncClient();
   const { backlog, error, lastSyncId, status } = useConnectionState();
   const isOffline = useIsOffline();
   const { data: items, isLoading } = useQuery<{{MODEL_NAME}}>("{{MODEL_NAME}}", {
@@ -372,9 +372,8 @@ const ExamplePage = observer(function ExamplePage() {
       setMutationError(null);
 
       try {
-        await client.update("{{MODEL_NAME}}", item.id, {
-          completed: !item.completed,
-        });
+        item.completed = !item.completed;
+        await item.save();
       } catch (caughtError) {
         setMutationError(
           caughtError instanceof Error
@@ -383,15 +382,15 @@ const ExamplePage = observer(function ExamplePage() {
         );
       }
     },
-    [client]
+    []
   );
 
   const handleRemove = useCallback(
-    async (id: string) => {
+    async (item: {{MODEL_NAME}}) => {
       setMutationError(null);
 
       try {
-        await client.delete("{{MODEL_NAME}}", id);
+        await item.delete();
       } catch (caughtError) {
         setMutationError(
           caughtError instanceof Error
@@ -400,7 +399,7 @@ const ExamplePage = observer(function ExamplePage() {
         );
       }
     },
-    [client]
+    []
   );
 
   const handleDraftChange = useCallback(
