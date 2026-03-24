@@ -1,5 +1,11 @@
 # @stratasync/react
 
+## 0.2.4
+
+### Patch Changes
+
+- 8509d8f: Export `useSyncError` and `useSyncReadyPromise` hooks
+
 ## 0.2.3
 
 ### Patch Changes
