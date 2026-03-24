@@ -18,7 +18,8 @@ All code templates for the standalone Fastify sync server. Replace `{{placeholde
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "db:push": "drizzle-kit push",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "check-types": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -87,7 +88,7 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: { { PROJECT_NAME } }
+      POSTGRES_DB: {{PROJECT_NAME}}
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
     volumes:
@@ -98,6 +99,14 @@ volumes:
 ```
 
 ---
+
+## .env.example
+
+`server/.env.example`
+
+```
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/{{PROJECT_NAME}}
+```
 
 ## .env
 
