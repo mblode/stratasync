@@ -156,7 +156,6 @@ const SYNC_REQUEST_TIMEOUT_MS = 30_000;
 const SYNC_USER_VERSION = 1;
 
 let clientInstance: SyncClient | null = null;
-let startPromise: Promise<void> | null = null;
 
 const getDbName = (userId: string): string =>
   `${SYNC_DB_PREFIX}-v${SYNC_USER_VERSION}-${userId}`;
@@ -194,33 +193,12 @@ export const getSyncClient = (): SyncClient => {
     userVersion: SYNC_USER_VERSION,
   });
 
-  rawClient.start = createIdempotentStart(rawClient.start.bind(rawClient));
-
   clientInstance = rawClient;
   return rawClient;
 };
-
-const createIdempotentStart =
-  (originalStart: () => Promise<void>): (() => Promise<void>) =>
-  () => {
-    if (startPromise) {
-      return startPromise;
-    }
-
-    const nextStartPromise = (async () => {
-      try {
-        await originalStart();
-      } finally {
-        startPromise = null;
-      }
-    })();
-
-    startPromise = nextStartPromise;
-    return nextStartPromise;
-  };
 ```
 
-The idempotent start wrapper prevents React StrictMode double-renders from opening duplicate connections.
+The client handles React StrictMode double-mount/unmount internally — `start()` awaits any pending `stop()` before proceeding.
 
 ---
 

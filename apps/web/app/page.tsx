@@ -1,7 +1,6 @@
 /* eslint-disable react/no-danger -- shiki outputs pre-rendered HTML */
 import {
   BoltIcon,
-  ChevronRightIcon,
   EyeOpenIcon,
   HistoryIcon,
   LayersThreeIcon,
@@ -14,8 +13,8 @@ import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { SyncDemo } from "@/components/demo/sync-demo";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { UseCaseBadges } from "@/components/use-case-badges";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
 
@@ -150,7 +149,7 @@ const Home = async () => {
           {/* Hero — Promise */}
           <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
-            <section className="py-16 text-center md:py-24">
+            <section className="py-16 text-center md:py-32">
               <div className="container-wrapper">
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
                   Sync that works offline.
@@ -171,14 +170,14 @@ const Home = async () => {
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
                   <Button
                     asChild
-                    className="border-white bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
+                    className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
                     size="lg"
                   >
                     <a href="https://stratasync.dev/docs">Get started</a>
                   </Button>
                   <Button
                     asChild
-                    className="border-white bg-transparent text-white hover:bg-white/10 active:bg-white/20"
+                    className="border-white bg-clip-border bg-transparent text-white hover:bg-white/10 active:bg-white/20"
                     size="lg"
                     variant="outline"
                   >
@@ -192,36 +191,19 @@ const Home = async () => {
           </div>
 
           {/* What you can build — Relevance */}
-          <section className="py-16">
+          <section className="pt-20 pb-16 md:pt-28 md:pb-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-4 text-center">
                 <h2 className="font-semibold font-sans text-xl tracking-tight">
                   What you can build
                 </h2>
-                <div className="flex flex-wrap justify-center gap-3">
-                  {[
-                    "Project management",
-                    "Collaborative docs",
-                    "Design tools",
-                    "Task lists",
-                    "CRM",
-                    "Team chat",
-                  ].map((item) => (
-                    <Badge
-                      className="px-4 py-2 text-sm"
-                      key={item}
-                      variant="outline"
-                    >
-                      {item}
-                    </Badge>
-                  ))}
-                </div>
+                <UseCaseBadges />
               </div>
             </div>
           </section>
 
           {/* See it in action — Proof */}
-          <section className="py-16">
+          <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-6">
                 <div className="space-y-2 text-center">
@@ -239,7 +221,7 @@ const Home = async () => {
           </section>
 
           {/* Why Strata Sync — Differentiation */}
-          <section className="py-16">
+          <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-5xl space-y-8">
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
@@ -263,7 +245,7 @@ const Home = async () => {
           </section>
 
           {/* Get started — Experience */}
-          <section className="py-16">
+          <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-10">
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
@@ -323,27 +305,35 @@ const Home = async () => {
                     />
                   </div>
                 </div>
+
+                <p className="text-center">
+                  <Button asChild variant="link">
+                    <a
+                      href="https://github.com/stratasync/stratasync/tree/main/examples"
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      View full examples on GitHub
+                    </a>
+                  </Button>
+                </p>
               </div>
             </div>
           </section>
 
           {/* Final CTA — Convert */}
-          <section className="py-24">
+          <section className="py-16 md:py-32">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl text-center">
                 <h2 className="text-balance font-sans text-4xl font-medium tracking-tight">
                   Ready to start building?
                 </h2>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-muted-foreground">
-                  Add local-first sync to your app in minutes. Open-source, MIT
-                  licensed.
+                  Add local-first sync to your app in minutes. Open-source.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
-                  <Button asChild className="pr-1.5" size="lg">
-                    <a href="https://stratasync.dev/docs">
-                      <span>Get started</span>
-                      <ChevronRightIcon className="opacity-50" />
-                    </a>
+                  <Button asChild size="lg">
+                    <a href="https://stratasync.dev/docs">Get started</a>
                   </Button>
                   <Button asChild size="lg" variant="secondary">
                     <a href="https://github.com/stratasync/stratasync">

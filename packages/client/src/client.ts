@@ -405,6 +405,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
 
   let outboxManager: OutboxManager | null = null;
   let startPromise: Promise<void> | null = null;
+  let stopPromise: Promise<void> | null = null;
   let hasStarted = false;
   let lifecycleVersion = 0;
 
@@ -857,27 +858,37 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       lifecycleVersion += 1;
       startPromise = null;
       hasStarted = false;
-      await waitForInflightSends();
-      await outboxManager?.clear();
-      clearOutboxManager();
-      clearYjsState();
-      await orchestrator.reset();
-      identityMaps.clearAll();
-      await options.storage.close();
-      await options.storage.open(getStorageOpenOptions());
-      try {
-        await options.storage.clear();
-      } finally {
+
+      const doClear = async () => {
+        await waitForInflightSends();
+        await outboxManager?.clear();
+        clearOutboxManager();
+        clearYjsState();
+        await orchestrator.reset();
+        identityMaps.clearAll();
         await options.storage.close();
+        await options.storage.open(getStorageOpenOptions());
+        try {
+          await options.storage.clear();
+        } finally {
+          await options.storage.close();
+        }
+        pendingLoads.clear();
+        pendingIndexLoads.clear();
+        missingModels.clear();
+        history.clear();
+        await pendingStart?.catch(() => {
+          /* noop */
+        });
+        emitEvent({ pendingCount: 0, type: "outboxChange" });
+      };
+
+      stopPromise = doClear();
+      try {
+        await stopPromise;
+      } finally {
+        stopPromise = null;
       }
-      pendingLoads.clear();
-      pendingIndexLoads.clear();
-      missingModels.clear();
-      history.clear();
-      await pendingStart?.catch(() => {
-        /* noop */
-      });
-      emitEvent({ pendingCount: 0, type: "outboxChange" });
     },
 
     get clientId(): string {
@@ -1075,6 +1086,15 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       const startVersion = lifecycleVersion;
       let currentStartPromise: Promise<void> = Promise.resolve();
       currentStartPromise = (async () => {
+        // Wait for any in-progress stop() to complete before starting.
+        // This prevents races where stop() clears state (clientId, storage)
+        // while start() is trying to initialize (e.g. React StrictMode).
+        if (stopPromise) {
+          await stopPromise.catch(() => {
+            /* noop */
+          });
+        }
+
         orchestrator.setConflictHandler(handleRejectedTransaction);
 
         try {
@@ -1133,12 +1153,22 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       lifecycleVersion += 1;
       startPromise = null;
       hasStarted = false;
-      await waitForInflightSends();
-      clearOutboxManager();
-      await orchestrator.stop();
-      await pendingStart?.catch(() => {
-        /* noop */
-      });
+
+      const doStop = async () => {
+        await waitForInflightSends();
+        clearOutboxManager();
+        await orchestrator.stop();
+        await pendingStart?.catch(() => {
+          /* noop */
+        });
+      };
+
+      stopPromise = doStop();
+      try {
+        await stopPromise;
+      } finally {
+        stopPromise = null;
+      }
     },
 
     async syncNow(): Promise<void> {

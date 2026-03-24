@@ -30,11 +30,20 @@ const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 5000;
 
 const setNdjsonStreamHeaders = (reply: FastifyReply): void => {
+  // Copy plugin-set headers (e.g. CORS) to the raw response before streaming
+  const pluginHeaders = reply.getHeaders();
+  for (const [key, value] of Object.entries(pluginHeaders)) {
+    if (value !== undefined) {
+      reply.raw.setHeader(key, value as number | string | string[]);
+    }
+  }
+
   reply.raw.statusCode = 200;
   reply.raw.setHeader("Cache-Control", "no-cache");
   reply.raw.setHeader("Connection", "keep-alive");
   reply.raw.setHeader("Content-Type", "application/x-ndjson");
   reply.raw.setHeader("Transfer-Encoding", "chunked");
+  reply.hijack();
 };
 
 interface RegisterRoutesOptions {

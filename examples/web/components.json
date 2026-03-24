@@ -17,8 +17,8 @@
     "hooks": "@/hooks"
   },
   "registries": {
-    "blode": {
-      "url": "https://ui.blode.co/r"
+    "@blode": {
+      "url": "https://ui.blode.co/r/styles/default/{name}.json"
     }
   }
 }

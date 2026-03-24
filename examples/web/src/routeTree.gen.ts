@@ -8,52 +8,106 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as IndexRouteImport } from "./routes/index";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as TooltipRouteImport } from './routes/tooltip'
+import { Route as GettingStartedRouteImport } from './routes/getting-started'
+import { Route as CheckboxRouteImport } from './routes/checkbox'
+import { Route as IndexRouteImport } from './routes/index'
 
-const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+const TooltipRoute = TooltipRouteImport.update({
+  id: '/tooltip',
+  path: '/tooltip',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
+const GettingStartedRoute = GettingStartedRouteImport.update({
+  id: '/getting-started',
+  path: '/getting-started',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CheckboxRoute = CheckboxRouteImport.update({
+  id: '/checkbox',
+  path: '/checkbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
+  '/': typeof IndexRoute
+  '/checkbox': typeof CheckboxRoute
+  '/getting-started': typeof GettingStartedRoute
+  '/tooltip': typeof TooltipRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
+  '/': typeof IndexRoute
+  '/checkbox': typeof CheckboxRoute
+  '/getting-started': typeof GettingStartedRoute
+  '/tooltip': typeof TooltipRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/checkbox': typeof CheckboxRoute
+  '/getting-started': typeof GettingStartedRoute
+  '/tooltip': typeof TooltipRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/";
-  fileRoutesByTo: FileRoutesByTo;
-  to: "/";
-  id: "__root__" | "/";
-  fileRoutesById: FileRoutesById;
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/checkbox' | '/getting-started' | '/tooltip'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/checkbox' | '/getting-started' | '/tooltip'
+  id: '__root__' | '/' | '/checkbox' | '/getting-started' | '/tooltip'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
+  IndexRoute: typeof IndexRoute
+  CheckboxRoute: typeof CheckboxRoute
+  GettingStartedRoute: typeof GettingStartedRoute
+  TooltipRoute: typeof TooltipRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/tooltip': {
+      id: '/tooltip'
+      path: '/tooltip'
+      fullPath: '/tooltip'
+      preLoaderRoute: typeof TooltipRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/getting-started': {
+      id: '/getting-started'
+      path: '/getting-started'
+      fullPath: '/getting-started'
+      preLoaderRoute: typeof GettingStartedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/checkbox': {
+      id: '/checkbox'
+      path: '/checkbox'
+      fullPath: '/checkbox'
+      preLoaderRoute: typeof CheckboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-};
+  CheckboxRoute: CheckboxRoute,
+  GettingStartedRoute: GettingStartedRoute,
+  TooltipRoute: TooltipRoute,
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
