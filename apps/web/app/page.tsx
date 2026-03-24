@@ -186,6 +186,17 @@ const Home = async () => {
                     </a>
                   </Button>
                 </div>
+
+                <code className="relative mt-8 inline-flex items-center gap-2 font-mono text-sm">
+                  <div className="max-w-100 truncate">
+                    npx skills add stratasync/stratasync
+                  </div>
+                  <CopyButton
+                    content="npx skills add stratasync/stratasync"
+                    size="xs"
+                    variant="ghost"
+                  />
+                </code>
               </div>
             </section>
           </div>
