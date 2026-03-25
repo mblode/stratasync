@@ -4,6 +4,7 @@ import type { BootstrapService } from "../../src/bootstrap/bootstrap-service.js"
 import type { DeltaService } from "../../src/delta/delta-service.js";
 import { registerSyncRoutes } from "../../src/fastify/routes.js";
 import {
+  BootstrapQuerySchema,
   BatchLoadBodySchema,
   MutateBodySchema,
 } from "../../src/fastify/validation.js";
@@ -49,6 +50,9 @@ const makeDeltaService = (): DeltaService =>
         hasMore: false,
         lastSyncId: "0",
       };
+    },
+    isCursorStale() {
+      return false;
     },
   }) as unknown as DeltaService;
 
@@ -101,6 +105,34 @@ describe(BatchLoadBodySchema, () => {
         "At most 100 requests are allowed"
       );
     }
+  });
+});
+
+describe(BootstrapQuerySchema, () => {
+  it("requires firstSyncId for partial bootstrap", () => {
+    const result = BootstrapQuerySchema.safeParse({
+      type: "partial",
+    });
+
+    expect(result.success).toBeFalsy();
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain(
+        "firstSyncId is required for partial bootstrap"
+      );
+    }
+  });
+
+  it("accepts validated partial bootstrap query params", () => {
+    const result = BootstrapQuerySchema.safeParse({
+      firstSyncId: "42",
+      noSyncPackets: "true",
+      onlyModels: "Task,Team",
+      schemaHash: "schema-1",
+      syncGroups: "workspace-1",
+      type: "partial",
+    });
+
+    expect(result.success).toBeTruthy();
   });
 });
 
@@ -208,6 +240,80 @@ describe(registerSyncRoutes, () => {
     }
   });
 
+  it("forwards partial bootstrap query params to the bootstrap service", async () => {
+    const generateBootstrapNdjson = vi.fn(async function* streamBootstrap() {
+      yield '{"type":"metadata"}';
+      yield '{"type":"row"}';
+    });
+    const bootstrapService = {
+      async *batchLoadNdjson() {
+        yield* [];
+      },
+      generateBootstrapNdjson,
+    } as unknown as BootstrapService;
+    const { app } = createApp({ bootstrapService });
+
+    try {
+      await app.ready();
+
+      const response = await app.inject({
+        headers: {
+          authorization: "Bearer token",
+        },
+        method: "GET",
+        url: "/sync/bootstrap?type=partial&firstSyncId=42&syncGroups=workspace-1&onlyModels=Task,Team&noSyncPackets=true&schemaHash=abc",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe('{"type":"metadata"}\n{"type":"row"}\n');
+      expect(generateBootstrapNdjson).toHaveBeenCalledOnce();
+      expect(generateBootstrapNdjson).toHaveBeenCalledWith(
+        {
+          groups: ["workspace-1"],
+          userId: "user-1",
+        },
+        {
+          firstSyncId: "42",
+          groups: ["workspace-1"],
+          models: ["Task", "Team"],
+          noSyncPackets: true,
+          schemaHash: "abc",
+          type: "partial",
+        }
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects partial bootstrap requests without firstSyncId", async () => {
+    const { app } = createApp();
+
+    try {
+      await app.ready();
+
+      const response = await app.inject({
+        headers: {
+          authorization: "Bearer token",
+        },
+        method: "GET",
+        url: "/sync/bootstrap?type=partial&schemaHash=abc",
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        details: [
+          expect.objectContaining({
+            message: "firstSyncId is required for partial bootstrap",
+          }),
+        ],
+        error: "Validation failed",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("accepts non-UUID modelIds through the mutate route", async () => {
     const mutateService = makeMutateService();
     const { app, authMiddleware } = createApp({ mutateService });
@@ -242,6 +348,33 @@ describe(registerSyncRoutes, () => {
         success: true,
       });
       expect(authMiddleware).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns BOOTSTRAP_REQUIRED when the delta cursor is stale", async () => {
+    const deltaService = {
+      fetchDeltas: vi.fn(),
+      isCursorStale: vi.fn().mockResolvedValue(true),
+    } as unknown as DeltaService;
+    const { app } = createApp({ deltaService });
+    try {
+      await app.ready();
+
+      const response = await app.inject({
+        headers: {
+          authorization: "Bearer token",
+        },
+        method: "GET",
+        url: "/sync/deltas?after=1",
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        error: "BOOTSTRAP_REQUIRED",
+        message: "A fresh bootstrap is required before fetching deltas",
+      });
     } finally {
       await app.close();
     }

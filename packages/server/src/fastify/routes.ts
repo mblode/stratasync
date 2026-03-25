@@ -88,7 +88,7 @@ export const registerSyncRoutes = (
         syncUser.groups,
         requestedGroups
       );
-      const { schemaHash } = query;
+      const { firstSyncId, schemaHash, type } = query;
 
       setNdjsonStreamHeaders(reply);
 
@@ -96,9 +96,12 @@ export const registerSyncRoutes = (
         for await (const line of bootstrapService.generateBootstrapNdjson(
           syncUser,
           {
+            firstSyncId,
             groups: syncGroups,
             models: onlyModels,
+            noSyncPackets: query.noSyncPackets === "true",
             schemaHash: schemaHash ?? "",
+            type,
           }
         )) {
           reply.raw.write(`${line}\n`);
@@ -167,6 +170,13 @@ export const registerSyncRoutes = (
       const afterSyncId = request.query.after
         ? parseSyncIdString(request.query.after)
         : 0n;
+
+      if (await deltaService.isCursorStale(afterSyncId)) {
+        return reply.code(409).send({
+          error: "BOOTSTRAP_REQUIRED",
+          message: "A fresh bootstrap is required before fetching deltas",
+        });
+      }
 
       let limit = request.query.limit
         ? Number.parseInt(request.query.limit, 10)

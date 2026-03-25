@@ -19,8 +19,6 @@ import {
 
 import type { StorageAdapter, TransportAdapter } from "./types.js";
 
-const MAX_RETRY_COUNT = 5;
-
 interface InvalidMutationBatchError extends Error {
   code: "INVALID_MUTATION_BATCH";
   clientTxId: string;
@@ -331,18 +329,16 @@ export class OutboxManager {
       throw error;
     }
 
-    // Transport errors are retryable until the retry cap is reached.
+    // Transport failures remain queued so reconnect/restart can replay them.
     for (const tx of transactions) {
       const retryCount = tx.retryCount + 1;
-      const nextState =
-        retryCount < MAX_RETRY_COUNT ? "queued" : ("failed" as const);
-      tx.state = nextState;
+      tx.state = "queued";
       tx.lastError = error instanceof Error ? error.message : "Unknown error";
       tx.retryCount = retryCount;
       await this.storage.updateOutboxTransaction(tx.clientTxId, {
         lastError: tx.lastError,
         retryCount,
-        state: nextState,
+        state: "queued",
       });
       if (!this.isLifecycleCurrent(version)) {
         throw error;
@@ -492,7 +488,7 @@ export class OutboxManager {
 
     // Reset unconfirmed transport states back to queued so they can retry.
     for (const tx of pending) {
-      if (tx.state === "sent" && tx.retryCount < MAX_RETRY_COUNT) {
+      if (tx.state === "sent") {
         tx.state = "queued";
         await this.storage.updateOutboxTransaction(tx.clientTxId, {
           state: "queued",
@@ -502,9 +498,7 @@ export class OutboxManager {
     }
 
     // Filter to only queued transactions
-    const queued = pending.filter(
-      (tx) => tx.state === "queued" && tx.retryCount < MAX_RETRY_COUNT
-    );
+    const queued = pending.filter((tx) => tx.state === "queued");
 
     if (queued.length === 0) {
       return;

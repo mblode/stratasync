@@ -369,6 +369,35 @@ describe(OutboxManager, () => {
     expect(await storage.getOutbox()).toHaveLength(0);
   });
 
+  it("keeps transport failures queued even after repeated retry attempts", async () => {
+    const storage = new InMemoryStorage();
+    const mutate = vi
+      .fn<(batch: TransactionBatch) => Promise<MutateResult>>()
+      .mockRejectedValue(new Error("network unavailable"));
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(mutate),
+    });
+
+    await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Queued",
+    });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await expect(manager.processPendingTransactions()).rejects.toThrow(
+        "network unavailable"
+      );
+    }
+
+    const queued = await storage.getOutbox();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.state).toBe("queued");
+    expect(queued[0]?.retryCount).toBeGreaterThanOrEqual(6);
+  });
+
   it("removes rejected transactions from storage and local echo tracking", async () => {
     const storage = new InMemoryStorage();
     const manager = new OutboxManager({

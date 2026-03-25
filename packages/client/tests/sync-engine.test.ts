@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   ClientModel,
   Model,
+  ModelRegistry,
   noopReactivityAdapter,
   Property,
 } from "../../core/src/index";
@@ -943,6 +944,48 @@ const partialTaskSchema: SchemaDefinition = {
   },
 };
 
+const eagerPartialSchema: SchemaDefinition = {
+  models: {
+    Comment: {
+      fields: {
+        body: {},
+        id: {},
+        taskId: {},
+      },
+      loadStrategy: "partial",
+      partialLoadMode: "full",
+    },
+    Task: {
+      fields: {
+        id: {},
+        title: {},
+      },
+      loadStrategy: "instant",
+    },
+  },
+};
+
+const regularPartialSchema: SchemaDefinition = {
+  models: {
+    Comment: {
+      fields: {
+        body: {},
+        id: {},
+        taskId: {},
+      },
+      loadStrategy: "partial",
+      partialLoadMode: "regular",
+    },
+    Task: {
+      fields: {
+        id: {},
+        title: {},
+      },
+      loadStrategy: "instant",
+    },
+  },
+};
+
 const POLL_INTERVAL_MS = 5;
 const SYNC_SETTLE_DELAY_MS = 20;
 const WAIT_TIMEOUT_MS = 2000;
@@ -1130,6 +1173,157 @@ describe("reverse-done alignment", () => {
     }
   });
 
+  it("forces a network bootstrap when bootstrapMode is full", async () => {
+    const schemaHash = new ModelRegistry(schema).getSchemaHash();
+    const storage = new InMemoryStorage(schemaHash, [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Local" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ]);
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "7",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    await storage.setModelPersistence("Team", true);
+
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "42",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Remote" },
+          modelName: "Task",
+        },
+        {
+          data: { id: "team-1", name: "Core" },
+          modelName: "Team",
+        },
+      ],
+    });
+
+    const client = createSyncClient({
+      bootstrapMode: "full",
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      expect(transport.bootstrapCalls).toHaveLength(1);
+      expect(
+        client.getCached<Record<string, unknown>>("Task", "task-1")
+      ).toMatchObject({
+        id: "task-1",
+        title: "Remote",
+      });
+      expect(await storage.get("Task", "task-1")).toMatchObject({
+        id: "task-1",
+        title: "Remote",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("hydrates locally stored full-priority partial models on startup", async () => {
+    const schemaHash = new ModelRegistry(eagerPartialSchema).getSchemaHash();
+    const storage = new InMemoryStorage();
+    await storage.put("Comment", {
+      body: "Stored partial",
+      id: "comment-1",
+      taskId: "task-1",
+    });
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "7",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "42",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: eagerPartialSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      expect(transport.bootstrapCalls).toHaveLength(0);
+      expect(
+        client.getCached<Record<string, unknown>>("Comment", "comment-1")
+      ).toMatchObject({
+        body: "Stored partial",
+        id: "comment-1",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("keeps regular partial models stored-only on startup until they are requested", async () => {
+    const schemaHash = new ModelRegistry(regularPartialSchema).getSchemaHash();
+    const storage = new InMemoryStorage();
+    await storage.put("Comment", {
+      body: "Stored partial",
+      id: "comment-1",
+      taskId: "task-1",
+    });
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "7",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "42",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: regularPartialSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      expect(transport.bootstrapCalls).toHaveLength(0);
+      expect(client.getCached("Comment", "comment-1")).toBeNull();
+      expect(await storage.get("Comment", "comment-1")).toMatchObject({
+        body: "Stored partial",
+        id: "comment-1",
+      });
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("re-runs bootstrap when the delta subscription requires a fresh snapshot", async () => {
     const storage = new InMemoryStorage();
     await storage.addToOutbox({
@@ -1176,6 +1370,90 @@ describe("reverse-done alignment", () => {
       });
     } finally {
       unsubscribe();
+      await client.stop();
+    }
+  });
+
+  it("re-runs bootstrap when HTTP delta catch-up requires a fresh snapshot", async () => {
+    const storage = new InMemoryStorage();
+    const initialRows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Initial" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const recoveredRows: ModelRow[] = [
+      {
+        data: { id: "task-1", teamId: "team-1", title: "Recovered" },
+        modelName: "Task",
+      },
+      {
+        data: { id: "team-1", name: "Core" },
+        modelName: "Team",
+      },
+    ];
+    const transport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: ["team-1"],
+      },
+      fullRows: initialRows,
+    });
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (transport.bootstrapCalls.length >= 1 && options.type === "full") {
+        transport.bootstrapCalls.push(options);
+        return (async function* generate() {
+          await Promise.resolve();
+          for (const row of recoveredRows) {
+            yield row;
+          }
+          return {
+            lastSyncId: "25",
+            subscribedSyncGroups: ["team-1"],
+          };
+        })();
+      }
+
+      return originalBootstrap(options);
+    }) as TestTransport["bootstrap"];
+    let fetchCalls = 0;
+    transport.fetchDeltas = ((after: string) => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return Promise.reject(
+          Object.assign(
+            new Error("A fresh bootstrap is required before fetching deltas"),
+            { code: "BOOTSTRAP_REQUIRED" }
+          )
+        );
+      }
+      return Promise.resolve({ actions: [], lastSyncId: after });
+    }) as TestTransport["fetchDeltas"];
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await waitForSync(client, "25");
+
+      expect(transport.bootstrapCalls).toHaveLength(2);
+      expect(
+        client.getIdentityMap<Record<string, unknown>>("Task").get("task-1")
+      ).toMatchObject({
+        id: "task-1",
+        title: "Recovered",
+      });
+    } finally {
       await client.stop();
     }
   });
@@ -3389,6 +3667,114 @@ describe("reverse-done alignment", () => {
       expect(latestSubscribe?.afterSyncId).toBe("60");
     } finally {
       await client.stop();
+    }
+  });
+
+  it("sync-group partial bootstrap eagerly hydrates full-priority partial models only", async () => {
+    const fullPriorityStorage = new InMemoryStorage();
+    const fullPriorityTransport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+      partialRowsByGroup: new Map([
+        [
+          "team-2",
+          [
+            {
+              data: {
+                body: "Team 2 comment",
+                id: "comment-1",
+                taskId: "task-2",
+              },
+              modelName: "Comment",
+            },
+          ],
+        ],
+      ]),
+    });
+    const fullPriorityClient = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: eagerPartialSchema,
+      storage: fullPriorityStorage,
+      transport: fullPriorityTransport,
+    });
+
+    const regularStorage = new InMemoryStorage();
+    const regularTransport = new TestTransport({
+      fullMetadata: {
+        lastSyncId: "10",
+        subscribedSyncGroups: [],
+      },
+      fullRows: [],
+      partialRowsByGroup: new Map([
+        [
+          "team-2",
+          [
+            {
+              data: {
+                body: "Team 2 comment",
+                id: "comment-1",
+                taskId: "task-2",
+              },
+              modelName: "Comment",
+            },
+          ],
+        ],
+      ]),
+    });
+    const regularClient = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: regularPartialSchema,
+      storage: regularStorage,
+      transport: regularTransport,
+    });
+
+    try {
+      await fullPriorityClient.start();
+      await regularClient.start();
+
+      const delta: DeltaPacket = {
+        actions: [
+          {
+            action: "S",
+            data: { subscribedSyncGroups: ["team-2"] },
+            id: "60",
+            modelId: "sync-groups",
+            modelName: "SyncGroup",
+          },
+        ],
+        lastSyncId: "60",
+      };
+
+      fullPriorityTransport.emitDelta(delta);
+      regularTransport.emitDelta(delta);
+
+      await Promise.all([
+        waitForSync(fullPriorityClient, "60"),
+        waitForSync(regularClient, "60"),
+      ]);
+
+      expect(
+        fullPriorityClient.getCached<Record<string, unknown>>(
+          "Comment",
+          "comment-1"
+        )
+      ).toMatchObject({
+        body: "Team 2 comment",
+        id: "comment-1",
+      });
+      expect(
+        regularClient.getCached<Record<string, unknown>>("Comment", "comment-1")
+      ).toBeNull();
+      expect(await regularStorage.get("Comment", "comment-1")).toMatchObject({
+        body: "Team 2 comment",
+        id: "comment-1",
+      });
+    } finally {
+      await fullPriorityClient.stop();
+      await regularClient.stop();
     }
   });
 

@@ -7,11 +7,27 @@ import { z } from "zod";
 /**
  * GET /sync/bootstrap - Bootstrap query params
  */
-export const BootstrapQuerySchema = z.object({
-  onlyModels: z.string().optional(),
-  schemaHash: z.string().optional(),
-  syncGroups: z.string().optional(),
-});
+export const BootstrapQuerySchema = z
+  .object({
+    firstSyncId: z
+      .string()
+      .regex(/^\d+$/, "firstSyncId must be a numeric string")
+      .optional(),
+    noSyncPackets: z.enum(["true", "false"]).optional(),
+    onlyModels: z.string().optional(),
+    schemaHash: z.string().optional(),
+    syncGroups: z.string().optional(),
+    type: z.enum(["full", "partial"]).optional(),
+  })
+  .superRefine((query, ctx) => {
+    if (query.type === "partial" && !query.firstSyncId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "firstSyncId is required for partial bootstrap",
+        path: ["firstSyncId"],
+      });
+    }
+  });
 
 export type BootstrapQuery = z.infer<typeof BootstrapQuerySchema>;
 

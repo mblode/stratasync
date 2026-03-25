@@ -308,6 +308,26 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     }
   };
 
+  const rollbackOptimisticMutation = (
+    action: Transaction["action"],
+    modelName: string,
+    modelId: string,
+    original?: Record<string, unknown>
+  ): void => {
+    rollbackTransaction({
+      action,
+      clientId: orchestrator.getClientId() || "rollback",
+      clientTxId: `rollback:${generateUUID()}`,
+      createdAt: Date.now(),
+      modelId,
+      modelName,
+      original,
+      payload: {},
+      retryCount: 0,
+      state: "failed",
+    });
+  };
+
   const applyHistoryOperation = async (
     operation: HistoryOperation
   ): Promise<string | undefined> => {
@@ -832,10 +852,18 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "archive");
         }
 
-        const queuedTx = await activeOutboxManager.archive(modelName, id, {
-          archivedAt: archived.archivedAt ?? undefined,
-          original,
-        });
+        let queuedTx: Transaction;
+        try {
+          queuedTx = await activeOutboxManager.archive(modelName, id, {
+            archivedAt: archived.archivedAt ?? undefined,
+            original,
+          });
+        } catch (error) {
+          if (resolvedOptions.optimistic !== false) {
+            rollbackOptimisticMutation("A", modelName, id, original);
+          }
+          throw error;
+        }
         mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
@@ -919,11 +947,19 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "insert");
         }
 
-        const queuedTx = await activeOutboxManager.insert(
-          modelName,
-          id,
-          serializedFullData
-        );
+        let queuedTx: Transaction;
+        try {
+          queuedTx = await activeOutboxManager.insert(
+            modelName,
+            id,
+            serializedFullData
+          );
+        } catch (error) {
+          if (resolvedOptions.optimistic !== false) {
+            rollbackOptimisticMutation("I", modelName, id);
+          }
+          throw error;
+        }
         mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
@@ -962,11 +998,19 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
 
         const original = mutationOptions?.original ?? getModelData(existing);
         const serializedOriginal = serializeMutationRecord(modelName, original);
-        const queuedTx = await activeOutboxManager.delete(
-          modelName,
-          id,
-          serializedOriginal
-        );
+        let queuedTx: Transaction;
+        try {
+          queuedTx = await activeOutboxManager.delete(
+            modelName,
+            id,
+            serializedOriginal
+          );
+        } catch (error) {
+          if (resolvedOptions.optimistic !== false) {
+            rollbackOptimisticMutation("D", modelName, id, original);
+          }
+          throw error;
+        }
         mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
@@ -1200,9 +1244,17 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "unarchive");
         }
 
-        const queuedTx = await activeOutboxManager.unarchive(modelName, id, {
-          original,
-        });
+        let queuedTx: Transaction;
+        try {
+          queuedTx = await activeOutboxManager.unarchive(modelName, id, {
+            original,
+          });
+        } catch (error) {
+          if (resolvedOptions.optimistic !== false) {
+            rollbackOptimisticMutation("V", modelName, id, original);
+          }
+          throw error;
+        }
         mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(
@@ -1262,12 +1314,20 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           emitModelChange(modelName, id, "update");
         }
 
-        const queuedTx = await activeOutboxManager.update(
-          modelName,
-          id,
-          serializedChanges,
-          serializedOriginal
-        );
+        let queuedTx: Transaction;
+        try {
+          queuedTx = await activeOutboxManager.update(
+            modelName,
+            id,
+            serializedChanges,
+            serializedOriginal
+          );
+        } catch (error) {
+          if (resolvedOptions.optimistic !== false) {
+            rollbackOptimisticMutation("U", modelName, id, original);
+          }
+          throw error;
+        }
         mutationOptions?.onTransactionCreated?.(queuedTx);
 
         recordHistoryEntry(

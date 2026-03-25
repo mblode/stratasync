@@ -123,9 +123,12 @@ export interface SerializedSyncActionOutput {
  * Bootstrap request
  */
 export interface BootstrapRequest {
+  firstSyncId?: string;
+  noSyncPackets?: boolean;
   schemaHash: string;
   groups?: string[];
   models?: string[];
+  type?: "full" | "partial";
 }
 
 /**

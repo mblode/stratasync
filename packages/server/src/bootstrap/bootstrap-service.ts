@@ -206,7 +206,11 @@ export class BootstrapService {
       ...context,
       groups,
     });
-    const lastSyncId = await this.dao.getLastSyncIdForGroups(groups);
+    const snapshotLastSyncId = await this.dao.getLastSyncIdForGroups(groups);
+    const filterAfterSyncId =
+      request.type === "partial" && request.firstSyncId
+        ? parseSyncIdString(request.firstSyncId)
+        : snapshotLastSyncId;
 
     const modelsToBootstrap = request.models ?? this.allModelNames;
     const returnedModelsCount: Record<string, number> = {};
@@ -216,13 +220,13 @@ export class BootstrapService {
         modelName,
         filter,
         groups,
-        lastSyncId
+        filterAfterSyncId
       );
       returnedModelsCount[modelName] = modelCount;
     }
 
     const metadata = {
-      lastSyncId: serializeSyncId(lastSyncId),
+      lastSyncId: serializeSyncId(snapshotLastSyncId),
       returnedModelsCount,
       schemaHash: request.schemaHash,
       subscribedSyncGroups: groups,
@@ -237,7 +241,7 @@ export class BootstrapService {
         modelName,
         filter,
         groups,
-        lastSyncId
+        filterAfterSyncId
       )) {
         rowCount += 1;
         yield line;

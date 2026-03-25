@@ -10,7 +10,8 @@ import type { AuthProvider, RetryConfig } from "./types.js";
 import {
   buildRequestHeaders,
   executeWithAuthRetry,
-  fetchChecked,
+  fetchWithTimeout,
+  HttpError,
   isRetryableError,
   parseSyncId,
   retryWithBackoff,
@@ -26,6 +27,31 @@ export interface FetchDeltasOptions {
   retryConfig?: RetryConfig;
   timeoutMs?: number;
 }
+
+const normalizeDeltaHttpError = (status: number, body: string): Error => {
+  if (status === 409) {
+    try {
+      const parsed = JSON.parse(body) as {
+        error?: unknown;
+        message?: unknown;
+      };
+      if (parsed.error === "BOOTSTRAP_REQUIRED") {
+        return Object.assign(
+          new Error(
+            typeof parsed.message === "string"
+              ? parsed.message
+              : "A fresh bootstrap is required before fetching deltas"
+          ),
+          { code: "BOOTSTRAP_REQUIRED" as const }
+        );
+      }
+    } catch {
+      /* noop */
+    }
+  }
+
+  return new HttpError(status, `Fetch deltas failed: ${status} ${body}`, body);
+};
 
 /**
  * Fetches deltas from the server via REST
@@ -56,12 +82,19 @@ export const fetchDeltas = async (
         const syncBase = normalizeSyncEndpoint(opts.syncEndpoint);
         const url = `${joinSyncUrl(syncBase, "/deltas")}?${params.toString()}`;
 
-        const res = await fetchChecked(
-          url,
-          { headers: requestHeaders, method: "GET" },
-          opts.timeoutMs,
-          "Fetch deltas failed"
-        );
+        const res =
+          opts.timeoutMs === undefined
+            ? await fetch(url, { headers: requestHeaders, method: "GET" })
+            : await fetchWithTimeout(
+                url,
+                { headers: requestHeaders, method: "GET" },
+                opts.timeoutMs
+              );
+
+        if (!res.ok) {
+          const body = await res.text();
+          throw normalizeDeltaHttpError(res.status, body);
+        }
 
         return res.json() as Promise<unknown>;
       }),

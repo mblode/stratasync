@@ -471,6 +471,12 @@ class MemoryStorage implements StorageAdapter {
   }
 }
 
+class FailingOutboxStorage extends MemoryStorage {
+  override addToOutbox(_tx: Transaction): Promise<void> {
+    return Promise.reject(new Error("idb write failed"));
+  }
+}
+
 // oxlint-disable-next-line max-classes-per-file -- test helpers colocated
 class NoopTransport implements TransportAdapter {
   private readonly connectionListeners = new Set<
@@ -842,6 +848,44 @@ describe("createSyncClient lifecycle", () => {
     expect(await storage.getOutbox()).toHaveLength(0);
     expect(client.canUndo()).toBeFalsy();
     expect(client.canRedo()).toBeFalsy();
+
+    await client.stop();
+  });
+
+  it("rolls back optimistic updates when the outbox write fails", async () => {
+    const storage = new FailingOutboxStorage(
+      new ModelRegistry(schema).getSchemaHash(),
+      [
+        {
+          data: { id: "task-1", title: "Seed" },
+          modelName: "Task",
+        },
+      ]
+    );
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport: new NoopTransport(),
+    });
+
+    await client.start();
+
+    await expect(
+      client.update("Task", "task-1", {
+        title: "Changed",
+      })
+    ).rejects.toThrow("idb write failed");
+
+    expect(client.getCached<Record<string, unknown>>("Task", "task-1")).toEqual(
+      {
+        id: "task-1",
+        title: "Seed",
+      }
+    );
+    expect(await storage.getOutbox()).toHaveLength(0);
+    expect(client.canUndo()).toBeFalsy();
 
     await client.stop();
   });

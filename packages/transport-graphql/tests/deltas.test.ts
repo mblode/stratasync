@@ -285,4 +285,33 @@ describe("delta fetching", () => {
       })
     ).rejects.toThrow("Sync action syncId/id must be a string");
   });
+
+  it("surfaces bootstrap-required errors without retrying", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        Response.json(
+          {
+            error: "BOOTSTRAP_REQUIRED",
+            message: "A fresh bootstrap is required before fetching deltas",
+          },
+          { status: 409 }
+        )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchDeltas({
+        afterSyncId: "5",
+        auth: createAuthProvider(null),
+        retryConfig: { baseDelay: 0, jitter: 0, maxDelay: 0, maxRetries: 3 },
+        syncEndpoint: SYNC_ENDPOINT,
+      })
+    ).rejects.toMatchObject({
+      code: "BOOTSTRAP_REQUIRED",
+      message: "A fresh bootstrap is required before fetching deltas",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

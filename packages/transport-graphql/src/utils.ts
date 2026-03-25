@@ -215,6 +215,14 @@ const RETRYABLE_STATUS_RE = /\b(500|502|503|504|429)\b/;
  * Checks if an error is retryable
  */
 export const isRetryableError = (error: unknown): boolean => {
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "BOOTSTRAP_REQUIRED"
+  ) {
+    return false;
+  }
+
   if (isNetworkError(error) || isTimeoutError(error)) {
     return true;
   }

@@ -16,6 +16,15 @@ export class DeltaService {
     this.logger = logger;
   }
 
+  async isCursorStale(afterSyncId: bigint): Promise<boolean> {
+    if (afterSyncId <= 0n) {
+      return false;
+    }
+
+    const earliestSyncId = await this.dao.getEarliestSyncId();
+    return earliestSyncId > 0n && afterSyncId < earliestSyncId;
+  }
+
   async fetchDeltas(
     context: SyncUserContext,
     afterSyncId: bigint,

@@ -201,6 +201,34 @@ export class ModelRegistry {
   }
 
   /**
+   * Global: Returns models that should hydrate eagerly from local state.
+   * Includes instant models plus partial models marked as full-priority.
+   */
+  static getEagerHydrationModelNames(): string[] {
+    return ModelRegistry.getModelMetadataEntries()
+      .filter(
+        ([, meta]) =>
+          meta.loadStrategy === "instant" ||
+          (meta.loadStrategy === "partial" && meta.partialLoadMode === "full")
+      )
+      .map(([name]) => name);
+  }
+
+  /**
+   * Snapshot: Returns models that should hydrate eagerly from local state.
+   * Includes instant models plus partial models marked as full-priority.
+   */
+  getEagerHydrationModelNames(): string[] {
+    return this.getAllModels()
+      .filter(
+        (model) =>
+          model.loadStrategy === "instant" ||
+          (model.loadStrategy === "partial" && model.partialLoadMode === "full")
+      )
+      .map((model) => model.name ?? "");
+  }
+
+  /**
    * Global: Returns partial model names (lazy-hydrated) from the global decorator registry.
    */
   static getPartialModelNames(): string[] {

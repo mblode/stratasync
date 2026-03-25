@@ -285,6 +285,11 @@ export class SyncOrchestrator {
     meta: StorageMeta,
     runToken: number
   ): Promise<void> {
+    if ((this.options.bootstrapMode ?? "auto") === "full") {
+      await this.bootstrap(runToken);
+      return;
+    }
+
     const needsBootstrap = await this.shouldBootstrap(meta);
     if (!needsBootstrap) {
       await this.hydrateIdentityMaps(runToken);
@@ -361,6 +366,9 @@ export class SyncOrchestrator {
       });
     } catch (error) {
       if (this.isRunActive(runToken)) {
+        if (await this.handleBootstrapRequired(error, this.deltaSubscription)) {
+          return;
+        }
         this.handleSyncError(error);
       }
     }
@@ -437,6 +445,9 @@ export class SyncOrchestrator {
           this.groups
         );
       } catch (error) {
+        if (isBootstrapRequiredError(error)) {
+          throw error;
+        }
         const isLastAttempt = attempt >= maxAttempts - 1;
         if (
           isLastAttempt ||
@@ -470,12 +481,7 @@ export class SyncOrchestrator {
   }
 
   private shouldAbortBootstrap(runToken: number): boolean {
-    if (this.isRunActive(runToken)) {
-      return false;
-    }
-
-    this.identityMaps.clearAll();
-    return true;
+    return !this.isRunActive(runToken);
   }
 
   /**
@@ -526,7 +532,14 @@ export class SyncOrchestrator {
    * Forces an immediate sync
    */
   async syncNow(): Promise<void> {
-    await this.fetchAndApplyDeltaPages(this.lastSyncId);
+    try {
+      await this.fetchAndApplyDeltaPages(this.lastSyncId);
+    } catch (error) {
+      if (await this.handleBootstrapRequired(error, this.deltaSubscription)) {
+        return;
+      }
+      throw error;
+    }
 
     // Process pending outbox
     if (this.outboxManager) {
@@ -592,14 +605,6 @@ export class SyncOrchestrator {
   private async bootstrap(runToken: number): Promise<void> {
     this.setState("bootstrapping");
 
-    // Clear existing model/meta state but keep outbox transactions so
-    // unsynced mutations survive a full bootstrap on restart.
-    await this.storage.clear({ preserveOutbox: true });
-    this.identityMaps.clearAll();
-    if (this.shouldAbortBootstrap(runToken)) {
-      return;
-    }
-
     // Stream bootstrap data
     const iterator = this.transport.bootstrap({
       onlyModels: this.registry.getBootstrapModelNames(),
@@ -608,12 +613,17 @@ export class SyncOrchestrator {
       type: "full",
     });
 
-    const metadata = await this.readBootstrapStream(iterator, runToken);
-    if (!metadata) {
+    const snapshot = await this.readBootstrapStream(iterator, runToken);
+    if (!snapshot) {
+      return;
+    }
+    if (this.shouldAbortBootstrap(runToken)) {
       return;
     }
 
-    const databaseVersion = this.applyBootstrapMetadata(metadata);
+    await this.commitBootstrapRows(snapshot.rows);
+
+    const databaseVersion = this.applyBootstrapMetadata(snapshot.metadata);
 
     const persisted = await this.markBootstrapModelsPersisted(runToken);
     if (!persisted) {
@@ -636,7 +646,11 @@ export class SyncOrchestrator {
   private async readBootstrapStream(
     iterator: AsyncGenerator<ModelRow, BootstrapMetadata, unknown>,
     runToken: number
-  ): Promise<BootstrapMetadata | null> {
+  ): Promise<{
+    metadata: BootstrapMetadata;
+    rows: ModelRow[];
+  } | null> {
+    const rows: ModelRow[] = [];
     while (true) {
       const { value, done } = await iterator.next();
       if (this.shouldAbortBootstrap(runToken)) {
@@ -647,27 +661,38 @@ export class SyncOrchestrator {
         if (!value) {
           throw new Error("Bootstrap completed without metadata");
         }
-        return value;
+        return { metadata: value, rows };
       }
 
-      await this.storeBootstrapRow(value);
-      if (this.shouldAbortBootstrap(runToken)) {
-        return null;
-      }
+      rows.push(value);
     }
   }
 
-  private async storeBootstrapRow(row: ModelRow): Promise<void> {
-    const primaryKey = this.registry.getPrimaryKey(row.modelName);
-    const id = row.data[primaryKey] as string;
-    if (typeof id !== "string") {
-      return;
+  private async commitBootstrapRows(rows: ModelRow[]): Promise<void> {
+    const ops = rows.map((row) => ({
+      data: row.data,
+      modelName: row.modelName,
+      type: "put" as const,
+    }));
+
+    await this.storage.clear({ preserveOutbox: true });
+    if (ops.length > 0) {
+      await this.storage.writeBatch(ops);
     }
 
-    await this.storage.put(row.modelName, row.data);
+    this.identityMaps.batch(() => {
+      this.identityMaps.clearAll();
+      for (const row of rows) {
+        const primaryKey = this.registry.getPrimaryKey(row.modelName);
+        const id = row.data[primaryKey] as string;
+        if (typeof id !== "string") {
+          continue;
+        }
 
-    const map = this.identityMaps.getMap(row.modelName);
-    map.set(id, row.data, { serialized: true });
+        const map = this.identityMaps.getMap(row.modelName);
+        map.set(id, row.data, { serialized: true });
+      }
+    });
   }
 
   private applyBootstrapMetadata(
@@ -725,7 +750,7 @@ export class SyncOrchestrator {
    * Loads existing data from storage into identity maps
    */
   private async hydrateIdentityMaps(runToken: number): Promise<void> {
-    for (const modelName of this.registry.getBootstrapModelNames()) {
+    for (const modelName of this.getEagerHydrationModelNames()) {
       if (!this.isRunActive(runToken)) {
         return;
       }
@@ -748,6 +773,17 @@ export class SyncOrchestrator {
         map.set(id, row, { serialized: true });
       }
     }
+  }
+
+  private getEagerHydrationModelNames(): string[] {
+    return this.registry
+      .getAllModels()
+      .filter(
+        (model) =>
+          model.loadStrategy === "instant" ||
+          (model.loadStrategy === "partial" && model.partialLoadMode === "full")
+      )
+      .map((model) => model.name ?? "");
   }
 
   private async areModelsPersisted(modelNames: string[]): Promise<boolean> {
@@ -868,13 +904,13 @@ export class SyncOrchestrator {
 
   private async handleBootstrapRequired(
     error: unknown,
-    subscription: AsyncIterator<DeltaPacket>
+    subscription: AsyncIterator<DeltaPacket> | null
   ): Promise<boolean> {
     if (!isBootstrapRequiredError(error) || !this.isRunActive(this.runToken)) {
       return false;
     }
 
-    if (this.deltaSubscription === subscription) {
+    if (subscription && this.deltaSubscription === subscription) {
       this.deltaSubscription = null;
     }
 
@@ -1611,7 +1647,7 @@ export class SyncOrchestrator {
       type: "partial",
     });
 
-    const hydrated = new Set(this.registry.getBootstrapModelNames());
+    const hydrated = new Set(this.getEagerHydrationModelNames());
 
     const cancelIfStale = async (): Promise<boolean> => {
       if (this.isRunActive(runToken)) {
@@ -1725,8 +1761,12 @@ export class SyncOrchestrator {
         if (this.running) {
           this.setState("syncing");
         }
-      } catch {
-        // Ignore errors, will retry
+      } catch (error) {
+        if (this.running) {
+          this.handleSyncError(
+            error instanceof Error ? error : new Error("Failed to reconnect")
+          );
+        }
       }
     })();
   }

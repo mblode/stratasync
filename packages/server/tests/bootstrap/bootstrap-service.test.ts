@@ -326,4 +326,86 @@ describe(BootstrapService, () => {
     expect(lines[1]).toContain('"sequence":1');
     expect(lines[1]).toContain('"title":"Keep me"');
   });
+
+  it("uses request.firstSyncId for partial bootstrap filtering while preserving metadata lastSyncId", async () => {
+    const touchedCalls: {
+      firstSyncId: bigint;
+      groups: string[];
+      modelIds: string[];
+      modelName: string;
+    }[] = [];
+    const db = createBootstrapDb(
+      {
+        named_tasks: [
+          [
+            { taskId: "task-1", title: "Keep me" },
+            { taskId: "task-2", title: "Changed later" },
+          ],
+          [],
+        ],
+      },
+      { named_tasks: 2 }
+    );
+    const dao = {
+      getLastSyncIdForGroups: vi.fn().mockResolvedValue(100n),
+      getTouchedModelIdsAfter: vi.fn(
+        (
+          firstSyncId: bigint,
+          groups: string[],
+          modelName: string,
+          modelIds: string[]
+        ) => {
+          touchedCalls.push({ firstSyncId, groups, modelIds, modelName });
+          return Promise.resolve(new Set(["task-2"]));
+        }
+      ),
+    };
+    const models: Record<string, SyncModelConfig> = {
+      NamedTask: {
+        bootstrap: {
+          buildScopeWhere: () => sql`true`,
+          cursor: { idField: "taskId", type: "simple" },
+          fields: ["title"],
+        },
+        groupKey: null,
+        mutate: {
+          actions: new Set(["I"]),
+          idField: "taskId",
+          insertFields: {
+            title: { type: "string" },
+          },
+          kind: "standard",
+        },
+        table: namedTasks,
+      },
+    };
+
+    const service = new BootstrapService(db, dao as never, models);
+    const lines = await collectLines(
+      service.generateBootstrapNdjson(
+        { groups: ["workspace-1"], userId: "user-1" },
+        { firstSyncId: "7", schemaHash: "schema-1", type: "partial" }
+      )
+    );
+
+    expect(touchedCalls).toEqual([
+      {
+        firstSyncId: 7n,
+        groups: ["workspace-1"],
+        modelIds: ["task-1", "task-2"],
+        modelName: "NamedTask",
+      },
+      {
+        firstSyncId: 7n,
+        groups: ["workspace-1"],
+        modelIds: ["task-1", "task-2"],
+        modelName: "NamedTask",
+      },
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('"lastSyncId":"100"');
+    expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":1}');
+    expect(lines[1]).toContain('"id":"task-1"');
+    expect(lines[1]).toContain('"title":"Keep me"');
+  });
 });
