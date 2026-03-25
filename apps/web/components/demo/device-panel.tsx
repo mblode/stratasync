@@ -2,7 +2,6 @@
 "use client";
 
 import { usePendingCount, useQuery, useSyncClient } from "@stratasync/react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
 
@@ -14,9 +13,6 @@ import { NetworkToggle } from "./network-toggle";
 import { SyncIndicator } from "./sync-indicator";
 import { TodoItem } from "./todo-item";
 import type { Todo } from "./types";
-
-const ENTER_SPRING = { damping: 28, stiffness: 500 };
-const EXIT_SPRING = { damping: 34, stiffness: 600 };
 
 let nextId = 0;
 const uid = () => {
@@ -39,7 +35,6 @@ export const DevicePanel = ({
 
   const [inputValue, setInputValue] = useState("");
   const [isOnline, setIsOnline] = useState(true);
-  const reduceMotion = useReducedMotion();
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && inputValue.trim()) {
@@ -60,6 +55,10 @@ export const DevicePanel = ({
       completed: !todo.completed,
       updatedAt: Date.now(),
     });
+  };
+
+  const handleUpdate = (todo: Todo, title: string) => {
+    client.update("Todo", todo.id, { title, updatedAt: Date.now() });
   };
 
   const handleDelete = (todo: Todo) => {
@@ -84,30 +83,14 @@ export const DevicePanel = ({
           <SyncIndicator isOnline={isOnline} status={state} />
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <AnimatePresence>
-            {hasPending && (
-              <motion.span
-                animate={{
-                  opacity: 1,
-                  scale: reduceMotion ? undefined : 1,
-                  transition: { type: "spring", ...ENTER_SPRING },
-                }}
-                aria-label={`${pendingCount} change${pendingCount === 1 ? "" : "s"} pending`}
-                className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 font-medium text-amber-700 text-xs dark:bg-amber-900/30 dark:text-amber-400"
-                exit={{
-                  opacity: 0,
-                  scale: reduceMotion ? undefined : 0.85,
-                  transition: { type: "spring", ...EXIT_SPRING },
-                }}
-                initial={{
-                  opacity: 0,
-                  scale: reduceMotion ? undefined : 0.85,
-                }}
-              >
-                {pendingCount}
-              </motion.span>
-            )}
-          </AnimatePresence>
+          {hasPending && (
+            <span
+              aria-label={`${pendingCount} change${pendingCount === 1 ? "" : "s"} pending`}
+              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 font-medium text-amber-700 text-xs dark:bg-amber-900/30 dark:text-amber-400"
+            >
+              {pendingCount}
+            </span>
+          )}
           <NetworkToggle isOnline={isOnline} onToggle={handleToggleNetwork} />
         </div>
       </div>
@@ -115,16 +98,15 @@ export const DevicePanel = ({
       {/* Todo list */}
       <ScrollArea className="h-[250px]">
         <ul>
-          <AnimatePresence initial={false} mode="popLayout">
-            {todos.map((todo) => (
-              <TodoItem
-                key={todo.id}
-                onDelete={() => handleDelete(todo)}
-                onToggle={() => handleToggle(todo)}
-                todo={todo}
-              />
-            ))}
-          </AnimatePresence>
+          {todos.map((todo) => (
+            <TodoItem
+              key={todo.id}
+              onDelete={() => handleDelete(todo)}
+              onToggle={() => handleToggle(todo)}
+              onUpdate={(title) => handleUpdate(todo, title)}
+              todo={todo}
+            />
+          ))}
         </ul>
       </ScrollArea>
 
@@ -134,7 +116,7 @@ export const DevicePanel = ({
           className="h-8 border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Add a todo…"
+          placeholder="What needs to be done?"
           value={inputValue}
         />
       </div>

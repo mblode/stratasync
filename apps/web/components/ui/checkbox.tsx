@@ -1,3 +1,4 @@
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop */
 "use client";
 
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
@@ -56,14 +57,6 @@ const Checkbox = React.forwardRef<
       [onCheckedChange]
     );
 
-    const renderCheckbox = React.useCallback(
-      (
-        renderProps: React.HTMLAttributes<HTMLSpanElement>,
-        state: { checked: boolean; indeterminate: boolean }
-      ) => <span {...renderProps} data-state={getDataState(state)} />,
-      []
-    );
-
     return (
       <CheckboxPrimitive.Root
         checked={checked === "indeterminate" ? false : checked}
@@ -78,7 +71,9 @@ const Checkbox = React.forwardRef<
         indeterminate={resolvedIndeterminate}
         onCheckedChange={handleCheckedChange}
         ref={ref}
-        render={renderCheckbox}
+        render={(renderProps, state) => (
+          <span {...renderProps} data-state={getDataState(state)} />
+        )}
         {...props}
       >
         <CheckboxPrimitive.Indicator
