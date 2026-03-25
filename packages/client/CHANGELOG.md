@@ -1,5 +1,13 @@
 # @stratasync/client
 
+## 0.2.4
+
+### Patch Changes
+
+- da88949: Align partial bootstrap and client hydration with Linear-style sync engine semantics.
+- Updated dependencies [da88949]
+  - @stratasync/core@0.2.4
+
 ## 0.2.3
 
 ### Patch Changes
