@@ -213,9 +213,30 @@ const Home = async () => {
                     See it in action
                   </h2>
                   <p className="mx-auto max-w-xl text-muted-foreground text-sm">
-                    Two devices, one shared state. Toggle offline, add todos,
-                    and watch changes sync in real-time.
+                    Done Bear is a local-first task manager built with Strata
+                    Sync. Instant reads, offline writes, and real-time
+                    collaboration — all powered by this engine.
                   </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
+                    <Button asChild size="lg">
+                      <a
+                        href="https://donebear.com/playground"
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        Try the playground
+                      </a>
+                    </Button>
+                    <Button asChild size="lg" variant="secondary">
+                      <a
+                        href="https://donebear.com"
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        Learn more
+                      </a>
+                    </Button>
+                  </div>
                 </div>
                 <SyncDemo />
               </div>
