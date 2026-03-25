@@ -256,7 +256,10 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    1. Define your models
+                    1. Define your models &mdash;{" "}
+                    <code className="text-xs opacity-60">
+                      lib/sync/models.ts
+                    </code>
                   </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton
@@ -274,7 +277,10 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    2. Create the client
+                    2. Create the client &mdash;{" "}
+                    <code className="text-xs opacity-60">
+                      lib/sync/client.ts
+                    </code>
                   </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton
@@ -292,7 +298,10 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    3. Build reactive components
+                    3. Build reactive components &mdash;{" "}
+                    <code className="text-xs opacity-60">
+                      components/todo-list.tsx
+                    </code>
                   </h3>
                   <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
                     <CopyButton

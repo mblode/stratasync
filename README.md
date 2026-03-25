@@ -28,8 +28,10 @@ npx skills add stratasync/stratasync
 Or install the packages manually:
 
 ```bash
-npm install @stratasync/core @stratasync/client @stratasync/react
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
 ```
+
+### 1. Define your models — `lib/sync/models.ts`
 
 ```typescript
 import { ClientModel, Model, Property } from "@stratasync/core";
@@ -40,6 +42,28 @@ class Todo extends Model {
   @Property() declare completed: boolean;
 }
 ```
+
+### 2. Create the client — `lib/sync/client.ts`
+
+```typescript
+import { createSyncClient } from "@stratasync/client";
+import { createMobXReactivity } from "@stratasync/mobx";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+import { GraphQLTransportAdapter } from "@stratasync/transport-graphql";
+
+const client = createSyncClient({
+  storage: createIndexedDbStorage(),
+  transport: new GraphQLTransportAdapter({
+    endpoint: "/api/graphql",
+    syncEndpoint: "/api/sync",
+    wsEndpoint: "wss://api.example.com/sync/ws",
+    auth: { getAccessToken: async () => "token" },
+  }),
+  reactivity: createMobXReactivity(),
+});
+```
+
+### 3. Build reactive components — `components/todo-list.tsx`
 
 ```tsx
 import { observer } from "mobx-react-lite";
