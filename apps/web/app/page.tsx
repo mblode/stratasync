@@ -24,6 +24,42 @@ class Todo extends Model {
   @Property() declare completed: boolean
 }`;
 
+const SERVER_SNIPPET = `import { createSyncServer } from "@stratasync/server"
+import { todos, syncActions, syncGroupMemberships } from "./db/schema"
+
+const sync = await createSyncServer({
+  db,
+  tables: { syncActions, syncGroupMemberships },
+  models: {
+    Todo: {
+      table: todos,
+      groupKey: "groupId",
+      bootstrap: {
+        fields: ["id", "title", "completed", "createdAt", "groupId"],
+        cursor: { type: "simple", idField: "id" },
+        buildScopeWhere: (filter) =>
+          inArray(todos.groupId, filter.workspaceGroupIds),
+      },
+      mutate: {
+        kind: "standard",
+        actions: new Set(["I", "U", "D"]),
+        insertFields: {
+          title: { type: "string" },
+          completed: { type: "string" },
+          groupId: { type: "string" },
+        },
+        updateFields: new Set(["title", "completed"]),
+      },
+    },
+  },
+  auth: {
+    verifyToken: async (token) => verify(token),
+    resolveGroups: (userId) => sync.syncDao.getUserGroups(userId),
+  },
+})
+
+sync.registerRoutes(fastify)`;
+
 const CLIENT_SNIPPET = `import { createSyncClient } from "@stratasync/client"
 import { createMobXReactivity } from "@stratasync/mobx"
 import { createIndexedDbStorage } from "@stratasync/storage-idb"
@@ -136,8 +172,9 @@ const shikiClassName =
   "overflow-x-auto pb-4 text-xs md:text-sm [&>pre]:m-0 [&>pre]:p-0 [&>pre]:!bg-transparent [&>pre]:!font-mono [&>pre>code]:!font-mono dark:[&>pre]:!text-[color:var(--shiki-dark)] dark:[&>pre_span]:!text-[color:var(--shiki-dark)]";
 
 const Home = async () => {
-  const [modelHtml, clientHtml, hooksHtml] = await Promise.all([
+  const [modelHtml, serverHtml, clientHtml, hooksHtml] = await Promise.all([
     getCodeHtml(MODEL_SNIPPET, "tsx"),
+    getCodeHtml(SERVER_SNIPPET, "tsx"),
     getCodeHtml(CLIENT_SNIPPET, "tsx"),
     getCodeHtml(HOOKS_SNIPPET, "tsx"),
   ]);
@@ -277,7 +314,26 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    2. Create the client &mdash;{" "}
+                    2. Set up the server &mdash;{" "}
+                    <code className="text-xs opacity-60">api/server.ts</code>
+                  </h3>
+                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
+                    <CopyButton
+                      className="absolute top-3 right-3"
+                      content={SERVER_SNIPPET}
+                      size="xs"
+                      variant="ghost"
+                    />
+                    <div
+                      className={shikiClassName}
+                      dangerouslySetInnerHTML={{ __html: serverHtml }}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="font-medium text-muted-foreground text-sm">
+                    3. Create the client &mdash;{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/client.ts
                     </code>
@@ -298,7 +354,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    3. Build reactive components &mdash;{" "}
+                    4. Build reactive components &mdash;{" "}
                     <code className="text-xs opacity-60">
                       components/todo-list.tsx
                     </code>

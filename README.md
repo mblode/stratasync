@@ -28,8 +28,11 @@ npx skills add stratasync/stratasync
 Or install the packages manually:
 
 ```bash
-npm install @stratasync/core @stratasync/client @stratasync/react
+npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+npm install @stratasync/server  # api server
 ```
+
+### 1. Define your models — `lib/sync/models.ts`
 
 ```typescript
 import { ClientModel, Model, Property } from "@stratasync/core";
@@ -40,6 +43,68 @@ class Todo extends Model {
   @Property() declare completed: boolean;
 }
 ```
+
+### 2. Set up the server — `api/server.ts`
+
+```typescript
+import { createSyncServer } from "@stratasync/server";
+import { todos, syncActions, syncGroupMemberships } from "./db/schema";
+
+const sync = await createSyncServer({
+  db,
+  tables: { syncActions, syncGroupMemberships },
+  models: {
+    Todo: {
+      table: todos,
+      groupKey: "groupId",
+      bootstrap: {
+        fields: ["id", "title", "completed", "createdAt", "groupId"],
+        cursor: { type: "simple", idField: "id" },
+        buildScopeWhere: (filter) =>
+          inArray(todos.groupId, filter.workspaceGroupIds),
+      },
+      mutate: {
+        kind: "standard",
+        actions: new Set(["I", "U", "D"]),
+        insertFields: {
+          title: { type: "string" },
+          completed: { type: "string" },
+          groupId: { type: "string" },
+        },
+        updateFields: new Set(["title", "completed"]),
+      },
+    },
+  },
+  auth: {
+    verifyToken: async (token) => verify(token),
+    resolveGroups: (userId) => sync.syncDao.getUserGroups(userId),
+  },
+});
+
+sync.registerRoutes(fastify);
+```
+
+### 3. Create the client — `lib/sync/client.ts`
+
+```typescript
+import { createSyncClient } from "@stratasync/client";
+import { createMobXReactivity } from "@stratasync/mobx";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+import { GraphQLTransportAdapter } from "@stratasync/transport-graphql";
+
+const client = createSyncClient({
+  storage: createIndexedDbStorage(),
+  transport: new GraphQLTransportAdapter({
+    endpoint: "/api/graphql",
+    syncEndpoint: "/api/sync",
+    wsEndpoint: "wss://api.example.com/sync/ws",
+    auth: { getAccessToken: async () => "token" },
+  }),
+  reactivity: createMobXReactivity(),
+});
+```
+
+### 4. Build reactive components — `components/todo-list.tsx`
 
 ```tsx
 import { observer } from "mobx-react-lite";
