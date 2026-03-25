@@ -4,8 +4,8 @@ import type { BootstrapService } from "../../src/bootstrap/bootstrap-service.js"
 import type { DeltaService } from "../../src/delta/delta-service.js";
 import { registerSyncRoutes } from "../../src/fastify/routes.js";
 import {
-  BootstrapQuerySchema,
   BatchLoadBodySchema,
+  BootstrapQuerySchema,
   MutateBodySchema,
 } from "../../src/fastify/validation.js";
 import type { MutateService } from "../../src/mutate/mutate-service.js";

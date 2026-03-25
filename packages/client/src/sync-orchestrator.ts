@@ -750,7 +750,7 @@ export class SyncOrchestrator {
    * Loads existing data from storage into identity maps
    */
   private async hydrateIdentityMaps(runToken: number): Promise<void> {
-    for (const modelName of this.getEagerHydrationModelNames()) {
+    for (const modelName of this.registry.getEagerHydrationModelNames()) {
       if (!this.isRunActive(runToken)) {
         return;
       }
@@ -773,17 +773,6 @@ export class SyncOrchestrator {
         map.set(id, row, { serialized: true });
       }
     }
-  }
-
-  private getEagerHydrationModelNames(): string[] {
-    return this.registry
-      .getAllModels()
-      .filter(
-        (model) =>
-          model.loadStrategy === "instant" ||
-          (model.loadStrategy === "partial" && model.partialLoadMode === "full")
-      )
-      .map((model) => model.name ?? "");
   }
 
   private async areModelsPersisted(modelNames: string[]): Promise<boolean> {
@@ -1647,7 +1636,7 @@ export class SyncOrchestrator {
       type: "partial",
     });
 
-    const hydrated = new Set(this.getEagerHydrationModelNames());
+    const hydrated = new Set(this.registry.getEagerHydrationModelNames());
 
     const cancelIfStale = async (): Promise<boolean> => {
       if (this.isRunActive(runToken)) {

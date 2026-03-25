@@ -44,7 +44,7 @@ tests/
 
 ### Outbox transaction states
 
-`queued` → `sent` → `awaitingSync` → completed (removed). On error: `sent` → `failed` → `queued` (retry, max 5).
+`queued` → `sent` → `awaitingSync` → completed (removed). On error: `sent` → `queued` (retry on reconnect).
 
 ## Gotchas
 
