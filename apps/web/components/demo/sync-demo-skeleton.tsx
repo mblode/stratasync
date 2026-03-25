@@ -94,9 +94,10 @@ export const SyncDemoSkeleton = () => (
     {/* Sync flow pipe */}
     <div
       aria-hidden="true"
-      className="pointer-events-none relative hidden self-stretch items-center md:flex"
+      className="pointer-events-none relative flex h-12 flex-col items-center md:h-auto md:flex-row md:self-stretch"
     >
-      <div className="h-0.5 w-full rounded-full bg-border" />
+      <div className="h-full w-0.5 rounded-full bg-border md:hidden" />
+      <div className="hidden h-0.5 w-full rounded-full bg-border md:block" />
     </div>
 
     <SkeletonPanel label="Device B" />
