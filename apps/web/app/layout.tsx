@@ -18,6 +18,7 @@ const glide = localFont({
 const siteTitle = `${siteConfig.name} - Local-first sync engine`;
 
 export const viewport: Viewport = {
+  maximumScale: 1,
   width: "device-width",
 };
 
