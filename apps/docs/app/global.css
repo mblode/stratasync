@@ -48,3 +48,11 @@ figure[class*="shiki"] {
 :where(table):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
   --color-fd-card: hsl(0, 0%, 100%);
 }
+
+.dark figure[class*="shiki"] {
+  --color-fd-card: hsl(0, 0%, 9.8%);
+}
+
+.dark :where(table):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  --color-fd-card: hsl(0, 0%, 9.8%);
+}
