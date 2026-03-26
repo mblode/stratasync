@@ -150,8 +150,7 @@ const Home = async () => {
                   Apps that just work.
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Instant reads. Offline writes. Real-time collaboration.
-                  Open-source sync for TypeScript and React.
+                  Inspired by Linear&#8217;s sync engine. Open-source.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -246,8 +245,8 @@ const Home = async () => {
                   How it works
                 </h2>
                 <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
-                  Built on the sync architecture Linear described but never
-                  open-sourced, extended with Yjs CRDTs and pluggable adapters.
+                  Yjs CRDTs, pluggable storage and transport, field-level
+                  conflict resolution.
                 </p>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {features.map((feature) => (
