@@ -45,7 +45,7 @@ const rows: ComparisonRow[] = [
     competitors: {
       electricsql: { icon: "neutral", text: "Bring your own" },
       instantdb: { icon: "neutral", text: "Server decides" },
-      powersync: { icon: "check", text: "Automatic, customizable" },
+      powersync: { icon: "check", text: "Customisable" },
       zero: { icon: "neutral", text: "Server decides" },
     },
     feature: "Conflict resolution",
