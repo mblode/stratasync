@@ -33,14 +33,13 @@ Built on the sync architecture [Linear](https://linear.app) described but never 
 
 ## How Strata Sync compares
 
-| Feature             | Strata Sync            | Linear (proprietary)   | TanStack DB           | InstantDB            | PowerSync            | Zero                 |
-| ------------------- | ---------------------- | ---------------------- | --------------------- | -------------------- | -------------------- | -------------------- |
-| Local storage       | IndexedDB              | IndexedDB              | In-memory             | IndexedDB            | SQLite (WASM)        | SQLite (WASM)        |
-| Conflict resolution | Field-level LWW rebase | Field-level LWW rebase | Custom per-collection | Server-authoritative | Server-authoritative | Server-authoritative |
-| Rich-text collab    | Yjs CRDT               | Proprietary            | None                  | None                 | None                 | None                 |
-| Offline writes      | Persistent outbox      | Persistent outbox      | Optimistic mutations  | Pending mutations    | Write-ahead log      | Optimistic mutations |
-| Undo/redo           | Built-in               | Built-in               | None                  | None                 | None                 | None                 |
-| Open source         | MIT                    | No                     | MIT                   | Apache 2.0           | Apache 2.0           | Apache 2.0           |
+| Feature             | Strata Sync            | ElectricSQL    | Zero                 | InstantDB            | PowerSync               |
+| ------------------- | ---------------------- | -------------- | -------------------- | -------------------- | ----------------------- |
+| Local storage       | Built-in (IndexedDB)   | Bring your own | Built-in (IndexedDB) | Built-in (IndexedDB) | Built-in (SQLite)       |
+| Conflict resolution | Automatic, field-level | Bring your own | Server decides       | Server decides       | Automatic, customizable |
+| Real-time editing   | Rich-text with Yjs     | Not included   | Not included         | Not included         | Not included            |
+| Offline writes      | Full offline support   | Bring your own | Not supported        | Basic support        | Full offline support    |
+| Undo / redo         | Built-in               | Not included   | Not included         | Not included         | Not included            |
 
 ## Packages
 

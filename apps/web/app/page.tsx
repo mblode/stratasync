@@ -11,6 +11,7 @@ import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
+import { LandingComparison } from "@/components/landing/landing-comparison";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -303,6 +304,9 @@ const Home = async () => {
               </div>
             </div>
           </section>
+
+          {/* How Strata Sync compares */}
+          <LandingComparison />
 
           {/* Final CTA — Convert */}
           <section className="py-16 md:py-32">
