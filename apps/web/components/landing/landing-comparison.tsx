@@ -78,7 +78,7 @@ const rows: ComparisonRow[] = [
       powersync: { icon: "cross", text: "Not included" },
       zero: { icon: "cross", text: "Not included" },
     },
-    feature: "Undo / redo",
+    feature: "Undo and redo",
     strataSync: { icon: "check", text: "Built-in" },
   },
 ];

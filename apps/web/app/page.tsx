@@ -75,7 +75,7 @@ const features = [
     title: "Instant reads",
   },
   {
-    description: "Writes queue offline and replay when you reconnect.",
+    description: "Writes queue offline and are replayed when you reconnect.",
     icon: OfflineIcon,
     title: "Offline writes",
   },
@@ -245,8 +245,8 @@ const Home = async () => {
                   How it works
                 </h2>
                 <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
-                  Yjs CRDTs, pluggable storage and transport, field-level
-                  conflict resolution.
+                  A server-sequenced log orders all changes globally. Pluggable
+                  adapters handle storage, transport, and reactivity.
                 </p>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {features.map((feature) => (
