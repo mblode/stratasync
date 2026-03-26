@@ -204,13 +204,15 @@ export class DemoTransport implements TransportAdapter {
     batch: TransactionBatch;
     resolve: (result: MutateResult) => void;
   }[] = [];
+  private readonly latencyMs: number;
   private connectionState: ConnectionState = "connected";
 
   isOnline = true;
 
-  constructor(server: DemoServer, transportId: string) {
+  constructor(server: DemoServer, transportId: string, latencyMs = 300) {
     this.server = server;
     this.transportId = transportId;
+    this.latencyMs = latencyMs;
     server.register(transportId, this);
   }
 
@@ -230,9 +232,17 @@ export class DemoTransport implements TransportAdapter {
   private flushPendingMutations(): void {
     const queued = this.pendingMutations.splice(0);
     for (const { batch, resolve } of queued) {
-      setTimeout(() => {
-        resolve(this.server.processMutation(this.transportId, batch));
-      }, 300);
+      this.scheduleResolve(() =>
+        resolve(this.server.processMutation(this.transportId, batch))
+      );
+    }
+  }
+
+  private scheduleResolve(fn: () => void): void {
+    if (this.latencyMs === 0) {
+      queueMicrotask(fn);
+    } else {
+      setTimeout(fn, this.latencyMs);
     }
   }
 
@@ -276,9 +286,9 @@ export class DemoTransport implements TransportAdapter {
     }
 
     return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(this.server.processMutation(this.transportId, batch));
-      }, 300);
+      this.scheduleResolve(() =>
+        resolve(this.server.processMutation(this.transportId, batch))
+      );
     });
   }
 

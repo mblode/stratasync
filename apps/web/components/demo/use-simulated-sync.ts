@@ -9,59 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DemoServer, DemoTransport } from "./demo-transport";
 import { InMemoryStorage } from "./in-memory-storage";
-import type { SyncAnimation } from "./types";
-
-// ---------------------------------------------------------------------------
-// Schema & seed data
-// ---------------------------------------------------------------------------
-
-const schema: SchemaDefinition = {
-  models: {
-    Todo: {
-      fields: {
-        completed: {},
-        createdAt: {},
-        id: {},
-        title: {},
-        updatedAt: {},
-      },
-      loadStrategy: "instant",
-    },
-  },
-};
-
-const SEED_ROWS = [
-  {
-    data: {
-      completed: true,
-      createdAt: 1,
-      id: "seed-1",
-      title: "Design new dashboard layout",
-      updatedAt: 1,
-    },
-    modelName: "Todo",
-  },
-  {
-    data: {
-      completed: false,
-      createdAt: 2,
-      id: "seed-2",
-      title: "Review pull request #42",
-      updatedAt: 2,
-    },
-    modelName: "Todo",
-  },
-  {
-    data: {
-      completed: false,
-      createdAt: 3,
-      id: "seed-3",
-      title: "Update API documentation",
-      updatedAt: 3,
-    },
-    modelName: "Todo",
-  },
-];
+import type { SeedRow, SyncAnimation } from "./types";
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -83,7 +31,11 @@ export interface DemoClients {
   activeSyncAnimations: SyncAnimation[];
 }
 
-export const useDemoClients = (): DemoClients | null => {
+export const useDemoClients = (
+  schema: SchemaDefinition,
+  seedRows: SeedRow[],
+  latencyMs?: number
+): DemoClients | null => {
   const [infra, setInfra] = useState<DemoInfra | null>(null);
   const [activeSyncAnimations, setActiveSyncAnimations] = useState<
     SyncAnimation[]
@@ -99,11 +51,11 @@ export const useDemoClients = (): DemoClients | null => {
     timers.current.add(id);
   }, []);
 
-  // Create infrastructure on client only
+  // Create infrastructure on client only — recreates when schema/seedRows change
   useEffect(() => {
-    const server = new DemoServer(SEED_ROWS);
-    const transportA = new DemoTransport(server, "A");
-    const transportB = new DemoTransport(server, "B");
+    const server = new DemoServer(seedRows);
+    const transportA = new DemoTransport(server, "A", latencyMs);
+    const transportB = new DemoTransport(server, "B", latencyMs);
     const reactivity = createMobXReactivity();
 
     const clientA = createSyncClient({
@@ -132,7 +84,7 @@ export const useDemoClients = (): DemoClients | null => {
       transportA.close().then(undefined, () => {});
       transportB.close().then(undefined, () => {});
     };
-  }, []);
+  }, [schema, seedRows, latencyMs]);
 
   // Wire up sync flow animations once infra is ready
   useEffect(() => {

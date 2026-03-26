@@ -33,8 +33,11 @@ const ScrollBar = ({
 const ScrollArea = ({
   className,
   children,
+  viewportRef,
   ...props
-}: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) => (
+}: React.ComponentProps<typeof ScrollAreaPrimitive.Root> & {
+  viewportRef?: React.Ref<HTMLDivElement>;
+}) => (
   <ScrollAreaPrimitive.Root
     className={cn("relative flex flex-col", className)}
     data-slot="scroll-area"
@@ -43,6 +46,7 @@ const ScrollArea = ({
     <ScrollAreaPrimitive.Viewport
       className="w-full min-h-0 flex-1 rounded-[inherit] outline-none transition-[color,box-shadow] focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50"
       data-slot="scroll-area-viewport"
+      ref={viewportRef}
     >
       {children}
     </ScrollAreaPrimitive.Viewport>

@@ -10,11 +10,10 @@ import {
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
-import { SyncDemo } from "@/components/demo/sync-demo";
+import { Showcase } from "@/components/demo/showcase";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
-import { UseCaseBadges } from "@/components/use-case-badges";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
 
@@ -192,56 +191,8 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* What you can build — Relevance */}
-          <section className="pt-20 pb-16 md:pt-28 md:pb-20">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-3xl space-y-4 text-center">
-                <h2 className="font-semibold font-sans text-xl tracking-tight">
-                  What you can build
-                </h2>
-                <UseCaseBadges />
-              </div>
-            </div>
-          </section>
-
-          {/* See it in action — Proof */}
-          <section className="py-16 md:py-20">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-3xl space-y-6">
-                <div className="space-y-2 text-center">
-                  <h2 className="font-semibold font-sans text-xl tracking-tight">
-                    See it in action
-                  </h2>
-                  <p className="mx-auto max-w-xl text-muted-foreground text-sm">
-                    Done Bear is a local-first task manager built with Strata
-                    Sync. Instant reads, offline writes, and real-time
-                    collaboration — all powered by this engine.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
-                    <Button asChild size="lg">
-                      <a
-                        href="https://donebear.com/playground"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        Try the playground
-                      </a>
-                    </Button>
-                    <Button asChild size="lg" variant="secondary">
-                      <a
-                        href="https://donebear.com"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        Learn more
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-                <SyncDemo />
-              </div>
-            </div>
-          </section>
+          {/* What you can build — Interactive showcase */}
+          <Showcase />
 
           {/* Why Strata Sync — Differentiation */}
           <section className="py-16 md:py-20">
