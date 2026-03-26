@@ -146,16 +146,17 @@ const Home = async () => {
     <div className="flex min-h-screen flex-col">
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
-          {/* Hero — Promise */}
+          {/* WHY — Hero */}
           <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
             <section className="py-16 text-center md:py-32">
               <div className="container-wrapper">
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
-                  Sync that works offline.
+                  Apps that just work.
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Inspired by Linear&#8217;s sync engine. Open-source.
+                  Instant. Collaborative. Offline. The sync engine your users
+                  expect and your codebase deserves.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -192,15 +193,92 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* What you can build — Interactive showcase */}
-          <Showcase />
+          {/* WHY — The Problem */}
+          <section className="py-16 md:py-24">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-3xl space-y-6 text-center">
+                <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
+                  Why are modern apps so hard to build?
+                </h2>
+                <div className="space-y-4 text-lg text-muted-foreground">
+                  <p className="text-balance">
+                    Users expect instant interactions. They expect apps to work
+                    on a train, on a plane, on spotty hotel Wi-Fi. They expect
+                    their edits to merge seamlessly with their teammates&#8217;.
+                  </p>
+                  <p className="text-balance">
+                    But delivering that experience means wrestling with caching
+                    layers, conflict resolution, optimistic updates, retry
+                    queues, and WebSocket plumbing.
+                  </p>
+                  <p className="text-balance">
+                    Most teams spend months building infrastructure instead of
+                    features.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          {/* Why Strata Sync — Differentiation */}
+          {/* WHY — The Tension */}
+          <section className="bg-muted/30 py-16 md:py-20">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-4xl space-y-8">
+                <h2 className="text-center font-sans text-xl font-semibold tracking-tight">
+                  User expectations vs. developer reality
+                </h2>
+                <div className="grid gap-8 sm:grid-cols-2">
+                  <div className="space-y-4">
+                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider">
+                      What users want
+                    </h3>
+                    <ul className="space-y-3 font-medium text-foreground">
+                      <li>Instant interactions, no spinners</li>
+                      <li>Works offline without thinking about it</li>
+                      <li>Real-time collaboration that just merges</li>
+                      <li>Never lose my work</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                      What developers build
+                    </h3>
+                    <ul className="space-y-3 text-muted-foreground">
+                      <li>Loading states, skeleton screens, retry logic</li>
+                      <li>
+                        Service workers, cache invalidation, queue management
+                      </li>
+                      <li>Conflict resolution algorithms, CRDT research</li>
+                      <li>Transaction logs, undo stacks, backup strategies</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* HOW — The Bridge */}
+          <section className="py-16 md:py-24">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-2xl space-y-4 text-center">
+                <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
+                  There&#8217;s a better architecture.
+                </h2>
+                <p className="text-balance text-lg text-muted-foreground">
+                  Local-first sync puts a replica of your database on every
+                  device. Reads are instant. Writes work offline. Collaboration
+                  is built-in. Strata Sync makes it easy.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* HOW — Feature Grid */}
           <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-5xl space-y-8">
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
-                  Why Strata Sync
+                  How it works
                 </h2>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {features.map((feature) => (
@@ -219,7 +297,13 @@ const Home = async () => {
             </div>
           </section>
 
-          {/* Get started — Experience */}
+          {/* HOW — Comparison */}
+          <LandingComparison />
+
+          {/* WHAT — Interactive showcase */}
+          <Showcase />
+
+          {/* WHAT — Get started */}
           <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-10">
@@ -305,18 +389,16 @@ const Home = async () => {
             </div>
           </section>
 
-          {/* How Strata Sync compares */}
-          <LandingComparison />
-
-          {/* Final CTA — Convert */}
+          {/* Final CTA */}
           <section className="py-16 md:py-32">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl text-center">
                 <h2 className="text-balance font-sans text-4xl font-medium tracking-tight">
-                  Ready to start building?
+                  Ready to build apps that just work?
                 </h2>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-muted-foreground">
-                  Add local-first sync to your app in minutes. Open-source.
+                  Add local-first sync to your app in minutes. Open-source. No
+                  vendor lock-in.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   <Button asChild size="lg">
