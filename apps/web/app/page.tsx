@@ -70,38 +70,33 @@ const TodoList = observer(() => {
 
 const features = [
   {
-    description:
-      "All reads come from a local IndexedDB replica. No spinners, no round-trips.",
+    description: "Reads come from a local IndexedDB replica. No round-trips.",
     icon: BoltIcon,
     title: "Instant reads",
   },
   {
-    description:
-      "Writes queue offline and sync when you reconnect. Nothing is lost.",
+    description: "Writes queue offline and replay when you reconnect.",
     icon: OfflineIcon,
-    title: "Offline support",
+    title: "Offline writes",
   },
   {
     description:
-      "MobX makes each field observable. Only affected components re-render.",
+      "MobX observes each field. Only affected components re-render.",
     icon: EyeOpenIcon,
     title: "Fine-grained reactivity",
   },
   {
-    description:
-      "Multiple users can edit the same document at the same time with Yjs.",
+    description: "Multiple users edit the same document at once via Yjs.",
     icon: PeopleIcon,
     title: "Real-time collaboration",
   },
   {
-    description:
-      "Transaction-based history tracking, built into the sync client.",
+    description: "Transaction-based history tracking, built in.",
     icon: HistoryIcon,
     title: "Undo and redo",
   },
   {
-    description:
-      "Swap storage, transport, or reactivity adapters. Use only what you need.",
+    description: "Swap storage, transport, or reactivity adapters.",
     icon: LayersThreeIcon,
     title: "Modular",
   },
@@ -155,8 +150,8 @@ const Home = async () => {
                   Apps that just work.
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
-                  Instant. Collaborative. Offline. The sync engine your users
-                  expect and your codebase deserves.
+                  Instant reads. Offline writes. Real-time collaboration.
+                  Open-source sync for TypeScript and React.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -193,63 +188,34 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* WHY — The Problem */}
-          <section className="py-16 md:py-24">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-3xl space-y-6 text-center">
-                <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
-                  Why are modern apps so hard to build?
-                </h2>
-                <div className="space-y-4 text-lg text-muted-foreground">
-                  <p className="text-balance">
-                    Users expect instant interactions. They expect apps to work
-                    on a train, on a plane, on spotty hotel Wi-Fi. They expect
-                    their edits to merge seamlessly with their teammates&#8217;.
-                  </p>
-                  <p className="text-balance">
-                    But delivering that experience means wrestling with caching
-                    layers, conflict resolution, optimistic updates, retry
-                    queues, and WebSocket plumbing.
-                  </p>
-                  <p className="text-balance">
-                    Most teams spend months building infrastructure instead of
-                    features.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* WHY — The Tension */}
+          {/* WHY — The problem */}
           <section className="bg-muted/30 py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-4xl space-y-8">
                 <h2 className="text-center font-sans text-xl font-semibold tracking-tight">
-                  User expectations vs. developer reality
+                  The gap between users and developers
                 </h2>
                 <div className="grid gap-8 sm:grid-cols-2">
                   <div className="space-y-4">
                     <h3 className="font-sans text-sm font-semibold uppercase tracking-wider">
-                      What users want
+                      Users expect
                     </h3>
                     <ul className="space-y-3 font-medium text-foreground">
-                      <li>Instant interactions, no spinners</li>
-                      <li>Works offline without thinking about it</li>
-                      <li>Real-time collaboration that just merges</li>
-                      <li>Never lose my work</li>
+                      <li>No spinners</li>
+                      <li>Works on the train</li>
+                      <li>Edits just merge</li>
+                      <li>Nothing gets lost</li>
                     </ul>
                   </div>
                   <div className="space-y-4">
                     <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                      What developers build
+                      Developers ship
                     </h3>
                     <ul className="space-y-3 text-muted-foreground">
                       <li>Loading states, skeleton screens, retry logic</li>
-                      <li>
-                        Service workers, cache invalidation, queue management
-                      </li>
-                      <li>Conflict resolution algorithms, CRDT research</li>
-                      <li>Transaction logs, undo stacks, backup strategies</li>
+                      <li>Service workers, cache invalidation, queues</li>
+                      <li>Conflict resolution, CRDT research</li>
+                      <li>Transaction logs, undo stacks, backups</li>
                     </ul>
                   </div>
                 </div>
@@ -257,17 +223,16 @@ const Home = async () => {
             </div>
           </section>
 
-          {/* HOW — The Bridge */}
+          {/* HOW — Local-first */}
           <section className="py-16 md:py-24">
             <div className="container-wrapper">
               <div className="mx-auto max-w-2xl space-y-4 text-center">
                 <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
-                  There&#8217;s a better architecture.
+                  Local-first closes the gap
                 </h2>
                 <p className="text-balance text-lg text-muted-foreground">
-                  Local-first sync puts a replica of your database on every
-                  device. Reads are instant. Writes work offline. Collaboration
-                  is built-in. Strata Sync makes it easy.
+                  Keep a replica of your data on every device. Reads are
+                  instant. Writes work offline. Collaboration is built in.
                 </p>
               </div>
             </div>
@@ -280,6 +245,10 @@ const Home = async () => {
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
                   How it works
                 </h2>
+                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
+                  Built on the sync architecture Linear described but never
+                  open-sourced, extended with Yjs CRDTs and pluggable adapters.
+                </p>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {features.map((feature) => (
                     <div key={feature.title}>
@@ -310,10 +279,13 @@ const Home = async () => {
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
                   Get started in minutes
                 </h2>
+                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
+                  Three files. That&#8217;s it.
+                </p>
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    1. Define your models &mdash;{" "}
+                    1. Define your models ·{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/models.ts
                     </code>
@@ -334,7 +306,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    2. Create the client &mdash;{" "}
+                    2. Create the client ·{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/client.ts
                     </code>
@@ -355,7 +327,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    3. Build reactive components &mdash;{" "}
+                    3. Build reactive components ·{" "}
                     <code className="text-xs opacity-60">
                       components/todo-list.tsx
                     </code>
@@ -397,8 +369,7 @@ const Home = async () => {
                   Ready to build apps that just work?
                 </h2>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-muted-foreground">
-                  Add local-first sync to your app in minutes. Open-source. No
-                  vendor lock-in.
+                  Open-source. No vendor lock-in.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   <Button asChild size="lg">
