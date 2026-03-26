@@ -71,7 +71,7 @@ export const variants: DemoVariant[] = [
   },
   {
     description:
-      "Track contacts and deals with sub-millisecond reads. Stay productive offline.",
+      "Track contacts and deals with instant reads. Stay productive offline.",
     icon: ContactsIcon,
     key: "crm",
     panelComponent: CrmPanel,

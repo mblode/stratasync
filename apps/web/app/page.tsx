@@ -70,38 +70,33 @@ const TodoList = observer(() => {
 
 const features = [
   {
-    description:
-      "All reads come from a local IndexedDB replica. No spinners, no round-trips.",
+    description: "Reads come from a local IndexedDB replica. No round-trips.",
     icon: BoltIcon,
     title: "Instant reads",
   },
   {
-    description:
-      "Writes queue offline and sync when you reconnect. Nothing is lost.",
+    description: "Writes queue offline and are replayed when you reconnect.",
     icon: OfflineIcon,
-    title: "Offline support",
+    title: "Offline writes",
   },
   {
     description:
-      "MobX makes each field observable. Only affected components re-render.",
+      "MobX observes each field. Only affected components re-render.",
     icon: EyeOpenIcon,
     title: "Fine-grained reactivity",
   },
   {
-    description:
-      "Multiple users can edit the same document at the same time with Yjs.",
+    description: "Multiple users edit the same document at once via Yjs.",
     icon: PeopleIcon,
     title: "Real-time collaboration",
   },
   {
-    description:
-      "Transaction-based history tracking, built into the sync client.",
+    description: "Transaction-based history tracking, built in.",
     icon: HistoryIcon,
     title: "Undo and redo",
   },
   {
-    description:
-      "Swap storage, transport, or reactivity adapters. Use only what you need.",
+    description: "Swap storage, transport, or reactivity adapters.",
     icon: LayersThreeIcon,
     title: "Modular",
   },
@@ -146,13 +141,13 @@ const Home = async () => {
     <div className="flex min-h-screen flex-col">
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
-          {/* Hero — Promise */}
+          {/* WHY — Hero */}
           <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
             <section className="py-16 text-center md:py-32">
               <div className="container-wrapper">
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
-                  Sync that works offline.
+                  Apps that just work.
                 </h1>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
                   Inspired by Linear&#8217;s sync engine. Open-source.
@@ -192,16 +187,67 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* What you can build — Interactive showcase */}
-          <Showcase />
+          {/* WHY — The problem */}
+          <section className="bg-muted/30 py-16 md:py-20">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-4xl space-y-8">
+                <h2 className="text-center font-sans text-xl font-semibold tracking-tight">
+                  The gap between users and developers
+                </h2>
+                <div className="grid gap-8 sm:grid-cols-2">
+                  <div className="space-y-4">
+                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider">
+                      Users expect
+                    </h3>
+                    <ul className="space-y-3 font-medium text-foreground">
+                      <li>No spinners</li>
+                      <li>Works on the train</li>
+                      <li>Edits just merge</li>
+                      <li>Nothing gets lost</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                      Developers ship
+                    </h3>
+                    <ul className="space-y-3 text-muted-foreground">
+                      <li>Loading states, skeleton screens, retry logic</li>
+                      <li>Service workers, cache invalidation, queues</li>
+                      <li>Conflict resolution, CRDT research</li>
+                      <li>Transaction logs, undo stacks, backups</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          {/* Why Strata Sync — Differentiation */}
+          {/* HOW — Local-first */}
+          <section className="py-16 md:py-24">
+            <div className="container-wrapper">
+              <div className="mx-auto max-w-2xl space-y-4 text-center">
+                <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
+                  Local-first closes the gap
+                </h2>
+                <p className="text-balance text-lg text-muted-foreground">
+                  Keep a replica of your data on every device. Reads are
+                  instant. Writes work offline. Collaboration is built in.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* HOW — Feature Grid */}
           <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-5xl space-y-8">
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
-                  Why Strata Sync
+                  How it works
                 </h2>
+                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
+                  A server-sequenced log orders all changes globally. Pluggable
+                  adapters handle storage, transport, and reactivity.
+                </p>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {features.map((feature) => (
                     <div key={feature.title}>
@@ -219,17 +265,26 @@ const Home = async () => {
             </div>
           </section>
 
-          {/* Get started — Experience */}
+          {/* HOW — Comparison */}
+          <LandingComparison />
+
+          {/* WHAT — Interactive showcase */}
+          <Showcase />
+
+          {/* WHAT — Get started */}
           <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-10">
                 <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
                   Get started in minutes
                 </h2>
+                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
+                  Three files. That&#8217;s it.
+                </p>
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    1. Define your models &mdash;{" "}
+                    1. Define your models ·{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/models.ts
                     </code>
@@ -250,7 +305,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    2. Create the client &mdash;{" "}
+                    2. Create the client ·{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/client.ts
                     </code>
@@ -271,7 +326,7 @@ const Home = async () => {
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    3. Build reactive components &mdash;{" "}
+                    3. Build reactive components ·{" "}
                     <code className="text-xs opacity-60">
                       components/todo-list.tsx
                     </code>
@@ -305,18 +360,15 @@ const Home = async () => {
             </div>
           </section>
 
-          {/* How Strata Sync compares */}
-          <LandingComparison />
-
-          {/* Final CTA — Convert */}
+          {/* Final CTA */}
           <section className="py-16 md:py-32">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl text-center">
                 <h2 className="text-balance font-sans text-4xl font-medium tracking-tight">
-                  Ready to start building?
+                  Ready to build apps that just work?
                 </h2>
                 <p className="mx-auto mt-4 max-w-xl text-balance text-muted-foreground">
-                  Add local-first sync to your app in minutes. Open-source.
+                  Open-source. No vendor lock-in.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   <Button asChild size="lg">
