@@ -120,8 +120,12 @@ const SelectionOverlay = ({
       e.stopPropagation();
       e.preventDefault();
 
+      const target = e.currentTarget as HTMLElement;
+      target.setPointerCapture(e.pointerId);
+
       const startX = e.clientX;
       const startY = e.clientY;
+      const pointerId = e.pointerId;
       const startBounds = {
         h: layer.height,
         w: layer.width,
@@ -154,12 +158,13 @@ const SelectionOverlay = ({
         onResize(layer.id, { ...bounds, updatedAt: Date.now() });
         onLocalOverrideClear(layer.id);
 
-        document.removeEventListener("pointermove", handlePointerMove);
-        document.removeEventListener("pointerup", handlePointerUp);
+        target.releasePointerCapture(pointerId);
+        target.removeEventListener("pointermove", handlePointerMove);
+        target.removeEventListener("pointerup", handlePointerUp);
       };
 
-      document.addEventListener("pointermove", handlePointerMove);
-      document.addEventListener("pointerup", handlePointerUp);
+      target.addEventListener("pointermove", handlePointerMove);
+      target.addEventListener("pointerup", handlePointerUp);
     },
     [
       layer.id,
@@ -265,8 +270,12 @@ export const DesignCanvas = ({
       onSelect(layer.id);
       setIsDragging(true);
 
+      const target = e.currentTarget as HTMLElement;
+      target.setPointerCapture(e.pointerId);
+
       const startX = e.clientX;
       const startY = e.clientY;
+      const pointerId = e.pointerId;
       const startLayerX = layer.x;
       const startLayerY = layer.y;
 
@@ -311,12 +320,13 @@ export const DesignCanvas = ({
         onUpdateLayer(layer.id, { ...pos, updatedAt: Date.now() });
         handleLocalOverrideClear(layer.id);
 
-        document.removeEventListener("pointermove", handlePointerMove);
-        document.removeEventListener("pointerup", handlePointerUp);
+        target.releasePointerCapture(pointerId);
+        target.removeEventListener("pointermove", handlePointerMove);
+        target.removeEventListener("pointerup", handlePointerUp);
       };
 
-      document.addEventListener("pointermove", handlePointerMove);
-      document.addEventListener("pointerup", handlePointerUp);
+      target.addEventListener("pointermove", handlePointerMove);
+      target.addEventListener("pointerup", handlePointerUp);
     },
     [onSelect, onUpdateLayer, handleLocalOverride, handleLocalOverrideClear]
   );
@@ -325,7 +335,7 @@ export const DesignCanvas = ({
     <div
       ref={canvasRef}
       className={cn(
-        "relative h-[250px] overflow-hidden",
+        "relative h-[250px] touch-none overflow-hidden",
         isDragging && "select-none"
       )}
       onClick={handleCanvasClick}
