@@ -167,6 +167,19 @@ const Home = async () => {
                   Get started in minutes
                 </h2>
 
+                <div className="flex justify-center">
+                  <code className="relative inline-flex items-center gap-2 rounded-lg bg-muted/50 px-4 py-2 font-mono text-sm">
+                    <span className="truncate">
+                      npx skills add stratasync/stratasync
+                    </span>
+                    <CopyButton
+                      content="npx skills add stratasync/stratasync"
+                      size="xs"
+                      variant="ghost"
+                    />
+                  </code>
+                </div>
+
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
                     1. Define your models ·{" "}

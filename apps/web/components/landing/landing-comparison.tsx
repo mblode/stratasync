@@ -155,26 +155,14 @@ export const LandingComparison = () => {
           </Tabs>
 
           {/* Mobile layout */}
-          <div className="grid grid-cols-2 gap-4 sm:hidden">
-            <div className="rounded-2xl border border-border bg-card">
-              <div className="px-4 pt-5 pb-3">
-                <p className="font-bold text-foreground text-lg">Strata Sync</p>
+          <div className="sm:hidden">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-t-2xl border-border border-x border-t bg-card px-4 pt-5 pb-3">
+                <p className="font-bold text-foreground text-lg">
+                  Strata Sync
+                </p>
               </div>
-              {rows.map((row, i) => (
-                <div
-                  className={`flex items-start gap-2.5 px-4 py-3 ${i < rows.length - 1 ? "border-border border-b" : ""}`}
-                  key={row.feature}
-                >
-                  <StatusIcon type={row.strataSync.icon} />
-                  <span className="text-foreground text-sm">
-                    {row.strataSync.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <div className="px-2 pt-5 pb-3">
+              <div className="px-3 pt-5 pb-3">
                 <div className="grid overflow-hidden *:col-start-1 *:row-start-1">
                   <AnimatePresence mode="popLayout">
                     <motion.p
@@ -187,25 +175,50 @@ export const LandingComparison = () => {
                   </AnimatePresence>
                 </div>
               </div>
-              {rows.map((row, i) => (
-                <div className="px-2 py-3" key={row.feature}>
-                  <div className="grid overflow-hidden *:col-start-1 *:row-start-1">
-                    <AnimatePresence mode="popLayout">
-                      <motion.div
-                        key={selected}
-                        className="flex items-start gap-2.5"
-                        {...cellAnimation(i + 1, hasInteracted)}
-                      >
-                        <StatusIcon type={row.competitors[selected].icon} />
-                        <span className="text-muted-foreground text-sm">
-                          {row.competitors[selected].text}
-                        </span>
-                      </motion.div>
-                    </AnimatePresence>
+            </div>
+            {rows.map((row, i) => {
+              const isLast = i === rows.length - 1;
+              return (
+                <div key={row.feature}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="border-border border-t px-3 pt-2 pb-0.5">
+                      <p className="text-muted-foreground text-xs">
+                        {row.feature}
+                      </p>
+                    </div>
+                    <div />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div
+                      className={`flex items-start gap-2 border-border border-x bg-card px-4 py-2.5 ${isLast ? "rounded-b-2xl border-b" : ""}`}
+                    >
+                      <StatusIcon type={row.strataSync.icon} />
+                      <span className="text-foreground text-sm leading-snug">
+                        {row.strataSync.text}
+                      </span>
+                    </div>
+                    <div className="px-3 py-2.5">
+                      <div className="grid overflow-hidden *:col-start-1 *:row-start-1">
+                        <AnimatePresence mode="popLayout">
+                          <motion.div
+                            key={selected}
+                            className="flex items-start gap-2"
+                            {...cellAnimation(i + 1, hasInteracted)}
+                          >
+                            <StatusIcon
+                              type={row.competitors[selected].icon}
+                            />
+                            <span className="text-muted-foreground text-sm leading-snug">
+                              {row.competitors[selected].text}
+                            </span>
+                          </motion.div>
+                        </AnimatePresence>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
 
           {/* Desktop layout */}
