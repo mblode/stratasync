@@ -1,6 +1,6 @@
 ---
 name: scaffold-stratasync
-description: Scaffold a complete Strata Sync app with Next.js client and Fastify server (models, sync, IndexedDB, WebSocket, PostgreSQL)
+description: Scaffold a complete StrataSync app with Next.js client and Fastify server (models, sync, IndexedDB, WebSocket, PostgreSQL)
 triggers:
   - scaffold stratasync
   - create stratasync app
@@ -10,9 +10,9 @@ triggers:
   - scaffold sync app
 ---
 
-# Scaffold Strata Sync App
+# Scaffold StrataSync App
 
-Scaffolds a complete local-first, server-sequenced sync app using Strata Sync. Produces a Next.js client and a standalone Fastify API server with PostgreSQL, ready to run in minutes.
+Scaffolds a complete local-first, server-sequenced sync app using StrataSync. Produces a Next.js client and a standalone Fastify API server with PostgreSQL, ready to run in minutes.
 
 ## Reference files
 
@@ -75,7 +75,7 @@ Write all client sync files per `references/client-setup.md`:
 - [ ] `src/lib/sync/models/{{MODEL_NAME_LOWER}}.ts`: Model class with decorators
 - [ ] `src/lib/sync/models.ts`: Barrel with side-effect import (**CRITICAL: decorator registration**)
 - [ ] `src/lib/sync/config.ts`: API URL, dev tokens
-- [ ] `src/lib/sync/create-client.ts`: Client factory with idempotent start
+- [ ] `src/lib/sync/create-client.ts`: Client factory (singleton)
 - [ ] `src/app/providers.tsx`: `NextSyncProvider` wrapper
 - [ ] `src/app/layout.tsx`: Wrap children with `<Providers>`
 
@@ -106,13 +106,12 @@ Write all client sync files per `references/client-setup.md`:
 - **Never** import `@stratasync/next` directly in client components. Use `@stratasync/next/client`.
 - **Never** omit `"use client"` on components that use hooks
 - **Never** use `React.forwardRef`. React 19+ passes ref as prop.
-- **Never** skip the idempotent start wrapper. React StrictMode double-renders cause duplicate connections.
 
 ## Skill handoffs
 
 | When                                  | Hand off to                                                   |
 | ------------------------------------- | ------------------------------------------------------------- |
 | User wants to add more models         | Refer to `references/model-patterns.md`                       |
-| User wants authentication             | Beyond scaffold scope. Point to Strata Sync server auth docs. |
+| User wants authentication             | Beyond scaffold scope. Point to StrataSync server auth docs.  |
 | User wants deployment                 | Beyond scaffold scope. Standard Next.js + Node.js deployment. |
 | User wants collaborative text editing | Point to `@stratasync/y-doc` package                          |

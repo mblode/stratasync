@@ -26,13 +26,13 @@ All code templates for the standalone Fastify sync server. Replace `{{placeholde
     "@fastify/websocket": "^11.2.0",
     "@stratasync/server": "latest",
     "dotenv": "^17.3.1",
-    "drizzle-orm": "1.0.0-beta.15-859cf75",
+    "drizzle-orm": "^1.0.0-beta.19",
     "fastify": "^5.8.2",
     "postgres": "^3.4.8"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "drizzle-kit": "^0.31.10",
+    "drizzle-kit": "^1.0.0-beta.19",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
@@ -144,7 +144,7 @@ export default defineConfig({
 
 `server/src/db/schema.ts`
 
-The model table matches the client model fields. `syncActions` and `syncGroupMemberships` are required by Strata Sync.
+The model table matches the client model fields. `syncActions` and `syncGroupMemberships` are required by StrataSync.
 
 ```ts
 import {
@@ -269,6 +269,7 @@ const syncDao = new SyncDao(db, { syncActions, syncGroupMemberships });
 
 const {{MODEL_NAME_LOWER}}Config: SyncModelConfig = {
   bootstrap: {
+    allowedIndexedKeys: ["id", "groupId"],
     buildScopeWhere: (filter, _db) =>
       filter.workspaceGroupIds.length > 0
         ? inArray({{MODEL_TABLE}}.groupId, filter.workspaceGroupIds)
@@ -292,13 +293,21 @@ const {{MODEL_NAME_LOWER}}Config: SyncModelConfig = {
   table: {{MODEL_TABLE}},
 };
 
+const fastify = Fastify({
+  logger: true,
+});
+
+await fastify.register(cors, { origin: true });
+await fastify.register(websocket);
+
 const sync = await createSyncServer({
   auth: {
-    resolveGroups: (userId) => syncDao.getUserGroups(userId),
+    resolveGroups: async (userId) => await syncDao.getUserGroups(userId),
     verifyToken: (token) =>
       Promise.resolve(token === DEV_TOKEN ? { userId: DEV_USER_ID } : null),
   },
   db,
+  logger: fastify.log,
   models: {
     {{MODEL_NAME}}: {{MODEL_NAME_LOWER}}Config,
   },
@@ -308,34 +317,24 @@ const sync = await createSyncServer({
   },
 });
 
-const fastify = Fastify({
-  logger: true,
-});
-
-await fastify.register(cors, { origin: true });
-await fastify.register(websocket);
-
 fastify.get("/health", () => ({
   ok: true,
 }));
 
 sync.registerRoutes(fastify);
 
-const shutdown = async () => {
-  await fastify.close();
+fastify.addHook("onClose", async () => {
   await sync.shutdown();
   await queryClient.end();
-};
-
-process.on("SIGINT", async () => {
-  await shutdown();
-  process.exit(0);
 });
 
-process.on("SIGTERM", async () => {
-  await shutdown();
-  process.exit(0);
-});
+const signals = ["SIGINT", "SIGTERM"] as const;
+for (const signal of signals) {
+  process.on(signal, async () => {
+    await fastify.close();
+    process.exit(0);
+  });
+}
 
 const address = await fastify.listen({
   host: "0.0.0.0",
@@ -346,3 +345,21 @@ fastify.log.info({ address }, "{{PROJECT_NAME}} sync API listening");
 ```
 
 Adapt `bootstrap.fields`, `bootstrap.instantFields`, `mutate.insertFields`, and `mutate.updateFields` to match the user's model fields.
+
+---
+
+## Production: Redis for multi-server
+
+The scaffold uses an in-memory delta bus (no Redis). For production with multiple server instances, pass `redis` to `createSyncServer()` so deltas broadcast across instances:
+
+```ts
+import { createClient } from "redis";
+
+const redis = createClient({ url: process.env.REDIS_URL });
+await redis.connect();
+
+const sync = await createSyncServer({
+  // ...existing config
+  redis,
+});
+```

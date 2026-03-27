@@ -1,17 +1,10 @@
 /* eslint-disable react/no-danger -- shiki outputs pre-rendered HTML */
-import {
-  BoltIcon,
-  EyeOpenIcon,
-  HistoryIcon,
-  LayersThreeIcon,
-  OfflineIcon,
-  PeopleIcon,
-} from "blode-icons-react";
 import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
 import { LandingComparison } from "@/components/landing/landing-comparison";
+import { LandingGap } from "@/components/landing/landing-gap";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -68,40 +61,6 @@ const TodoList = observer(() => {
   )
 })`;
 
-const features = [
-  {
-    description: "Reads come from a local IndexedDB replica. No round-trips.",
-    icon: BoltIcon,
-    title: "Instant reads",
-  },
-  {
-    description: "Writes queue offline and are replayed when you reconnect.",
-    icon: OfflineIcon,
-    title: "Offline writes",
-  },
-  {
-    description:
-      "MobX observes each field. Only affected components re-render.",
-    icon: EyeOpenIcon,
-    title: "Fine-grained reactivity",
-  },
-  {
-    description: "Multiple users edit the same document at once via Yjs.",
-    icon: PeopleIcon,
-    title: "Real-time collaboration",
-  },
-  {
-    description: "Transaction-based history tracking, built in.",
-    icon: HistoryIcon,
-    title: "Undo and redo",
-  },
-  {
-    description: "Swap storage, transport, or reactivity adapters.",
-    icon: LayersThreeIcon,
-    title: "Modular",
-  },
-];
-
 const highlighterOptions = {
   langs: ["bash", "tsx"],
   themes: ["github-light", "github-dark"],
@@ -149,7 +108,7 @@ const Home = async () => {
                 <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
                   Apps that just work.
                 </h1>
-                <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/60 md:text-2xl">
+                <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/75 md:text-2xl">
                   Inspired by Linear&#8217;s sync engine. Open-source.
                 </p>
 
@@ -187,83 +146,8 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* WHY — The problem */}
-          <section className="bg-muted/30 py-16 md:py-20">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-4xl space-y-8">
-                <h2 className="text-center font-sans text-xl font-semibold tracking-tight">
-                  The gap between users and developers
-                </h2>
-                <div className="grid gap-8 sm:grid-cols-2">
-                  <div className="space-y-4">
-                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider">
-                      Users expect
-                    </h3>
-                    <ul className="space-y-3 font-medium text-foreground">
-                      <li>No spinners</li>
-                      <li>Works on the train</li>
-                      <li>Edits just merge</li>
-                      <li>Nothing gets lost</li>
-                    </ul>
-                  </div>
-                  <div className="space-y-4">
-                    <h3 className="font-sans text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                      Developers ship
-                    </h3>
-                    <ul className="space-y-3 text-muted-foreground">
-                      <li>Loading states, skeleton screens, retry logic</li>
-                      <li>Service workers, cache invalidation, queues</li>
-                      <li>Conflict resolution, CRDT research</li>
-                      <li>Transaction logs, undo stacks, backups</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* HOW — Local-first */}
-          <section className="py-16 md:py-24">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-2xl space-y-4 text-center">
-                <h2 className="text-balance font-sans text-3xl font-medium tracking-tight md:text-4xl">
-                  Local-first closes the gap
-                </h2>
-                <p className="text-balance text-lg text-muted-foreground">
-                  Keep a replica of your data on every device. Reads are
-                  instant. Writes work offline. Collaboration is built in.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* HOW — Feature Grid */}
-          <section className="py-16 md:py-20">
-            <div className="container-wrapper">
-              <div className="mx-auto max-w-5xl space-y-8">
-                <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
-                  How it works
-                </h2>
-                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
-                  A server-sequenced log orders all changes globally. Pluggable
-                  adapters handle storage, transport, and reactivity.
-                </p>
-                <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
-                  {features.map((feature) => (
-                    <div key={feature.title}>
-                      <feature.icon className="mb-3 h-6 w-6 text-primary" />
-                      <h3 className="font-semibold font-sans text-lg">
-                        {feature.title}
-                      </h3>
-                      <p className="mt-1 text-muted-foreground text-sm">
-                        {feature.description}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
+          {/* WHY — problem + HOW — mechanism */}
+          <LandingGap />
 
           {/* HOW — Comparison */}
           <LandingComparison />
@@ -275,12 +159,9 @@ const Home = async () => {
           <section className="py-16 md:py-20">
             <div className="container-wrapper">
               <div className="mx-auto max-w-3xl space-y-10">
-                <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
+                <h2 className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl">
                   Get started in minutes
                 </h2>
-                <p className="mx-auto max-w-xl text-center text-muted-foreground text-sm">
-                  Three files. That&#8217;s it.
-                </p>
 
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">

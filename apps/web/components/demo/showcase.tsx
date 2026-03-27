@@ -19,7 +19,7 @@ const Showcase = () => {
     <section className="py-16 md:py-20">
       <div className="container-wrapper">
         <div className="mx-auto max-w-3xl space-y-6">
-          <h2 className="text-center font-semibold font-sans text-xl tracking-tight">
+          <h2 className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl">
             What you can build
           </h2>
 

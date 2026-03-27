@@ -35,6 +35,7 @@ const syncDao = new SyncDao(db, { syncActions, syncGroupMemberships });
 
 const todoConfig: SyncModelConfig = {
   bootstrap: {
+    allowedIndexedKeys: ["id", "groupId"],
     buildScopeWhere: (filter, _db) =>
       filter.workspaceGroupIds.length > 0
         ? inArray(todos.groupId, filter.workspaceGroupIds)
@@ -58,13 +59,21 @@ const todoConfig: SyncModelConfig = {
   table: todos,
 };
 
+const fastify = Fastify({
+  logger: true,
+});
+
+await fastify.register(cors, { origin: true });
+await fastify.register(websocket);
+
 const sync = await createSyncServer({
   auth: {
-    resolveGroups: (userId) => syncDao.getUserGroups(userId),
+    resolveGroups: async (userId) => await syncDao.getUserGroups(userId),
     verifyToken: (token) =>
       Promise.resolve(token === DEV_TOKEN ? { userId: DEV_USER_ID } : null),
   },
   db,
+  logger: fastify.log,
   models: {
     Todo: todoConfig,
   },
@@ -74,34 +83,24 @@ const sync = await createSyncServer({
   },
 });
 
-const fastify = Fastify({
-  logger: true,
-});
-
-await fastify.register(cors, { origin: true });
-await fastify.register(websocket);
-
 fastify.get("/health", () => ({
   ok: true,
 }));
 
 sync.registerRoutes(fastify);
 
-const shutdown = async () => {
-  await fastify.close();
+fastify.addHook("onClose", async () => {
   await sync.shutdown();
   await queryClient.end();
-};
-
-process.on("SIGINT", async () => {
-  await shutdown();
-  process.exit(0);
 });
 
-process.on("SIGTERM", async () => {
-  await shutdown();
-  process.exit(0);
-});
+const signals = ["SIGINT", "SIGTERM"] as const;
+for (const signal of signals) {
+  process.on(signal, async () => {
+    await fastify.close();
+    process.exit(0);
+  });
+}
 
 const address = await fastify.listen({
   host: "0.0.0.0",

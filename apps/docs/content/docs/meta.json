@@ -1,6 +1,11 @@
 {
   "title": "Documentation",
   "pages": [
+    "---Why Strata Sync---",
+    "manifesto",
+    "values",
+    "mission",
+    "product-vision",
     "---Getting Started---",
     "index",
     "installation",

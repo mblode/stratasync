@@ -139,7 +139,6 @@ export const DEV_USER_ID = "dev-user";
 `src/lib/sync/create-client.ts`
 
 ```ts
-// oxlint-disable no-use-before-define -- helper functions grouped after factory function
 import type { SyncClient } from "@stratasync/client";
 import { createSyncClient } from "@stratasync/client";
 import { ModelRegistry } from "@stratasync/core";
@@ -215,12 +214,7 @@ import type { ReactNode } from "react";
 import { getSyncClient } from "@/lib/sync/create-client";
 
 export const Providers = ({ children }: { children: ReactNode }) => (
-  <NextSyncProvider
-    client={getSyncClient}
-    loading={<div>Starting sync engine...</div>}
-  >
-    {children}
-  </NextSyncProvider>
+  <NextSyncProvider client={getSyncClient()}>{children}</NextSyncProvider>
 );
 ```
 
@@ -238,7 +232,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  description: "{{PROJECT_NAME}} powered by Strata Sync.",
+  description: "{{PROJECT_NAME}} powered by StrataSync.",
   title: "{{PROJECT_NAME}}",
 };
 
@@ -266,10 +260,10 @@ import {
   useConnectionState,
   useIsOffline,
   useQuery,
-  useSyncClient,
+  useSyncClientInstance,
 } from "@stratasync/react";
 import { observer } from "mobx-react-lite";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useState } from "react";
 
 import { DEV_GROUP_ID } from "@/lib/sync/config";
@@ -288,7 +282,7 @@ const {{MODEL_NAME}}Item = observer(
     onToggle,
   }: {
     item: {{MODEL_NAME}};
-    onRemove: (item: {{MODEL_NAME}}) => void;
+    onRemove: (id: string) => void;
     onToggle: (item: {{MODEL_NAME}}) => void;
   }) => {
     const handleToggle = useCallback(() => {
@@ -296,8 +290,8 @@ const {{MODEL_NAME}}Item = observer(
     }, [onToggle, item]);
 
     const handleRemove = useCallback(() => {
-      onRemove(item);
-    }, [onRemove, item]);
+      onRemove(item.id);
+    }, [onRemove, item.id]);
 
     return (
       <article data-completed={item.completed} key={item.id}>
@@ -325,8 +319,8 @@ const {{MODEL_NAME}}Item = observer(
 );
 
 const ExamplePage = observer(function ExamplePage() {
-  const { client } = useSyncClient();
-  const { backlog, error, lastSyncId, status } = useConnectionState();
+  const client = useSyncClientInstance();
+  const { backlog, error } = useConnectionState();
   const isOffline = useIsOffline();
   const { data: items, isLoading } = useQuery<{{MODEL_NAME}}>("{{MODEL_NAME}}", {
     orderBy: (a, b) => b.createdAt - a.createdAt,
@@ -334,8 +328,6 @@ const ExamplePage = observer(function ExamplePage() {
 
   const [draft, setDraft] = useState("");
   const [mutationError, setMutationError] = useState<string | null>(null);
-
-  const completedCount = items.filter((item) => item.completed).length;
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -372,8 +364,9 @@ const ExamplePage = observer(function ExamplePage() {
       setMutationError(null);
 
       try {
-        item.completed = !item.completed;
-        await item.save();
+        await client.update("{{MODEL_NAME}}", item.id, {
+          completed: !item.completed,
+        });
       } catch (caughtError) {
         setMutationError(
           caughtError instanceof Error
@@ -382,15 +375,15 @@ const ExamplePage = observer(function ExamplePage() {
         );
       }
     },
-    []
+    [client]
   );
 
   const handleRemove = useCallback(
-    async (item: {{MODEL_NAME}}) => {
+    async (id: string) => {
       setMutationError(null);
 
       try {
-        await item.delete();
+        await client.delete("{{MODEL_NAME}}", id);
       } catch (caughtError) {
         setMutationError(
           caughtError instanceof Error
@@ -399,11 +392,11 @@ const ExamplePage = observer(function ExamplePage() {
         );
       }
     },
-    []
+    [client]
   );
 
   const handleDraftChange = useCallback(
-    (event: FormEvent<HTMLInputElement>) => {
+    (event: ChangeEvent<HTMLInputElement>) => {
       setDraft(event.currentTarget.value);
     },
     []
@@ -413,17 +406,14 @@ const ExamplePage = observer(function ExamplePage() {
     <main>
       <h1>{{PROJECT_NAME}}</h1>
       <p>
-        Offline-first sync powered by Strata Sync. Open in two tabs to see
+        Offline-first sync powered by StrataSync. Open in two tabs to see
         real-time sync.
       </p>
 
       <div>
         <span>Total: {items.length}</span>
-        <span>Completed: {completedCount}</span>
         <span>Backlog: {backlog}</span>
-        <span>
-          Sync: {isOffline ? "offline" : status} (last: {String(lastSyncId)})
-        </span>
+        <span>Sync: {isOffline ? "offline" : "online"}</span>
         {error ? <span>Error: {error.message}</span> : null}
       </div>
 

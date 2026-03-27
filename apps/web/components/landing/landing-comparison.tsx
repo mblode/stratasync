@@ -136,7 +136,7 @@ export const LandingComparison = () => {
     <section className="py-16 md:py-20">
       <div className="container-wrapper">
         <div className="mx-auto max-w-5xl space-y-8">
-          <h2 className="text-center font-sans font-semibold text-xl tracking-tight">
+          <h2 className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl">
             How Strata Sync compares
           </h2>
 

@@ -2,11 +2,7 @@
 "use client";
 
 import { usePendingCount, useQuery, useSyncClient } from "@stratasync/react";
-import {
-  BuildingsIcon,
-  CrossSmallIcon,
-  CurrencyDollarIcon,
-} from "blode-icons-react";
+import { CrossSmallIcon } from "blode-icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
@@ -34,7 +30,6 @@ const stageConfig: Record<
   Contact["stage"],
   {
     avatarBg: string;
-    avatarRing: string;
     badge: string;
     dot: string;
     label: string;
@@ -43,35 +38,27 @@ const stageConfig: Record<
   closed: {
     avatarBg:
       "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
-    avatarRing: "ring-green-200 dark:ring-green-700",
-    badge:
-      "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 dark:bg-green-950 dark:text-green-300 dark:border-green-800 dark:hover:bg-green-900",
+    badge: "text-green-600 dark:text-green-400",
     dot: "bg-green-500",
     label: "Closed",
   },
   lead: {
     avatarBg: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
-    avatarRing: "ring-gray-200 dark:ring-gray-700",
-    badge:
-      "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700",
+    badge: "text-gray-500 dark:text-gray-400",
     dot: "bg-gray-400",
     label: "Lead",
   },
   proposal: {
     avatarBg:
       "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300",
-    avatarRing: "ring-amber-200 dark:ring-amber-700",
-    badge:
-      "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900",
+    badge: "text-amber-600 dark:text-amber-400",
     dot: "bg-amber-500",
     label: "Proposal",
   },
   qualified: {
     avatarBg:
       "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
-    avatarRing: "ring-blue-200 dark:ring-blue-700",
-    badge:
-      "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-900",
+    badge: "text-blue-600 dark:text-blue-400",
     dot: "bg-blue-500",
     label: "Qualified",
   },
@@ -166,9 +153,8 @@ const ContactItem = ({
       <div
         aria-hidden="true"
         className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-semibold text-xs ring-2 ring-offset-2 ring-offset-card",
-          stage.avatarBg,
-          stage.avatarRing
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-semibold text-xs",
+          stage.avatarBg
         )}
       >
         {getInitials(contact.name)}
@@ -193,7 +179,7 @@ const ContactItem = ({
           <button
             aria-label={`Stage: ${stage.label}. Click to advance.`}
             className={cn(
-              "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium text-[11px] transition-colors",
+              "inline-flex shrink-0 cursor-pointer items-center gap-1.5 font-medium text-[11px] transition-colors",
               stage.badge
             )}
             onClick={handleCycleStage}
@@ -215,43 +201,36 @@ const ContactItem = ({
         </div>
 
         <div className="mt-1 flex items-center gap-3 text-xs">
-          <span className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground">
-            <BuildingsIcon aria-hidden="true" className="h-3 w-3 shrink-0" />
-            <input
-              aria-label={`Edit company for ${contact.name}`}
-              className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-xs text-muted-foreground outline-none"
-              onBlur={(e) => {
-                companyFocusedRef.current = false;
-                onUpdate({ company: e.target.value, updatedAt: Date.now() });
-              }}
-              onChange={(e) => setCompanyDraft(e.target.value)}
-              onFocus={() => {
-                companyFocusedRef.current = true;
-              }}
-              placeholder="Company"
-              value={companyDraft}
-            />
-          </span>
-          <span className="flex shrink-0 items-center gap-1 font-medium text-foreground tabular-nums">
-            <CurrencyDollarIcon
-              aria-hidden="true"
-              className="h-3 w-3 shrink-0 text-muted-foreground"
-            />
-            <input
-              aria-label={`Edit deal value for ${contact.name}`}
-              className="w-14 border-0 bg-transparent p-0 text-right text-xs font-medium tabular-nums outline-none"
-              onBlur={handleValueBlur}
-              onChange={(e) => setValueDraft(e.target.value)}
-              onFocus={() => {
-                setValueFocused(true);
-                setValueDraft(String(contact.dealValue));
-              }}
-              placeholder="0"
-              value={
-                valueFocused ? valueDraft : formatDealValue(contact.dealValue)
-              }
-            />
-          </span>
+          <input
+            aria-label={`Edit company for ${contact.name}`}
+            className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-xs text-muted-foreground outline-none"
+            onBlur={(e) => {
+              companyFocusedRef.current = false;
+              onUpdate({ company: e.target.value, updatedAt: Date.now() });
+            }}
+            onChange={(e) => setCompanyDraft(e.target.value)}
+            onFocus={() => {
+              companyFocusedRef.current = true;
+            }}
+            placeholder="Company"
+            value={companyDraft}
+          />
+          <input
+            aria-label={`Edit deal value for ${contact.name}`}
+            className="w-16 shrink-0 border-0 bg-transparent p-0 text-right text-xs font-medium tabular-nums outline-none"
+            onBlur={handleValueBlur}
+            onChange={(e) => setValueDraft(e.target.value)}
+            onFocus={() => {
+              setValueFocused(true);
+              setValueDraft(String(contact.dealValue));
+            }}
+            placeholder="$0"
+            value={
+              valueFocused
+                ? valueDraft
+                : `$${formatDealValue(contact.dealValue)}`
+            }
+          />
         </div>
       </div>
 

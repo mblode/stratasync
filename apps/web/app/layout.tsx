@@ -3,6 +3,7 @@ import { GeistMono } from "geist/font/mono";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type React from "react";
+import { Agentation } from "agentation";
 
 import { siteConfig } from "@/lib/config";
 
@@ -109,6 +110,7 @@ const RootLayout = ({
       />
       {/* oxlint-enable react/no-danger */}
       {children}
+      {process.env.NODE_ENV === "development" && <Agentation />}
       <GoogleAnalytics gaId="G-5EQKSBTWY6" />
     </body>
   </html>
