@@ -1,28 +1,9 @@
 "use client";
 
-import { ArrowMergeRightIcon, BoltIcon, OfflineIcon } from "blode-icons-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { useRef } from "react";
 
 const EASE_ENTER = [0.22, 1, 0.36, 1] as const;
-
-const howPillars = [
-  {
-    body: "Data lives on the device. Open the app and it's already there. No loading screen, no round-trip.",
-    icon: BoltIcon,
-    title: "Reads are instant",
-  },
-  {
-    body: "Edits apply immediately. Go offline and changes queue up, syncing when you reconnect.",
-    icon: OfflineIcon,
-    title: "Writes never wait",
-  },
-  {
-    body: "Two people edit the same thing at once? Changes merge automatically. No conflict warnings, no lost work.",
-    icon: ArrowMergeRightIcon,
-    title: "Conflicts resolve themselves",
-  },
-];
 
 const BrokenAppMock = () => (
   <div
@@ -141,78 +122,28 @@ export const LandingGap = () => {
   return (
     <section ref={sectionRef} className="py-24 md:py-32">
       <div className="container-wrapper">
-        <div className="mx-auto max-w-4xl space-y-20">
-          {/* Problem */}
-          <div className="space-y-10">
-            <motion.h2
-              className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl"
-              initial={{ opacity: 0, y: 12 }}
-              animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }}
-              transition={{ duration: dur(500), ease: EASE_ENTER }}
-            >
-              Most apps don&#8217;t just work
-            </motion.h2>
-
-            <motion.div
-              className="mx-auto max-w-md"
-              initial={{ opacity: 0, y: 20 }}
-              animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-              transition={{
-                delay: del(150),
-                duration: dur(600),
-                ease: EASE_ENTER,
-              }}
-            >
-              <BrokenAppMock />
-            </motion.div>
-          </div>
-
-          {/* How it works */}
-          <motion.div
-            className="text-center"
+        <div className="mx-auto max-w-4xl space-y-10">
+          <motion.h2
+            className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl"
             initial={{ opacity: 0, y: 12 }}
             animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }}
+            transition={{ duration: dur(500), ease: EASE_ENTER }}
+          >
+            Most apps don&#8217;t just work
+          </motion.h2>
+
+          <motion.div
+            className="mx-auto max-w-md"
+            initial={{ opacity: 0, y: 20 }}
+            animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
             transition={{
-              delay: del(400),
-              duration: dur(400),
+              delay: del(150),
+              duration: dur(600),
               ease: EASE_ENTER,
             }}
           >
-            <p className="mx-auto max-w-xl text-balance text-center font-sans text-3xl font-medium tracking-tight md:text-4xl">
-              Strata Sync changes that
-            </p>
+            <BrokenAppMock />
           </motion.div>
-
-          {/* HOW pillars */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {howPillars.map((item, i) => (
-              <motion.div
-                key={item.title}
-                className="flex items-start gap-4 rounded-2xl border border-border p-5"
-                initial={{ opacity: 0, y: 16 }}
-                animate={
-                  isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }
-                }
-                transition={{
-                  delay: del(500 + i * 50),
-                  duration: dur(500),
-                  ease: EASE_ENTER,
-                }}
-              >
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <item.icon className="size-5" />
-                </span>
-                <div>
-                  <h3 className="font-sans text-sm font-semibold">
-                    {item.title}
-                  </h3>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {item.body}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
         </div>
       </div>
     </section>

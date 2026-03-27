@@ -5,6 +5,7 @@ import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
 import { LandingComparison } from "@/components/landing/landing-comparison";
 import { LandingGap } from "@/components/landing/landing-gap";
+import { LandingHow } from "@/components/landing/landing-how";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -146,8 +147,11 @@ const Home = async () => {
             </section>
           </div>
 
-          {/* WHY — problem + HOW — mechanism */}
+          {/* WHY — problem */}
           <LandingGap />
+
+          {/* HOW — mechanism */}
+          <LandingHow />
 
           {/* HOW — Comparison */}
           <LandingComparison />
