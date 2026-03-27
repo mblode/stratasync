@@ -1,9 +1,9 @@
 import { GoogleAnalytics } from "@next/third-parties/google";
+import { Agentation } from "agentation";
 import { GeistMono } from "geist/font/mono";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type React from "react";
-import { Agentation } from "agentation";
 
 import { siteConfig } from "@/lib/config";
 

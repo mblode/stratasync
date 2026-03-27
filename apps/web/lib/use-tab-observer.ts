@@ -4,7 +4,9 @@ interface TabObserverOptions {
   onActiveTabChange?: (index: number, element: HTMLElement) => void;
 }
 
-export function useTabObserver({ onActiveTabChange }: TabObserverOptions = {}) {
+export const useTabObserver = ({
+  onActiveTabChange,
+}: TabObserverOptions = {}) => {
   const listRef = React.useRef<HTMLDivElement>(null);
   const onActiveTabChangeRef = React.useRef(onActiveTabChange);
 
@@ -21,8 +23,8 @@ export function useTabObserver({ onActiveTabChange }: TabObserverOptions = {}) {
           continue;
         }
         const isActive =
-          el.hasAttribute("data-active") ||
-          el.getAttribute("data-state") === "active" ||
+          Object.hasOwn(el.dataset, "active") ||
+          el.dataset.state === "active" ||
           el.getAttribute("aria-selected") === "true";
 
         if (isActive) {
@@ -40,9 +42,9 @@ export function useTabObserver({ onActiveTabChange }: TabObserverOptions = {}) {
     if (listRef.current) {
       resizeObserver.observe(listRef.current);
       mutationObserver.observe(listRef.current, {
+        attributes: true,
         childList: true,
         subtree: true,
-        attributes: true,
       });
     }
 
@@ -66,4 +68,4 @@ export function useTabObserver({ onActiveTabChange }: TabObserverOptions = {}) {
   }, [handleUpdate]);
 
   return { listRef };
-}
+};
