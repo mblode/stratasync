@@ -158,9 +158,7 @@ export const LandingComparison = () => {
           <div className="sm:hidden">
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-t-2xl border-border border-x border-t bg-card px-4 pt-5 pb-3">
-                <p className="font-bold text-foreground text-lg">
-                  Strata Sync
-                </p>
+                <p className="font-bold text-foreground text-lg">Strata Sync</p>
               </div>
               <div className="px-3 pt-5 pb-3">
                 <div className="grid overflow-hidden *:col-start-1 *:row-start-1">
@@ -181,7 +179,7 @@ export const LandingComparison = () => {
               return (
                 <div key={row.feature}>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="border-border border-t px-3 pt-2 pb-0.5">
+                    <div className="border-border border-x border-t bg-card px-4 pt-2.5 pb-2">
                       <p className="text-muted-foreground text-xs">
                         {row.feature}
                       </p>
@@ -190,7 +188,7 @@ export const LandingComparison = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div
-                      className={`flex items-start gap-2 border-border border-x bg-card px-4 py-2.5 ${isLast ? "rounded-b-2xl border-b" : ""}`}
+                      className={`flex items-start gap-2 border-border border-x bg-card px-4 pt-0 pb-2.5 ${isLast ? "rounded-b-2xl border-b" : ""}`}
                     >
                       <StatusIcon type={row.strataSync.icon} />
                       <span className="text-foreground text-sm leading-snug">
@@ -205,9 +203,7 @@ export const LandingComparison = () => {
                             className="flex items-start gap-2"
                             {...cellAnimation(i + 1, hasInteracted)}
                           >
-                            <StatusIcon
-                              type={row.competitors[selected].icon}
-                            />
+                            <StatusIcon type={row.competitors[selected].icon} />
                             <span className="text-muted-foreground text-sm leading-snug">
                               {row.competitors[selected].text}
                             </span>
