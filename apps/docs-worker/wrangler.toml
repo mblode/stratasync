@@ -6,6 +6,6 @@ compatibility_date = "2024-12-01"
 enabled = true
 
 [vars]
-DOCS_URL = "docs.stratasync.dev"
+DOCS_URL = "stratasync.blode.md"
 CUSTOM_URL = "stratasync.dev"
 LANDING_URL = "landing.stratasync.dev"

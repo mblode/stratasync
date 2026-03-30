@@ -7,7 +7,7 @@ interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      const docsUrl = env?.DOCS_URL ?? "docs.stratasync.dev";
+      const docsUrl = env?.DOCS_URL ?? "stratasync.blode.md";
       const customUrl = env?.CUSTOM_URL ?? "stratasync.dev";
       const landingHost = env?.LANDING_URL ?? "landing.stratasync.dev";
       const urlObject = new URL(request.url);
@@ -35,7 +35,7 @@ export default {
         });
       }
 
-      // Proxy requests to /docs path to Fumadocs
+      // Proxy requests to /docs path to Blode docs
       if (urlObject.pathname.startsWith("/docs")) {
         const url = new URL(request.url);
         url.hostname = docsUrl;
