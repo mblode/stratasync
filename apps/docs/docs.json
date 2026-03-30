@@ -1,0 +1,64 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Strata Sync",
+  "description": "Build instant, offline-capable apps that sync with Strata Sync.",
+  "colors": {
+    "primary": "#1d4ed8",
+    "light": "#dbeafe",
+    "dark": "#1e3a8a"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Website",
+        "href": "https://stratasync.dev"
+      },
+      {
+        "label": "GitHub",
+        "href": "https://github.com/stratasync/stratasync"
+      }
+    ]
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Why Strata Sync",
+        "pages": ["manifesto", "values", "mission", "product-vision"]
+      },
+      {
+        "group": "Getting Started",
+        "pages": ["index", "installation", "quick-start"]
+      },
+      {
+        "group": "Architecture",
+        "pages": ["architecture", "architecture/sync-protocol", "architecture/data-flow"]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/offline-first",
+          "guides/collaborative-editing",
+          "guides/conflict-resolution",
+          "guides/ssr-bootstrap",
+          "guides/model-relationships",
+          "guides/load-strategies"
+        ]
+      },
+      {
+        "group": "Packages",
+        "pages": [
+          "packages",
+          "packages/core",
+          "packages/client",
+          "packages/react",
+          "packages/next",
+          "packages/y-doc",
+          "packages/mobx",
+          "packages/storage-idb",
+          "packages/transport-graphql"
+        ]
+      }
+    ]
+  }
+}

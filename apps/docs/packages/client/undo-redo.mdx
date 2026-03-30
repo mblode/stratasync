@@ -1,0 +1,132 @@
+---
+title: Undo and redo
+description: Client-side undo and redo with full transaction history.
+---
+
+Every mutation records a history entry. Undo reverses it; redo replays it.
+
+## Basic usage
+
+Call `undo()` and `redo()` after any mutation to walk the history stack.
+
+```ts
+await client.create("Task", { title: "Task 1", status: "todo" });
+await client.update("Task", "task-123", { title: "Updated" });
+
+if (client.canUndo()) {
+  await client.undo();
+}
+
+if (client.canRedo()) {
+  await client.redo();
+}
+```
+
+## API reference
+
+### canUndo()
+
+Returns `true` if the undo stack has entries.
+
+```ts
+const canUndo: boolean = client.canUndo();
+```
+
+### canRedo()
+
+Returns `true` if the redo stack has entries.
+
+```ts
+const canRedo: boolean = client.canRedo();
+```
+
+### undo()
+
+Applies the inverse of the last mutation and moves it to the redo stack.
+
+```ts
+await client.undo();
+```
+
+On failure, the entry stays on the undo stack and the error is thrown.
+
+### redo()
+
+Re-applies the last undone mutation and moves it back to the undo stack.
+
+```ts
+await client.redo();
+```
+
+## How it works
+
+Each mutation creates a history entry with inverse and original operations. `undo()` executes the inverse as a new outbox transaction (with history recording suppressed). `redo()` works the same way in reverse.
+
+See [Transactions](../core/transactions) for the complete action-to-inverse mapping.
+
+## History and the outbox
+
+Undo/redo operations create real transactions that sync to the server: not client-only rollbacks.
+
+- Undo operations persist and sync like regular mutations
+- Other clients see the undo as a normal update, delete, or insert
+- Server rejection removes the history entry from both stacks
+
+## Stack behavior
+
+- New mutations clear the redo stack
+- `clearAll()` clears both stacks
+- Server rejection removes the associated history entry
+
+## React integration
+
+Use the sync client hooks in `@stratasync/react` to bind undo/redo to your UI.
+
+```tsx
+import { useSyncClientInstance } from "@stratasync/react";
+
+function UndoRedoButtons() {
+  const client = useSyncClientInstance();
+
+  return (
+    <div>
+      <button onClick={() => client.undo()} disabled={!client.canUndo()}>
+        Undo
+      </button>
+      <button onClick={() => client.redo()} disabled={!client.canRedo()}>
+        Redo
+      </button>
+    </div>
+  );
+}
+```
+
+## Keyboard shortcuts
+
+Bind `Cmd/Ctrl+Z` and `Cmd/Ctrl+Shift+Z` to undo and redo.
+
+```tsx
+import { useEffect } from "react";
+import { useSyncClientInstance } from "@stratasync/react";
+
+function useUndoRedoShortcuts() {
+  const client = useSyncClientInstance();
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        client.undo();
+      } else if (e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        client.redo();
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [client]);
+}
+```

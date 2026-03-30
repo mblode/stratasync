@@ -1,0 +1,218 @@
+---
+title: Client utilities
+description: Client-side Next.js provider, bootstrap decoding, and re-exported React hooks.
+---
+
+`NextSyncProvider`, bootstrap decoding utilities, and re-exported React hooks with `"use client"`.
+
+```ts
+import {
+  NextSyncProvider,
+  decodeBootstrapSnapshot,
+  deserializeBootstrapSnapshot,
+  isBootstrapSnapshotStale,
+  seedStorageFromBootstrap,
+  isPrefetchStale,
+  // All @stratasync/react hooks:
+  useModel,
+  useModelSuspense,
+  useQuery,
+  useQueryAll,
+  useQueryCount,
+  useConnectionState,
+  useIsOffline,
+  usePendingCount,
+  useSync,
+  useSyncClient,
+  useSyncClientInstance,
+  useSyncReady,
+  useSyncState,
+} from "@stratasync/next";
+```
+
+## NextSyncProvider
+
+App Router compatible sync provider with loading states and error handling.
+
+```tsx
+"use client";
+
+import { NextSyncProvider } from "@stratasync/next";
+import { createSyncClient } from "@stratasync/client";
+
+const client = createSyncClient({
+  /* ... */
+});
+
+function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <NextSyncProvider
+      client={client}
+      loading={<FullPageSpinner />}
+      error={(err) => <ErrorPage message={err.message} />}
+      onReady={() => console.log("Sync ready")}
+      onError={(err) => console.error("Sync failed", err)}
+    >
+      {children}
+    </NextSyncProvider>
+  );
+}
+```
+
+**Signature:** `NextSyncProvider(props: NextSyncProviderProps): ReactNode`
+
+### NextSyncProviderProps
+
+| Prop       | Type                               | Default  | Description                                                                 |
+| ---------- | ---------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `client`   | `SyncClient \| (() => SyncClient)` | Required | Sync client instance or lazy factory.                                       |
+| `children` | `ReactNode`                        | Required | Child components.                                                           |
+| `loading`  | `ReactNode`                        | `null`   | Shown while the client initializes.                                         |
+| `error`    | `(error: Error) => ReactNode`      | -        | Error renderer. If not provided, the error is thrown for an error boundary. |
+| `onReady`  | `() => void`                       | -        | Callback when the client is ready.                                          |
+| `onError`  | `(error: Error) => void`           | -        | Callback when initialization fails.                                         |
+
+### Initialization lifecycle
+
+On mount:
+
+1. Resolves the client (calls the factory if provided).
+2. Calls `client.start()`.
+3. Shows `loading` while starting.
+4. On success, renders children in a `SyncProvider`.
+5. On failure, shows `error` or throws to an error boundary.
+
+### Lazy client factory
+
+Defer client creation until mount:
+
+```tsx
+<NextSyncProvider
+  client={() =>
+    createSyncClient({
+      /* ... */
+    })
+  }
+  loading={<Spinner />}
+>
+  {children}
+</NextSyncProvider>
+```
+
+Useful when configuration depends on browser-only values (cookies, localStorage).
+
+## Bootstrap decoding
+
+Decode snapshots serialized on the server. See [Server utilities](server) for the serialization side.
+
+### decodeBootstrapSnapshot
+
+Decodes a JSON-encoded bootstrap snapshot string.
+
+```ts
+import { decodeBootstrapSnapshot } from "@stratasync/next";
+
+const snapshot = await decodeBootstrapSnapshot(encodedString);
+```
+
+**Signature:** `decodeBootstrapSnapshot(encoded: string): Promise<BootstrapSnapshot>`
+
+### deserializeBootstrapSnapshot
+
+Deserializes a `BootstrapSnapshotPayload` object. Handles both JSON and gzip-base64 encodings.
+
+```ts
+import { deserializeBootstrapSnapshot } from "@stratasync/next";
+
+const snapshot = await deserializeBootstrapSnapshot(payload);
+```
+
+**Signature:** `deserializeBootstrapSnapshot(payload: BootstrapSnapshotPayload): Promise<BootstrapSnapshot>`
+
+### isBootstrapSnapshotStale
+
+Checks if a bootstrap snapshot is too old to use. Default `maxAge` is 30,000ms (30 seconds).
+
+```ts
+import { isBootstrapSnapshotStale } from "@stratasync/next";
+
+const isStale = isBootstrapSnapshotStale(snapshot, 30_000);
+```
+
+**Signature:** `isBootstrapSnapshotStale(snapshot: BootstrapSnapshot, maxAge?: number): boolean`
+
+### seedStorageFromBootstrap
+
+Pre-populates IndexedDB from a bootstrap snapshot so the client can skip network bootstrap.
+
+```ts
+import { seedStorageFromBootstrap } from "@stratasync/next";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+
+const result = await seedStorageFromBootstrap({
+  storage: createIndexedDbStorage(),
+  snapshot: bootstrapSnapshot,
+  dbName: "my-app-sync",
+  clearExisting: true,
+  validateSchemaHash: true,
+  batchSize: 500,
+  closeAfter: true,
+});
+
+if (result.applied) {
+  console.log(`Seeded ${result.rowCount} rows`);
+} else {
+  console.log(`Skipped: ${result.reason}`);
+}
+```
+
+**SeedStorageOptions:**
+
+| Option               | Type                                                      | Default     | Description                     |
+| -------------------- | --------------------------------------------------------- | ----------- | ------------------------------- |
+| `storage`            | `StorageAdapter`                                          | Required    | Storage adapter instance.       |
+| `snapshot`           | `BootstrapSnapshot \| BootstrapSnapshotPayload \| string` | Required    | The bootstrap data to seed.     |
+| `dbName`             | `string`                                                  | `"sync-db"` | Database name.                  |
+| `clearExisting`      | `boolean`                                                 | `true`      | Clear storage before seeding.   |
+| `validateSchemaHash` | `boolean`                                                 | `true`      | Validate schema hash matches.   |
+| `batchSize`          | `number`                                                  | `500`       | Number of rows per write batch. |
+| `closeAfter`         | `boolean`                                                 | `true`      | Close storage after seeding.    |
+| `schema`             | `SchemaDefinition \| ModelRegistrySnapshot`               | -           | Schema for hash validation.     |
+
+**SeedStorageResult:**
+
+| Field      | Type                             | Description                   |
+| ---------- | -------------------------------- | ----------------------------- |
+| `applied`  | `boolean`                        | Whether the seed was applied. |
+| `rowCount` | `number`                         | Number of rows seeded.        |
+| `reason`   | `"schema_mismatch" \| undefined` | Reason if not applied.        |
+
+## Prefetch utilities
+
+### isPrefetchStale
+
+Checks if prefetched data is too old to use.
+
+```ts
+import { isPrefetchStale } from "@stratasync/next";
+
+const isStale = isPrefetchStale(prefetchedData, 30_000);
+```
+
+**Signature:** `isPrefetchStale(prefetched: PrefetchedData, maxAge?: number): boolean`
+
+## Re-exported hooks
+
+Import hooks directly from `@stratasync/next` in client components:
+
+```tsx
+"use client";
+
+import { useModel, useQuery, useConnectionState } from "@stratasync/next";
+```
+
+> **Note:** `useModelState` is **not** re-exported from `@stratasync/next`. Import it directly from `@stratasync/react` if you need it:
+>
+> ```tsx
+> import { useModelState } from "@stratasync/react";
+> ```

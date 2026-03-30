@@ -1,0 +1,119 @@
+---
+title: "@stratasync/next"
+description: Next.js App Router integration with server-side bootstrap prefetching and client-side sync provider.
+---
+
+Server-side bootstrap prefetching for fast page loads, a client-side `NextSyncProvider`, and re-exported hooks from `@stratasync/react`.
+
+## What it provides
+
+**Client-side (default import / `@stratasync/next/client`):**
+
+- `NextSyncProvider`: App Router compatible provider with loading and error states
+- Most hooks from `@stratasync/react` (re-exported with `"use client"` directive). `useModelState` is **not** re-exported: import it directly from `@stratasync/react` if needed.
+- Bootstrap decoding and seeding utilities
+- Stale checking for prefetched data
+
+**Server-side (`@stratasync/next/server`):**
+
+- `prefetchBootstrap`: fetch initial data on the server
+- `prefetchModels`: selective model prefetching
+- `serializeBootstrapSnapshot` / `encodeBootstrapSnapshot`: serialize for transfer to client
+
+## Installation
+
+```bash
+npm install @stratasync/next
+```
+
+### Peer dependencies
+
+| Package | Required version       |
+| ------- | ---------------------- |
+| `next`  | `^14.0.0 \|\| ^15.0.0` |
+| `react` | `^18.0.0 \|\| ^19.0.0` |
+
+## Package exports
+
+Separate entry points for server and client:
+
+```ts
+// Client-side (default) -- includes "use client" directive
+import { NextSyncProvider, useModel, useQuery } from "@stratasync/next";
+
+// Explicit client import
+import { NextSyncProvider } from "@stratasync/next/client";
+
+// Server-side -- no React hooks, no browser APIs
+import {
+  prefetchBootstrap,
+  serializeBootstrapSnapshot,
+} from "@stratasync/next/server";
+```
+
+The `package.json` export resolves automatically:
+
+- **Browser:** resolves to `./dist/client.js`
+- **Node.js:** resolves to `./dist/server.js`
+
+## Quick start
+
+For SSR bootstrap prefetching, see [SSR and bootstrap](../../guides/ssr-bootstrap).
+
+```tsx
+// app/providers.tsx
+"use client";
+
+import { NextSyncProvider } from "@stratasync/next";
+import { syncClient } from "./sync-client";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <NextSyncProvider
+      client={syncClient}
+      loading={<div>Loading sync engine...</div>}
+      error={(err) => <div>Failed to start: {err.message}</div>}
+    >
+      {children}
+    </NextSyncProvider>
+  );
+}
+```
+
+Use hooks in client components:
+
+```tsx
+// app/tasks/page.tsx
+"use client";
+
+import { useQuery } from "@stratasync/next";
+
+export default function TasksPage() {
+  const { data: tasks, isLoading } = useQuery<Task>("Task");
+
+  if (isLoading) {
+    return <div>Loading tasks...</div>;
+  }
+
+  return (
+    <ul>
+      {tasks.map((task) => (
+        <li key={task.id}>{task.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Architecture role
+
+Sits at the top of the dependency graph.
+
+```
+sync-core
+  ^-- sync-client
+        ^-- sync-react
+              ^-- sync-next (client + server entry points)
+```
+
+Server entry point imports from `@stratasync/core` and `@stratasync/client` only (no React). Client entry point re-exports `@stratasync/react` with `"use client"`.

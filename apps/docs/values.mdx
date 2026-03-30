@@ -1,0 +1,44 @@
+---
+title: Values
+description: The core principles that guide every decision in Strata Sync.
+---
+
+Every engineering decision involves trade-offs. These are the principles that tell us which trade-offs to make.
+
+## Offline is the default
+
+Reads come from the local store. Writes go to the outbox first. The app works identically whether the network is fast, slow, or gone.
+
+Network connectivity improves the experience with real-time sync and collaboration, but it does not gatekeep basic functionality. If the user can open the app, the app works.
+
+## The server is the authority
+
+Clients make optimistic guesses. The server assigns global ordering through a monotonic sync log. When client and server disagree, the server wins.
+
+This is a deliberate constraint. It eliminates an entire class of distributed consistency problems and makes conflict resolution predictable. If you need different behaviour, you can configure it, but the safe default is server authority.
+
+## Composable over monolithic
+
+The core is framework-agnostic. Adapters handle storage, transport, and reactivity at the edges.
+
+Swap IndexedDB for SQLite. Replace GraphQL with REST. Trade MobX for signals. None of these changes touch the sync engine. Strata Sync gives you the primitives. You choose how to assemble them.
+
+## Type safety is not optional
+
+Schema decorators define the contract. Typed hooks bind it to React. If the code compiles, the runtime behaviour matches your expectations.
+
+We treat type errors as bugs, not warnings. The schema is the single source of truth for both client and server. Drift between them is a defect we refuse to tolerate.
+
+## Developer experience first
+
+Three files to get started. No build step for sync. No separate sync server to deploy.
+
+The API surface is small. The defaults are sensible. Complexity is opt-in. We measure success by how quickly a developer goes from install to working sync, and how rarely they need to consult the docs after that.
+
+## Open source, no vendor lock-in
+
+The sync engine is yours. No cloud dashboard required. No usage-based pricing. Fork it, extend it, deploy it wherever you want.
+
+Strata Sync is infrastructure, not a service. You own your data, your deployment, and your future.
+
+These values shape a specific purpose. Read our [Mission](mission).

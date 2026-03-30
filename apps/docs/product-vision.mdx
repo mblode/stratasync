@@ -1,0 +1,35 @@
+---
+title: Product Vision
+description: Where Strata Sync is heading.
+---
+
+The local-first approach that Linear, Figma, and Notion use internally should be available to every TypeScript developer through a single `npm install`. That is the future we are building.
+
+## The world we are building toward
+
+Every app ships with instant reads, offline writes, and real-time collaboration as defaults — not features. Developers define their schema and the sync engine handles the rest. The gap between prototype and production collapses because the hard infrastructure is already solved.
+
+Users never see a spinner when they click. Data is always there, always writable, always syncing in the background. Developers never hand-roll conflict resolution, retry logic, or optimistic update plumbing. The engine absorbs that complexity so application code stays focused on the product.
+
+## What we are working on
+
+Strata Sync is evolving across several directional themes. These are areas of active investment, not a roadmap with deadlines.
+
+- **More storage adapters** — SQLite via wa-sqlite and OPFS, bringing local-first to more environments and unlocking larger datasets on the client.
+- **More transport options** — REST and tRPC alongside GraphQL, giving teams flexibility in their server stack without sacrificing sync guarantees.
+- **More reactivity adapters** — Signals, Jotai, and beyond MobX, so the engine fits naturally into whichever state management approach a team already uses.
+- **Server framework integrations** — Beyond Fastify: Express, Hono, and edge runtimes. Strata Sync should meet your server where it already runs.
+- **Permissions and access control** — Fine-grained sync groups and row-level security that work locally. Clients only receive the data they are allowed to see, and the local replica enforces that boundary.
+- **Migration tooling** — Schema evolution that works with the local replica, not against it. Adding a field or renaming a relation should be safe across every client, even those that have been offline for weeks.
+
+## The long game
+
+Local-first becomes the default architecture for interactive apps, not a specialisation. The same way React made component-based UI the norm, Strata Sync aims to make local-first sync the norm for data-driven applications.
+
+The ecosystem grows: community adapters, framework integrations, hosted services that complement but never replace the open-source core. We believe the best infrastructure is infrastructure you own and can run yourself. A healthy open-source project with a thriving community of contributors is more durable than any single company.
+
+## Get involved
+
+The best way to shape the future of Strata Sync is to build with it. Try it in a side project, push it to its limits, and tell us what breaks. Contributions, feedback, and bug reports are welcome on [GitHub](https://github.com/stratasync/stratasync).
+
+Start building with the [Quick Start](quick-start), or read the [Manifesto](manifesto) to understand why we started.

@@ -1,0 +1,292 @@
+---
+title: Model relationships
+description: Define references, collections, and back-references between models with lazy and eager loading.
+---
+
+Define foreign keys, inverse collections, and ordered lists with six relationship decorators.
+
+## Relationship decorators at a glance
+
+| Decorator              | Direction            | Cardinality  | Creates foreign key?      |
+| ---------------------- | -------------------- | ------------ | ------------------------- |
+| `@Reference`           | Model A -> Model B   | One-to-one   | Yes (on A)                |
+| `@ManyToOne`           | Model A -> Model B   | Many-to-one  | Yes (on A)                |
+| `@OneToMany`           | Model B -> Model A[] | One-to-many  | No (uses A's foreign key) |
+| `@BackReference`       | Computed inverse     | Varies       | No                        |
+| `@ReferenceArray`      | Model A -> Model B[] | Ordered list | Yes (array field on A)    |
+| `@ReferenceCollection` | Alias for @OneToMany | One-to-many  | No                        |
+
+## @Reference: belongs to
+
+One-to-one relationship where the current model holds the foreign key.
+
+```ts
+import { Model, ClientModel, Property, Reference } from "@stratasync/core";
+
+@ClientModel("Task", { loadStrategy: "instant" })
+export class Task extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare title: string;
+
+  // Creates an `assigneeId` foreign key property automatically
+  @Reference(() => User, "assignedTasks")
+  declare assignee: User | null;
+
+  // The foreign key is available as a regular property
+  @Property()
+  declare assigneeId: string | null;
+}
+```
+
+You can override the default foreign key name with the `foreignKey` option:
+
+```ts
+@Reference(() => User, "createdTasks", { foreignKey: "creatorId" })
+declare creator: User | null;
+
+@Property()
+declare creatorId: string | null;
+```
+
+### Options
+
+| Option       | Type      | Default     | Description                       |
+| ------------ | --------- | ----------- | --------------------------------- |
+| `foreignKey` | `string`  | `${name}Id` | Name of the foreign key property  |
+| `nullable`   | `boolean` | -           | Whether the reference can be null |
+| `indexed`    | `boolean` | auto        | Whether to index the foreign key  |
+| `lazy`       | `boolean` | -           | Whether to lazily hydrate         |
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## @ManyToOne: explicit many-to-one
+
+Like `@Reference` but accepts a model name string.
+
+```ts
+import { Model, ClientModel, Property, ManyToOne } from "@stratasync/core";
+
+@ClientModel("Comment", { loadStrategy: "lazy" })
+export class Comment extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare body: string;
+
+  // String-based model name (no factory function needed)
+  @ManyToOne("Task", "comments", { foreignKey: "taskId" })
+  declare task: unknown;
+
+  @Property()
+  declare taskId: string;
+
+  // Also supports factory functions
+  @ManyToOne(() => User, "comments", { foreignKey: "authorId" })
+  declare author: unknown;
+
+  @Property()
+  declare authorId: string;
+}
+```
+
+Use `@ManyToOne` for string-based references, `@Reference` for factory functions (helps with circular imports). Both produce identical metadata.
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## @OneToMany: inverse collection
+
+The inverse side of a many-to-one. Creates a `LazyCollection` of models pointing to the current instance via foreign key.
+
+```ts
+import { Model, ClientModel, Property, OneToMany } from "@stratasync/core";
+
+@ClientModel("Project", { loadStrategy: "instant" })
+export class Project extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare name: string;
+
+  // All tasks where task.projectId === this.id
+  @OneToMany({ foreignKey: "projectId" })
+  declare tasks: unknown[];
+}
+```
+
+### Options
+
+| Option       | Type      | Default | Description                        |
+| ------------ | --------- | ------- | ---------------------------------- |
+| `foreignKey` | `string`  | -       | Foreign key on the child model     |
+| `indexed`    | `boolean` | -       | Whether to use index for lookups   |
+| `nullable`   | `boolean` | -       | Whether the collection can be null |
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## @BackReference: computed inverse
+
+A computed inverse of a reference. Unlike `@OneToMany`, doesn't create a collection: it represents the inverse lookup.
+
+```ts
+import { Model, ClientModel, Property, BackReference } from "@stratasync/core";
+
+@ClientModel("User", { loadStrategy: "instant" })
+export class User extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare name: string;
+
+  // Computed inverse of Task.assignee
+  @BackReference({ foreignKey: "assigneeId" })
+  declare assignedTasks: unknown[];
+
+  // Computed inverse of Comment.author
+  @BackReference({ foreignKey: "authorId" })
+  declare comments: unknown[];
+}
+```
+
+### Options
+
+| Option       | Type     | Default | Description                          |
+| ------------ | -------- | ------- | ------------------------------------ |
+| `foreignKey` | `string` | -       | Foreign key on the referencing model |
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## @ReferenceArray: ordered list of references
+
+An ordered list of references. Preserves insertion order.
+
+```ts
+import { Model, ClientModel, Property, ReferenceArray } from "@stratasync/core";
+
+@ClientModel("Board", { loadStrategy: "instant" })
+export class Board extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare name: string;
+
+  // Ordered list of column IDs
+  @ReferenceArray()
+  declare columns: unknown[];
+
+  @Property()
+  declare columnIds: string[];
+}
+```
+
+For many-to-many relationships, use the `through` option to specify a join model:
+
+```ts
+@ReferenceArray({ through: "ProjectMember" })
+declare members: unknown[];
+```
+
+### Options
+
+| Option    | Type     | Default | Description                      |
+| --------- | -------- | ------- | -------------------------------- |
+| `through` | `string` | -       | Join model name for many-to-many |
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## @ReferenceCollection: unordered set
+
+Alias for `@OneToMany`. Use when the collection is unordered.
+
+```ts
+import {
+  Model,
+  ClientModel,
+  Property,
+  ReferenceCollection,
+} from "@stratasync/core";
+
+@ClientModel("Team", { loadStrategy: "instant" })
+export class Team extends Model {
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare name: string;
+
+  // Unordered set of team members
+  @ReferenceCollection({ foreignKey: "teamId" })
+  declare members: unknown[];
+}
+```
+
+See [Decorators](../packages/core/decorators) for the full API reference.
+
+## Lazy loading vs. eager loading
+
+By default, references resolve eagerly from the identity map. Use `lazy` to defer hydration.
+
+```ts
+// Eager (default): resolved from identity map on access
+@Reference(() => User, "assignedTasks")
+declare assignee: User | null;
+
+// Lazy: not hydrated until explicitly accessed
+@Reference(() => User, "assignedTasks", { lazy: true })
+declare assignee: User | null;
+```
+
+Lazy loading helps with large reference chains, partial-load models (where the referenced data may not be available yet), and performance-sensitive views where you load models but don't display all their references. See [Load Strategies](load-strategies) for more on controlling when relationship targets load.
+
+## Circular references
+
+The identity map and the factory function pattern handle circular references naturally. You can model self-referencing trees (such as subtask hierarchies) without extra configuration.
+
+```ts
+@ClientModel("Task", { loadStrategy: "instant" })
+export class Task extends Model {
+  @Property()
+  declare id: string;
+
+  @Reference(() => Task, undefined, { foreignKey: "parentId" })
+  declare parent: Task | null;
+
+  @Property()
+  declare parentId: string | null;
+
+  @OneToMany({ foreignKey: "parentId" })
+  declare children: unknown[];
+}
+```
+
+The factory function `() => Task` works because TypeScript hoists class declarations, so the class is available when the factory runs. The identity map guarantees that `task.parent.children[0]` resolves to the same object reference as `task`. When rendering recursive trees in React, use depth limits or lazy loading to avoid infinite loops.
+
+## Navigating the relationship graph
+
+Once you define relationships, you can traverse them through the identity map without extra queries.
+
+```ts
+// Get a project and traverse relationships
+const project = client.getCached("Project", projectId);
+
+// Navigate to team
+const team = project.team; // Resolves via identity map
+
+// Get all tasks in the project
+const tasks = project.tasks; // LazyCollection
+
+// Get the assignee of a task
+const task = tasks[0];
+const assignee = task.assignee; // Resolves via identity map
+
+// Navigate back to the user's team
+const userTeam = assignee.team; // Same team object (referential equality)
+```
+
+See [Decorators](../packages/core/decorators) for a complete domain model example.

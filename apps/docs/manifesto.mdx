@@ -1,0 +1,48 @@
+---
+title: Manifesto
+description: Why local-first matters and what's broken about server-centric apps.
+---
+
+The web promised immediacy. Click a link, see the page. But most apps today feel slow. Every tap waits for a server. Every interaction carries the weight of a network round-trip that users never asked for.
+
+## The server-centric trap
+
+The standard architecture is simple to describe: browser sends a request, server processes it, browser renders the result. Every read requires a round-trip. Every write can fail. Users stare at spinners.
+
+To paper over the latency, teams pile on complexity. Loading states. Skeleton screens. Retry logic. Service workers. Cache invalidation. Offline queues. Conflict resolution. CRDT research. Merge strategies. Transaction logs. Undo stacks.
+
+All of this, just to ship a basic save button.
+
+The server-centric model forces developers to fight the network on every feature. The result is fragile code, slow interfaces, and an ever-growing backlog of edge cases that never quite get fixed.
+
+## What users actually experience
+
+Stale data sits next to fresh data. Conflicting edits silently overwrite each other. The app goes blank when the plane enters a tunnel.
+
+The save button shows a spinner for three seconds on a fast connection and fails silently on a slow one. A form submission disappears into the void. The user retries, creates a duplicate, and blames themselves.
+
+The problem is not that developers are bad. The architecture makes reliable, responsive apps impossible without enormous effort. Most teams never get there.
+
+## The local-first alternative
+
+There is a better model. Keep a replica of every record on every device.
+
+Reads come from the local store. They are instant. No round-trip, no loading state, no skeleton screen.
+
+Writes go to a local outbox. They succeed immediately. The sync layer sends them to the server in the background. If the network drops, writes queue up and replay when it returns.
+
+Conflicts resolve automatically. Server-sequenced ordering gives every client a single, consistent timeline. CRDTs handle concurrent rich-text edits without manual merge logic.
+
+This is not a new idea. Linear built it. Figma built it. Notion built it. They proved the architecture works at scale. But they never open-sourced the hard parts.
+
+## The gap we fill
+
+Linear described their sync architecture publicly. They wrote about the monotonic sync counter, the delta protocol, the client-side model cache. They showed it could be done. But they never released it.
+
+The local-first community has produced solid theory. Academic papers, conference talks, prototype libraries. What it lacks is production-ready tooling for TypeScript and React. The ecosystem that most product teams actually use.
+
+Strata Sync is an open-source implementation of that architecture. Server-sequenced consistency with a monotonic sync ID. A persistent outbox for offline writes. Field-level conflict resolution. Yjs CRDT collaboration for rich text. Undo and redo. Pluggable storage and transport adapters. All typed, all composable, all designed for React and Next.js from the start.
+
+The goal is not to invent new theory. The goal is to take what works and make it accessible to every team that ships a web app.
+
+Read our [Values](values) to see the principles that guide how we build.

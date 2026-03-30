@@ -1,0 +1,138 @@
+---
+title: Data flow
+description: How mutations and deltas flow through Strata Sync, from user input to server confirmation and back.
+---
+
+Two primary data flows: **client writes** (mutations going to the server) and **server pushes** (deltas coming back).
+
+## Client write flow
+
+Call a mutation method on the sync client. The change applies optimistically, persists locally, and sends to the server in the background.
+
+```mermaid
+sequenceDiagram
+  participant UI as React Component
+  participant Client as Sync Client
+  participant Store as Identity Map
+  participant IDB as IndexedDB
+  participant Outbox as Outbox Manager
+  participant Transport as Transport Adapter
+  participant Server as API Server
+
+  UI->>Client: client.update("Task", id, changes)
+  Client->>Client: Create transaction (clientTxId + idempotency key)
+  Client->>Store: Apply optimistic update
+  Store-->>UI: MobX reaction (UI re-renders)
+  Client->>IDB: Persist updated row
+  Client->>Outbox: Add transaction to outbox
+  Client->>IDB: Persist outbox entry
+  Outbox->>Transport: Batch and send mutations
+  Transport->>Server: POST /sync/mutate
+  Server->>Server: Validate, assign syncId, persist
+  Server-->>Transport: Mutation result
+  Transport-->>Outbox: Acknowledge transaction
+  Outbox->>IDB: Remove from outbox
+```
+
+### Key steps
+
+1. **Optimistic apply**: Creates a `Transaction` with an idempotency key, applies to the identity map, and persists to IndexedDB.
+
+2. **Batch send**: The outbox batches transactions based on `batchDelay` (default 50 ms), reducing network overhead.
+
+3. **Server processing**: Validates the mutation, assigns a `syncId`, persists, and broadcasts a delta to all clients.
+
+4. **Acknowledgment**: The server responds with the assigned `syncId`. The outbox removes acknowledged transactions.
+
+## Server push flow
+
+Deltas arrive through the WebSocket subscription when another client writes a change or the server processes your own mutation.
+
+```mermaid
+sequenceDiagram
+  participant Server as API Server
+  participant WS as WebSocket
+  participant Transport as Transport Adapter
+  participant Client as Sync Client
+  participant Rebase as Rebase Engine
+  participant Store as Identity Map
+  participant IDB as IndexedDB
+  participant UI as React Component
+
+  Server->>WS: Delta packet (syncActions + lastSyncId)
+  WS->>Transport: Receive delta
+  Transport->>Client: onDelta(packet)
+  Client->>IDB: Write batch (apply all actions)
+  Client->>Store: Update identity map
+  Client->>Rebase: Rebase pending transactions
+  Rebase-->>Store: Re-apply local intent
+  Client->>IDB: Update lastSyncId
+  Store-->>UI: MobX reaction (UI re-renders)
+```
+
+### Key steps
+
+1. **Batch write**: Applies all sync actions from the `DeltaPacket` to IndexedDB in a single atomic write.
+
+2. **Identity map update**: Inserts create instances, updates modify them, deletes remove them.
+
+3. **Rebase**: If affected models have pending local transactions, the rebase engine reconciles server state with local intent.
+
+4. **Watermark advance**: Advances `lastSyncId` to the packet's watermark, so the next delta fetch starts from the right place.
+
+## Conflict resolution (rebase)
+
+Field-level LWW rebase resolves conflicts between server deltas and pending local transactions. Each pending transaction stores a `patch` and an `original` snapshot. Non-overlapping changes merge cleanly; overlapping fields use the configured `rebaseStrategy` (`"server-wins"`, `"client-wins"`, or `"merge"`).
+
+See [Conflict resolution](../guides/conflict-resolution) for strategies and examples.
+
+## Offline and reconnect flow
+
+Read and write while disconnected: the outbox queues mutations in IndexedDB until the connection returns.
+
+```mermaid
+sequenceDiagram
+  participant UI as React Component
+  participant Client as Sync Client
+  participant IDB as IndexedDB
+  participant Outbox as Outbox Manager
+  participant Transport as Transport Adapter
+
+  Note over Transport: Connection lost
+  UI->>Client: client.update("Task", id, changes)
+  Client->>Client: Create transaction
+  Client->>IDB: Persist optimistic update
+  Client->>Outbox: Queue transaction
+  Client->>IDB: Persist to outbox
+  Note over UI: UI shows changes immediately
+
+  Note over Transport: Connection restored
+  Transport->>Client: Reconnected
+  Client->>Transport: Fetch deltas after lastSyncId
+  Transport-->>Client: Catch-up delta packet
+  Client->>Client: Apply deltas + rebase
+  Outbox->>Transport: Replay pending transactions
+  Transport-->>Outbox: Acknowledge
+```
+
+On reconnection, the client fetches missed deltas, then replays the outbox. Idempotency keys make retry safe, even if a mutation was sent but not acknowledged before the disconnect.
+
+See [Offline-first guide](../guides/offline-first) for configuration and best practices.
+
+## Transaction lifecycle
+
+Each outbox transaction moves through these states:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Queued: created
+  Queued --> Sent: transport sends
+  Sent --> AwaitingSync: server acknowledges
+  AwaitingSync --> Confirmed: delta with syncId arrives
+  Sent --> Queued: network error (retry)
+  Sent --> Failed: server rejects
+  Confirmed --> [*]: removed from outbox
+  Failed --> [*]: removed from outbox
+```
+
+**Queued** (waiting to send), **Sent** (awaiting response), **AwaitingSync** (acknowledged, delta pending), **Confirmed** (done, removed from outbox), **Failed** (rejected, rolled back). Network errors move back to Queued for retry.

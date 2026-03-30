@@ -1,0 +1,227 @@
+---
+title: YjsPresenceManager
+description: Manages presence signaling, view/edit tracking, and session state for collaborative editing.
+---
+
+Tracks which documents you're viewing and editing, signals state to the server, and receives session updates with active participants.
+
+## Creating an instance
+
+Use the same `clientId` and `connId` values as your `YjsDocumentManager`.
+
+```ts
+import { YjsPresenceManager } from "@stratasync/y-doc";
+
+const presenceManager = new YjsPresenceManager({
+  clientId: "client-abc-123",
+  connId: "conn-xyz-456",
+});
+```
+
+### PresenceManagerConfig
+
+| Property   | Type     | Description                                                    |
+| ---------- | -------- | -------------------------------------------------------------- |
+| `clientId` | `string` | Logical client identity for attribution.                       |
+| `connId`   | `string` | Connection-scoped identity for echo suppression and ownership. |
+
+## Setting the transport
+
+Set before signaling presence. See [YjsDocumentManager](document-manager) for transport setup.
+
+```ts
+presenceManager.setTransport(yjsTransport);
+```
+
+Listens for `session_state` messages and sends `doc_view` and `doc_focus` messages.
+
+## API reference
+
+### startViewing
+
+Signals that you opened a document.
+
+```ts
+import type { DocumentKey } from "@stratasync/y-doc";
+
+const docKey: DocumentKey = {
+  entityType: "Task",
+  entityId: "task-123",
+  fieldName: "description",
+};
+
+presenceManager.startViewing(docKey);
+```
+
+**Signature:** `startViewing(docKey: DocumentKey): void`
+
+Duplicate calls for the same document are ignored.
+
+### stopViewing
+
+Signals that you closed a document. Auto-calls `blur` if editing.
+
+```ts
+presenceManager.stopViewing(docKey);
+```
+
+**Signature:** `stopViewing(docKey: DocumentKey): void`
+
+### focus
+
+Signals editor focus. Auto-calls `startViewing` if not already viewing.
+
+```ts
+presenceManager.focus(docKey);
+```
+
+**Signature:** `focus(docKey: DocumentKey): void`
+
+Sends a `doc_focus` message with state `"focus"`.
+
+### blur
+
+Signals editor blur.
+
+```ts
+presenceManager.blur(docKey);
+```
+
+**Signature:** `blur(docKey: DocumentKey): void`
+
+Sends a `doc_focus` message with state `"blur"`.
+
+### isViewing
+
+Returns whether you're viewing a document.
+
+```ts
+const viewing: boolean = presenceManager.isViewing(docKey);
+```
+
+**Signature:** `isViewing(docKey: DocumentKey): boolean`
+
+### isEditing
+
+Returns whether you're editing a document.
+
+```ts
+const editing: boolean = presenceManager.isEditing(docKey);
+```
+
+**Signature:** `isEditing(docKey: DocumentKey): boolean`
+
+### getSessionState
+
+Returns session state with active participants.
+
+```ts
+import type { SessionState } from "@stratasync/y-doc";
+
+const session: SessionState | null = presenceManager.getSessionState(docKey);
+
+if (session) {
+  const activeCount = session.participants.filter((p) => p.isEditing).length;
+}
+```
+
+**Signature:** `getSessionState(docKey: DocumentKey): SessionState | null`
+
+Returns `null` if no session state has been received yet.
+
+### SessionState
+
+```ts
+interface SessionState {
+  active: boolean;
+  participants: SessionParticipant[];
+}
+```
+
+| Property       | Type                   | Description                                               |
+| -------------- | ---------------------- | --------------------------------------------------------- |
+| `active`       | `boolean`              | Whether the session is active (at least one participant). |
+| `participants` | `SessionParticipant[]` | List of participants.                                     |
+
+### SessionParticipant
+
+```ts
+interface SessionParticipant {
+  userId: string;
+  isEditing: boolean;
+}
+```
+
+| Property    | Type      | Description                                   |
+| ----------- | --------- | --------------------------------------------- |
+| `userId`    | `string`  | The participant's user ID.                    |
+| `isEditing` | `boolean` | Whether the participant is editing (focused). |
+
+### onSessionStateChange
+
+Fires with current state, then on each change.
+
+```ts
+const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
+  updateParticipantList(session.participants);
+  showCollaborationBadge(session.active);
+});
+
+unsubscribe();
+```
+
+**Signature:** `onSessionStateChange(docKey: DocumentKey, callback: (state: SessionState) => void): () => void`
+
+Returns an unsubscribe function.
+
+### cleanup
+
+Stops viewing all documents and clears state.
+
+```ts
+presenceManager.cleanup();
+```
+
+**Signature:** `cleanup(): void`
+
+## Presence lifecycle
+
+```
+User opens document   --> startViewing()  --> doc_view "start" sent
+User clicks editor    --> focus()         --> doc_focus "focus" sent
+User clicks elsewhere --> blur()          --> doc_focus "blur" sent
+User closes document  --> stopViewing()   --> doc_view "stop" sent
+```
+
+The server aggregates signals into `SessionState` updates and broadcasts to all participants.
+
+## Full example
+
+```ts
+import { YjsPresenceManager } from "@stratasync/y-doc";
+import type { DocumentKey } from "@stratasync/y-doc";
+
+const presenceManager = new YjsPresenceManager({
+  clientId: "client-123",
+  connId: "conn-456",
+});
+
+presenceManager.setTransport(yjsTransport);
+
+const docKey: DocumentKey = {
+  entityType: "Task",
+  entityId: "task-abc",
+  fieldName: "description",
+};
+
+const unsubscribe = presenceManager.onSessionStateChange(docKey, (session) => {
+  const editors = session.participants.filter((p) => p.isEditing);
+  updateUI({ activeEditors: editors.length, isActive: session.active });
+});
+
+presenceManager.startViewing(docKey);
+presenceManager.focus(docKey);
+presenceManager.blur(docKey);
+presenceManager.stopViewing(docKey);
+unsubscribe();
+```

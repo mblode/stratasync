@@ -1,0 +1,237 @@
+---
+title: CRUD operations
+description: Create, read, update, delete, archive, and unarchive models through the sync client.
+---
+
+CRUD operations work with the identity map, outbox, and optimistic updates.
+
+## Common behavior
+
+Every mutation applies optimistically to the identity map, creates an outbox transaction, records a history entry for undo/redo, and emits a `modelChange` event.
+
+## Reading models
+
+Read synchronously from the identity map or asynchronously from storage.
+
+### get
+
+Fetches a model by ID. Checks the identity map first, then falls back to storage.
+
+```ts
+const task = await client.get<Task>("Task", "task-123");
+if (task) {
+  console.log(task.title);
+}
+```
+
+**Signature:** `get<T>(modelName: string, id: string): Promise<T | null>`
+
+Returns `null` if the model isn't found in either the identity map or storage.
+
+### getCached
+
+Reads from the identity map only. No storage or network requests.
+
+```ts
+const task = client.getCached<Task>("Task", "task-123");
+// Returns null if not in the identity map
+```
+
+**Signature:** `getCached<T>(modelName: string, id: string): T | null`
+
+Fastest read path, but only works for models already in memory.
+
+### ensureModel
+
+Guarantees a model is available locally. Loads from storage if not cached, or fetches from the server for lazy/partial/explicitlyRequested models.
+
+```ts
+const task = await client.ensureModel<Task>("Task", "task-123");
+```
+
+**Signature:** `ensureModel<T>(modelName: string, id: string): Promise<T | null>`
+
+Behavior by load strategy:
+
+| Load strategy                                    | Behavior                                                  |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| `"instant"`                                      | Returns from identity map or storage. No network request. |
+| `"lazy"` / `"partial"` / `"explicitlyRequested"` | Fetches from server via `batchLoad` if not cached.        |
+| `"local"`                                        | Returns from identity map or storage. No network request. |
+
+### getAll
+
+Returns all models of a type. Supports filtering, sorting, and pagination.
+
+```ts
+// All tasks
+const tasks = await client.getAll<Task>("Task");
+
+// Filtered and sorted
+const activeTasks = await client.getAll<Task>("Task", {
+  where: (t) => t.status !== "done",
+  orderBy: (a, b) => a.priority - b.priority,
+  limit: 20,
+});
+```
+
+**Signature:** `getAll<T>(modelName: string, options?: QueryOptions<T>): Promise<T[]>`
+
+### query
+
+Full filtering, sorting, pagination, and metadata.
+
+```ts
+const result = await client.query<Task>("Task", {
+  where: (t) => t.projectId === "proj-123",
+  orderBy: (a, b) => a.createdAt - b.createdAt,
+  limit: 10,
+  offset: 0,
+});
+
+console.log(result.data); // Task[]
+console.log(result.hasMore); // boolean
+console.log(result.totalCount); // number
+```
+
+**Signature:** `query<T>(modelName: string, options?: QueryOptions<T>): Promise<QueryResult<T>>`
+
+See [Queries](queries) for the full query API.
+
+## Creating models
+
+### create
+
+Creates a new model. Generates a UUID if no `id` is provided.
+
+```ts
+const task = await client.create<Task>("Task", {
+  title: "New task",
+  status: "todo",
+  priority: 0,
+  projectId: "proj-123",
+});
+
+console.log(task.id); // Auto-generated UUID
+```
+
+**Signature:** `create<T>(modelName: string, data: T, options?): Promise<T>`
+
+**Options:**
+
+```ts
+await client.create("Task", data, {
+  onTransactionCreated: (tx) => {
+    console.log("Transaction ID:", tx.clientTxId);
+  },
+});
+```
+
+## Updating models
+
+### update
+
+Updates a model with partial changes. Computes original values from the identity map. Throws if not found.
+
+```ts
+const updated = await client.update<Task>("Task", "task-123", {
+  title: "Updated title",
+  priority: 2,
+});
+```
+
+**Signature:** `update<T>(modelName: string, id: string, changes: Partial<T>, options?): Promise<T>`
+
+**Options:**
+
+```ts
+await client.update("Task", "task-123", changes, {
+  original: { title: "Previous title" }, // Explicit originals
+  onTransactionCreated: (tx) => {
+    console.log("Transaction:", tx.clientTxId);
+  },
+});
+```
+
+## Deleting models
+
+### delete
+
+Permanently deletes a model. Stores original data in the transaction for undo. Throws if not found.
+
+```ts
+await client.delete("Task", "task-123");
+```
+
+**Signature:** `delete(modelName: string, id: string, options?): Promise<void>`
+
+## Archiving models
+
+### archive
+
+Soft-deletes by setting `archivedAt`. Queries exclude archived models by default.
+
+```ts
+await client.archive("Task", "task-123");
+```
+
+**Signature:** `archive(modelName: string, id: string, options?): Promise<void>`
+
+**Options:**
+
+```ts
+await client.archive("Task", "task-123", {
+  archivedAt: "2025-01-15T10:30:00.000Z", // Custom timestamp
+  original: { archivedAt: undefined },
+  onTransactionCreated: (tx) => {
+    /* ... */
+  },
+});
+```
+
+### unarchive
+
+Restores a soft-deleted model by clearing the `archivedAt` field.
+
+```ts
+await client.unarchive("Task", "task-123");
+```
+
+**Signature:** `unarchive(modelName: string, id: string, options?): Promise<void>`
+
+## Other operations
+
+### syncNow
+
+Forces an immediate sync with the server.
+
+```ts
+await client.syncNow();
+```
+
+### clearAll
+
+Clears all local data: identity maps, storage, pending loads, and undo history.
+
+```ts
+await client.clearAll();
+```
+
+### getIdentityMap
+
+Returns the raw identity map for a model type.
+
+```ts
+const map = client.getIdentityMap<Task>("Task");
+for (const [id, task] of map) {
+  console.log(id, task.title);
+}
+```
+
+### isModelMissing
+
+Checks whether a model lookup failed. Used internally by React hooks to avoid repeated lookups.
+
+```ts
+const missing = client.isModelMissing("Task", "task-123");
+```

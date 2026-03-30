@@ -1,0 +1,244 @@
+---
+title: Quick start
+description: Build a sync-enabled React app in five steps.
+---
+
+Build a local-first React app with real-time sync, offline support, and undo/redo.
+
+Skip the manual setup? Scaffold a complete app:
+
+```bash
+npx skills add stratasync/stratasync
+```
+
+## Step 1: Define your model
+
+`@ClientModel` registers a class with the sync engine. `@Property` marks each synced field.
+
+```ts
+// models/task.ts
+import { Model, ClientModel, Property } from "@stratasync/core";
+
+@ClientModel("Task", { loadStrategy: "instant" })
+export class Task extends Model {
+  // Use `declare` so TypeScript skips initializer code for decorated properties
+  @Property()
+  declare id: string;
+
+  @Property()
+  declare title: string;
+
+  @Property()
+  declare status: string;
+
+  @Property()
+  declare completed: boolean;
+}
+```
+
+## Step 2: Create the sync client
+
+Wire up storage, transport, and reactivity.
+
+```ts
+// lib/sync-client.ts
+import { createSyncClient } from "@stratasync/client";
+import { createMobXReactivity } from "@stratasync/mobx";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+import { createGraphQLTransport } from "@stratasync/transport-graphql";
+
+// Import the model so it registers with ModelRegistry
+import "../models/task";
+
+const storage = createIndexedDbStorage({
+  name: "my-app",
+});
+
+const transport = createGraphQLTransport({
+  endpoint: "/api/graphql",
+  syncEndpoint: "/api/sync",
+  wsEndpoint: "wss://api.example.com/sync/ws",
+  auth: { getAccessToken: async () => "token" },
+});
+
+const reactivity = createMobXReactivity();
+
+export const client = createSyncClient({
+  storage,
+  transport,
+  reactivity,
+  // Apply mutations locally before server confirmation
+  optimistic: true,
+  // Group rapid mutations into a single network request
+  batchMutations: true,
+  batchDelay: 50,
+});
+```
+
+## Step 3: Wrap your app with SyncProvider
+
+`SyncProvider` starts sync on mount and stops on unmount.
+
+```tsx
+// app/providers.tsx
+"use client";
+
+import { SyncProvider } from "@stratasync/react";
+import { client } from "../lib/sync-client";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <SyncProvider client={client} autoStart autoStop>
+      {children}
+    </SyncProvider>
+  );
+}
+```
+
+```tsx
+// app/layout.tsx
+import { Providers } from "./providers";
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+```
+
+## Step 4: Read data with hooks
+
+Hooks read single records or filtered lists with full type safety.
+
+### useModel: single record
+
+`useModel` fetches one model by ID. Wrap the component in a `<Suspense>` boundary.
+
+```tsx
+"use client";
+
+import { observer } from "mobx-react-lite";
+import { Suspense } from "react";
+import { useModel } from "@stratasync/react";
+import type { Task } from "../models/task";
+
+const TaskDetail = observer(function TaskDetail({ id }: { id: string }) {
+  const task = useModel<Task>("Task", id);
+
+  if (!task) {
+    return <p>Task not found</p>;
+  }
+
+  return (
+    <div>
+      <h1>{task.title}</h1>
+      <p>Status: {task.status}</p>
+    </div>
+  );
+});
+
+export default function TaskPage({ params }: { params: { id: string } }) {
+  return (
+    <Suspense fallback={<p>Loading task...</p>}>
+      <TaskDetail id={params.id} />
+    </Suspense>
+  );
+}
+```
+
+### useQuery: filtered lists
+
+`useQuery` returns a reactive list matching a filter. Returns `{ data, isLoading, error }` instead of using Suspense.
+
+```tsx
+"use client";
+
+import { observer } from "mobx-react-lite";
+import { useQuery } from "@stratasync/react";
+import type { Task } from "../models/task";
+
+const OpenTasks = observer(function OpenTasks() {
+  const { data: tasks, isLoading } = useQuery<Task>("Task", {
+    where: (task) => task.status === "open",
+  });
+
+  if (isLoading) {
+    return <p>Loading...</p>;
+  }
+
+  return (
+    <ul>
+      {tasks.map((task) => (
+        <li key={task.id}>{task.title}</li>
+      ))}
+    </ul>
+  );
+});
+```
+
+For offline indicators and sync progress, see the [offline-first guide](guides/offline-first).
+
+## Step 5: Mutate data
+
+Mutations apply optimistically and queue for sync in the background.
+
+```tsx
+"use client";
+
+import { useSyncClient } from "@stratasync/react";
+
+export function CreateTask() {
+  const { client } = useSyncClient();
+
+  async function handleCreate() {
+    await client.create("Task", {
+      title: "New task",
+      status: "open",
+      completed: false,
+    });
+  }
+
+  return <button onClick={handleCreate}>Create Task</button>;
+}
+```
+
+### Update and delete
+
+```tsx
+async function handleUpdate(taskId: string) {
+  await client.update("Task", taskId, { title: "Updated title" });
+}
+
+async function handleDelete(taskId: string) {
+  await client.delete("Task", taskId);
+}
+```
+
+### Archive and unarchive
+
+```tsx
+async function handleArchive(taskId: string) {
+  await client.archive("Task", taskId);
+}
+
+async function handleUnarchive(taskId: string) {
+  await client.unarchive("Task", taskId);
+}
+```
+
+### Undo and redo
+
+```tsx
+if (client.canUndo()) await client.undo();
+if (client.canRedo()) await client.redo();
+```
+
+See [Data flow](architecture/data-flow) for how mutations move through the system.
