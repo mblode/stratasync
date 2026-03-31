@@ -4,6 +4,27 @@ interface Env {
   LANDING_URL?: string;
 }
 
+const isDocsPath = (pathname: string): boolean =>
+  pathname === "/docs" || pathname.startsWith("/docs/");
+
+const isNextInternalPath = (pathname: string): boolean =>
+  pathname.startsWith("/_next/");
+
+const shouldProxyAssetToDocs = (
+  pathname: string,
+  referer: string | null
+): boolean => {
+  if (!isNextInternalPath(pathname) || !referer) {
+    return false;
+  }
+
+  try {
+    return isDocsPath(new URL(referer).pathname);
+  } catch {
+    return false;
+  }
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -36,7 +57,13 @@ export default {
       }
 
       // Proxy requests to /docs path to Blode docs
-      if (urlObject.pathname.startsWith("/docs")) {
+      if (
+        isDocsPath(urlObject.pathname) ||
+        shouldProxyAssetToDocs(
+          urlObject.pathname,
+          request.headers.get("Referer")
+        )
+      ) {
         const url = new URL(request.url);
         url.hostname = docsUrl;
 

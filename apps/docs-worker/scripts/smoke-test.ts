@@ -34,6 +34,21 @@ const run = async () => {
     assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
 
     requests.length = 0;
+    await worker.fetch(
+      new Request("https://stratasync.dev/_next/static/chunks/main.js", {
+        headers: {
+          Referer: "https://stratasync.dev/docs",
+        },
+      }),
+      env
+    );
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(requests.length, 1);
+    assertHost(requests[0], env.DOCS_URL);
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
+
+    requests.length = 0;
     await worker.fetch(new Request("https://stratasync.dev/"), env);
     // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
@@ -80,9 +95,7 @@ const run = async () => {
   }
 };
 
-try {
-  await run();
-} catch (error) {
+run().catch((error) => {
   console.error(error);
   process.exitCode = 1;
-}
+});
