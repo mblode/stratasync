@@ -26,7 +26,7 @@ sequenceDiagram
     Client->>Outbox: Remove confirmed transaction (state: "completed")
 ```
 
-The storage adapter stores the outbox in IndexedDB, so pending mutations survive page reloads, browser crashes, and device restarts. When the client starts, it replays any `queued` or `sent` transactions. For the full outbox lifecycle and state definitions, see [Data flow](../architecture/data-flow).
+The storage adapter stores the outbox in IndexedDB, so pending mutations survive page reloads, browser crashes, and device restarts. When the client starts, it replays any `queued` or `sent` transactions. For the full outbox lifecycle and state definitions, see [Data flow](/architecture/data-flow).
 
 ## Optimistic updates
 
@@ -56,7 +56,7 @@ const TaskStatus = observer(function TaskStatus({
 });
 ```
 
-If the server rejects the mutation, the client rolls back the optimistic update and emits a `rebaseConflict` event. See [Conflict resolution](conflict-resolution) for details.
+If the server rejects the mutation, the client rolls back the optimistic update and emits a `rebaseConflict` event. See [Conflict resolution](/guides/conflict-resolution) for details.
 
 ## Monitoring connection state
 
@@ -98,7 +98,7 @@ export function SyncIndicator() {
 }
 ```
 
-See [Hooks](../packages/react/hooks) for the full state reference.
+See [Hooks](/packages/react/hooks) for the full state reference.
 
 ## Pending mutation tracking
 
@@ -178,7 +178,7 @@ Key behaviors:
 - **Exponential backoff**: Retries at 1s, 2s, 4s, up to 30s, with 20% jitter to avoid thundering herd.
 - **Delta catch-up**: The client sends its `lastSyncId` and receives only missed deltas. No full re-download in most cases.
 - **Outbox replay**: The client retransmits any queued or previously-sent mutations. Each mutation carries an idempotency key, so duplicate delivery is safe.
-- **Rebase**: If server deltas affect the same models as pending mutations, the client rebases automatically. See [Conflict resolution](conflict-resolution).
+- **Rebase**: If server deltas affect the same models as pending mutations, the client rebases automatically. See [Conflict resolution](/guides/conflict-resolution).
 
 ## Best practices
 
@@ -187,7 +187,7 @@ Follow these guidelines to build a polished offline experience.
 - Show sync status in your app shell so users know when they're offline and how many changes are pending.
 - Assume every mutation succeeds and show the result immediately: handle failures as exceptions, not expected outcomes.
 - Structure mutations to be idempotent so replaying them after reconnection produces the same result.
-- Register a listener for `rebaseConflict` events to handle cases where an optimistic update conflicts with a server change. See [Conflict resolution](conflict-resolution).
+- Register a listener for `rebaseConflict` events to handle cases where an optimistic update conflicts with a server change. See [Conflict resolution](/guides/conflict-resolution).
 - Use the `PendingGuard` pattern (shown above) to prevent data loss when the user closes the tab with unsynced mutations.
 
 ## Complete example: offline-capable task manager

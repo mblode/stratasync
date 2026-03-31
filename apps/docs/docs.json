@@ -28,16 +28,20 @@
   "navigation": {
     "groups": [
       {
-        "group": "Why Strata Sync",
-        "pages": ["manifesto", "values", "mission", "product-vision"]
-      },
-      {
         "group": "Getting Started",
-        "pages": ["index", "installation", "quick-start"]
+        "pages": [
+          "index",
+          "installation",
+          "quick-start"
+        ]
       },
       {
         "group": "Architecture",
-        "pages": ["architecture", "architecture/sync-protocol", "architecture/data-flow"]
+        "pages": [
+          "architecture",
+          "architecture/sync-protocol",
+          "architecture/data-flow"
+        ]
       },
       {
         "group": "Guides",

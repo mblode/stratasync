@@ -60,7 +60,7 @@ declare creatorId: string | null;
 | `indexed`    | `boolean` | auto        | Whether to index the foreign key  |
 | `lazy`       | `boolean` | -           | Whether to lazily hydrate         |
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## @ManyToOne: explicit many-to-one
 
@@ -95,7 +95,7 @@ export class Comment extends Model {
 
 Use `@ManyToOne` for string-based references, `@Reference` for factory functions (helps with circular imports). Both produce identical metadata.
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## @OneToMany: inverse collection
 
@@ -126,7 +126,7 @@ export class Project extends Model {
 | `indexed`    | `boolean` | -       | Whether to use index for lookups   |
 | `nullable`   | `boolean` | -       | Whether the collection can be null |
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## @BackReference: computed inverse
 
@@ -159,7 +159,7 @@ export class User extends Model {
 | ------------ | -------- | ------- | ------------------------------------ |
 | `foreignKey` | `string` | -       | Foreign key on the referencing model |
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## @ReferenceArray: ordered list of references
 
@@ -198,7 +198,7 @@ declare members: unknown[];
 | --------- | -------- | ------- | -------------------------------- |
 | `through` | `string` | -       | Join model name for many-to-many |
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## @ReferenceCollection: unordered set
 
@@ -226,7 +226,7 @@ export class Team extends Model {
 }
 ```
 
-See [Decorators](../packages/core/decorators) for the full API reference.
+See [Decorators](/packages/core/decorators) for the full API reference.
 
 ## Lazy loading vs. eager loading
 
@@ -242,7 +242,7 @@ declare assignee: User | null;
 declare assignee: User | null;
 ```
 
-Lazy loading helps with large reference chains, partial-load models (where the referenced data may not be available yet), and performance-sensitive views where you load models but don't display all their references. See [Load Strategies](load-strategies) for more on controlling when relationship targets load.
+Lazy loading helps with large reference chains, partial-load models (where the referenced data may not be available yet), and performance-sensitive views where you load models but don't display all their references. See [Load Strategies](/guides/load-strategies) for more on controlling when relationship targets load.
 
 ## Circular references
 
@@ -289,4 +289,4 @@ const assignee = task.assignee; // Resolves via identity map
 const userTeam = assignee.team; // Same team object (referential equality)
 ```
 
-See [Decorators](../packages/core/decorators) for a complete domain model example.
+See [Decorators](/packages/core/decorators) for a complete domain model example.

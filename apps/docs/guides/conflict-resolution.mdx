@@ -7,7 +7,7 @@ When multiple clients modify the same data, the rebase algorithm resolves confli
 
 ## Server-sequenced model
 
-The server assigns global order. See [Sync protocol](../architecture/sync-protocol) for details.
+The server assigns global order. See [Sync protocol](/architecture/sync-protocol) for details.
 
 ## How rebase works
 
@@ -106,7 +106,7 @@ const client = createSyncClient({
 | --------------------------------- | --------------------------------------------------------------------------------- |
 | General purpose (forms, settings) | `rebaseStrategy: "merge"` + `fieldLevelConflicts: true` (default)                 |
 | Simple apps, few concurrent users | `rebaseStrategy: "server-wins"` (default)                                         |
-| Collaborative text editing        | Use [Yjs CRDTs](collaborative-editing) instead                                    |
+| Collaborative text editing        | Use [Yjs CRDTs](/guides/collaborative-editing) instead                            |
 | Critical data (finance, legal)    | `rebaseStrategy: "server-wins"` with `rebaseConflict` event handler for custom UI |
 | Force-update operations           | `rebaseStrategy: "client-wins"`                                                   |
 
@@ -278,6 +278,6 @@ This is why `fieldLevelConflicts: true` (the default) with `rebaseStrategy: "mer
 
 ## Next steps
 
-- [Offline-First Patterns](offline-first): How mutations flow through the outbox.
-- [Collaborative Editing](collaborative-editing): CRDT-based editing that avoids field-level conflicts.
-- [sync-core Transactions API](../packages/core/transactions): Low-level transaction creation and management.
+- [Offline-First Patterns](/guides/offline-first): How mutations flow through the outbox.
+- [Collaborative Editing](/guides/collaborative-editing): CRDT-based editing that avoids field-level conflicts.
+- [sync-core Transactions API](/packages/core/transactions): Low-level transaction creation and management.

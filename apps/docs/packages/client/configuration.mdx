@@ -113,7 +113,7 @@ All optional.
 | `bootstrapMode`  | `"auto" \| "full" \| "local"`               | `"auto"`    | `auto`: use local storage if available and the schema matches, otherwise bootstrap from server. `full`: always bootstrap from server. `local`: never contact the server. |
 | `schema`         | `SchemaDefinition \| ModelRegistrySnapshot` | -           | Explicit schema definition. If omitted, the client uses the global `ModelRegistry` populated by decorators.                                                              |
 | `modelFactory`   | `ModelFactory \| ModelFactoryFactory`       | -           | Custom factory for creating model instances from raw data. Defaults to `ModelRegistry` constructors with `_applyUpdate`.                                                 |
-| `yjsTransport`   | `YjsTransport`                              | -           | Yjs transport for collaborative editing. Enables `client.yjs` with document and presence managers. See [Y-Doc](../y-doc).                                                |
+| `yjsTransport`   | `YjsTransport`                              | -           | Yjs transport for collaborative editing. Enables `client.yjs` with document and presence managers. See [Y-Doc](/packages/y-doc).                                                |
 
 ## Conflict resolution
 

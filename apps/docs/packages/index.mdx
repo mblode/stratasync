@@ -1,0 +1,35 @@
+---
+title: Packages
+description: Overview of the Strata Sync package ecosystem.
+---
+
+Strata Sync is split into focused packages so you can adopt only the layers you
+need.
+
+## Core runtime
+
+- [`@stratasync/core`](/packages/core) - Model runtime, schema, decorators, and
+  transactions.
+- [`@stratasync/client`](/packages/client) - Client orchestration, queries,
+  events, and the offline outbox.
+
+## UI and framework integrations
+
+- [`@stratasync/react`](/packages/react) - React hooks and providers.
+- [`@stratasync/next`](/packages/next) - Next.js App Router bootstrap and
+  hydration utilities.
+- [`@stratasync/mobx`](/packages/mobx) - MobX reactivity bindings for models.
+
+## Storage and transport adapters
+
+- [`@stratasync/storage-idb`](/packages/storage-idb) - IndexedDB persistence
+  for local-first apps.
+- [`@stratasync/transport-graphql`](/packages/transport-graphql) - GraphQL and
+  WebSocket sync transport.
+
+## Collaboration
+
+- [`@stratasync/y-doc`](/packages/y-doc) - Yjs-backed collaborative editing and
+  presence.
+
+Use the package pages above for installation, imports, and API details.

@@ -84,7 +84,7 @@ sequenceDiagram
 
 Field-level LWW rebase resolves conflicts between server deltas and pending local transactions. Each pending transaction stores a `patch` and an `original` snapshot. Non-overlapping changes merge cleanly; overlapping fields use the configured `rebaseStrategy` (`"server-wins"`, `"client-wins"`, or `"merge"`).
 
-See [Conflict resolution](../guides/conflict-resolution) for strategies and examples.
+See [Conflict resolution](/guides/conflict-resolution) for strategies and examples.
 
 ## Offline and reconnect flow
 
@@ -117,7 +117,7 @@ sequenceDiagram
 
 On reconnection, the client fetches missed deltas, then replays the outbox. Idempotency keys make retry safe, even if a mutation was sent but not acknowledged before the disconnect.
 
-See [Offline-first guide](../guides/offline-first) for configuration and best practices.
+See [Offline-first guide](/guides/offline-first) for configuration and best practices.
 
 ## Transaction lifecycle
 

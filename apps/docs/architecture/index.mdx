@@ -3,7 +3,7 @@ title: Architecture overview
 description: The layered architecture of Strata Sync, from the framework-agnostic core to React and Next.js integrations.
 ---
 
-The core is framework-agnostic. Adapters at the edges handle React, MobX, IndexedDB, and GraphQL. The sync protocol is based on [Linear's published design](sync-protocol#design-lineage).
+The core is framework-agnostic. Adapters at the edges handle React, MobX, IndexedDB, and GraphQL. The sync protocol is based on [Linear's published design](/architecture/sync-protocol#design-lineage).
 
 ## Package dependency graph
 
@@ -32,7 +32,7 @@ Storage, transport, and reactivity adapters implement interfaces from `@stratasy
 
 ## Layered architecture
 
-Each layer builds on the one below. See the individual [package docs](../packages) for API details.
+Each layer builds on the one below. See the individual [package docs](/packages) for API details.
 
 ### Layer 1: Schema and metadata (`@stratasync/core`)
 
@@ -60,7 +60,7 @@ Turns model instances into MobX observables. Delta application wraps in a MobX t
 
 ### Layer 7: Framework integration (`@stratasync/react`, `@stratasync/next`)
 
-React hooks and providers connect the sync client to the component tree. The Next.js package adds server-side bootstrap prefetching for fast first paint. See [React](../packages/react) and [Next.js](../packages/next) for the full hook API.
+React hooks and providers connect the sync client to the component tree. The Next.js package adds server-side bootstrap prefetching for fast first paint. See [React](/packages/react) and [Next.js](/packages/next) for the full hook API.
 
 ## Full system architecture
 
