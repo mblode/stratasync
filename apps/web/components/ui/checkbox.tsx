@@ -1,4 +1,3 @@
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop */
 "use client";
 
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
@@ -10,26 +9,17 @@ import "./checkbox.css";
 
 type CheckedState = boolean | "indeterminate";
 
-export interface CheckboxProps extends Omit<
-  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>,
-  "checked" | "defaultChecked" | "indeterminate" | "onCheckedChange"
-> {
+export interface CheckboxProps
+  extends Omit<
+    React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>,
+    "checked" | "defaultChecked" | "indeterminate" | "onCheckedChange"
+  > {
   checked?: CheckedState;
   defaultChecked?: CheckedState;
   hasError?: boolean;
   indeterminate?: boolean;
   onCheckedChange?: (checked: CheckedState) => void;
 }
-
-const getDataState = (state: {
-  checked: boolean;
-  indeterminate: boolean;
-}): string => {
-  if (state.indeterminate) {
-    return "indeterminate";
-  }
-  return state.checked ? "checked" : "unchecked";
-};
 
 const Checkbox = React.forwardRef<
   React.ElementRef<typeof CheckboxPrimitive.Root>,
@@ -50,13 +40,6 @@ const Checkbox = React.forwardRef<
       indeterminate ??
       (checked === "indeterminate" || defaultChecked === "indeterminate");
 
-    const handleCheckedChange = React.useCallback(
-      (nextChecked: boolean) => {
-        onCheckedChange?.(nextChecked);
-      },
-      [onCheckedChange]
-    );
-
     return (
       <CheckboxPrimitive.Root
         checked={checked === "indeterminate" ? false : checked}
@@ -69,10 +52,19 @@ const Checkbox = React.forwardRef<
           defaultChecked === "indeterminate" ? false : defaultChecked
         }
         indeterminate={resolvedIndeterminate}
-        onCheckedChange={handleCheckedChange}
+        onCheckedChange={(nextChecked) => onCheckedChange?.(nextChecked)}
         ref={ref}
         render={(renderProps, state) => (
-          <span {...renderProps} data-state={getDataState(state)} />
+          <span
+            {...renderProps}
+            data-state={
+              state.indeterminate
+                ? "indeterminate"
+                : state.checked
+                  ? "checked"
+                  : "unchecked"
+            }
+          />
         )}
         {...props}
       >
