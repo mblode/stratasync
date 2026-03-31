@@ -3,6 +3,11 @@
   "theme": "mint",
   "name": "Strata Sync",
   "description": "Build instant, offline-capable apps that sync with Strata Sync.",
+  "seo": {
+    "metatags": {
+      "canonical": "https://stratasync.dev/docs"
+    }
+  },
   "colors": {
     "primary": "#1d4ed8",
     "light": "#dbeafe",
