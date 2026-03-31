@@ -116,6 +116,14 @@ export {
   createStandardDelegate,
 } from "./mutate/model-handlers.js";
 
+// Schema inference
+export type {
+  InferredBootstrapFields,
+  InferredMutateFields,
+  InferredTableFields,
+} from "./schema/infer-model.js";
+export { inferTableFields } from "./schema/infer-model.js";
+
 // Services
 export { BootstrapService } from "./bootstrap/bootstrap-service.js";
 export { DeltaService } from "./delta/delta-service.js";
