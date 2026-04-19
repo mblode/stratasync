@@ -204,7 +204,21 @@ export default {
       const landingHost = env?.LANDING_URL ?? "landing.stratasync.dev";
       const urlObject = new URL(request.url);
 
-      // Allow Vercel/Let's Encrypt verification paths to pass through
+      // Agent discovery endpoints are served by the landing app, so forward
+      // them explicitly to the landing host. All other /.well-known/ paths
+      // (Vercel/Let's Encrypt verification, etc.) pass through to origin.
+      if (
+        urlObject.pathname === "/.well-known/api-catalog" ||
+        urlObject.pathname === "/.well-known/agent-skills/index.json"
+      ) {
+        const landingUrl = new URL(request.url);
+        landingUrl.hostname = landingHost;
+        return await fetch(landingUrl, {
+          body: request.body,
+          headers: request.headers,
+          method: request.method,
+        });
+      }
       if (urlObject.pathname.startsWith("/.well-known/")) {
         return await fetch(request);
       }

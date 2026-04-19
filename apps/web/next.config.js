@@ -40,6 +40,22 @@ const securityHeaders = [
   { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
 ];
 
+// RFC 8288 Link headers for agent discovery.
+// - api-catalog: RFC 9727 machine-readable index of API resources
+// - service-doc: IANA-registered rel for human-readable API docs
+// - alternate (text/markdown): advertises markdown content negotiation
+const agentDiscoveryLinkHeader = [
+  '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+  '</docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
+  '</.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"',
+  '</>; rel="alternate"; type="text/markdown"',
+].join(", ");
+
+const agentDiscoveryHeaders = [
+  { key: "Link", value: agentDiscoveryLinkHeader },
+  { key: "Vary", value: "Accept" },
+];
+
 const nextConfig = {
   env: {
     STRATASYNC_VERSION: version,
@@ -98,8 +114,24 @@ const nextConfig = {
         source: "/fonts/:path*",
       },
       {
+        headers: agentDiscoveryHeaders,
+        source: "/",
+      },
+      {
         headers: securityHeaders,
         source: "/(.*)",
+      },
+    ];
+  },
+  rewrites() {
+    return [
+      {
+        destination: "/well-known/api-catalog",
+        source: "/.well-known/api-catalog",
+      },
+      {
+        destination: "/well-known/agent-skills-index",
+        source: "/.well-known/agent-skills/index.json",
       },
     ];
   },

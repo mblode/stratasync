@@ -66,6 +66,27 @@ const run = async () => {
     assert.equal(requests.length, 1);
     assertHost(requests[0], "stratasync.dev");
 
+    // Agent discovery endpoints are forwarded to the landing app.
+    requests.length = 0;
+    await worker.fetch(
+      new Request("https://stratasync.dev/.well-known/api-catalog"),
+      env
+    );
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(requests.length, 1);
+    assertHost(requests[0], env.LANDING_URL);
+
+    requests.length = 0;
+    await worker.fetch(
+      new Request(
+        "https://stratasync.dev/.well-known/agent-skills/index.json"
+      ),
+      env
+    );
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
+    assert.equal(requests.length, 1);
+    assertHost(requests[0], env.LANDING_URL);
+
     // docs.stratasync.dev → stratasync.dev/docs (301 redirect)
     requests.length = 0;
     const docsSubdomainRes = await worker.fetch(
