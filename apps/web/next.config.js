@@ -123,6 +123,14 @@ const nextConfig = {
       },
     ];
   },
+  images: {
+    remotePatterns: [
+      {
+        hostname: "images.unsplash.com",
+        protocol: "https",
+      },
+    ],
+  },
   rewrites() {
     return [
       {
@@ -134,14 +142,6 @@ const nextConfig = {
         source: "/.well-known/agent-skills/index.json",
       },
     ];
-  },
-  images: {
-    remotePatterns: [
-      {
-        hostname: "images.unsplash.com",
-        protocol: "https",
-      },
-    ],
   },
 };
 

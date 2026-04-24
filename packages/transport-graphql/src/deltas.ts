@@ -1,5 +1,5 @@
 import type { DeltaPacket, SyncAction, SyncId } from "@stratasync/core";
-import { maxSyncId } from "@stratasync/core";
+import { isSyncIdGreaterThan, maxSyncId } from "@stratasync/core";
 
 import {
   joinSyncUrl,
@@ -153,6 +153,12 @@ export async function* fetchAllDeltas(
 
     if (!packet.hasMore || packet.actions.length === 0) {
       break;
+    }
+
+    if (!isSyncIdGreaterThan(packet.lastSyncId, currentSyncId)) {
+      throw new Error(
+        `Delta pagination did not advance beyond sync ID ${currentSyncId}`
+      );
     }
 
     currentSyncId = packet.lastSyncId;

@@ -55,6 +55,29 @@ describe(YjsPresenceManager, () => {
       );
       expect(startMessages).toHaveLength(1);
     });
+
+    it("keeps viewing active until all viewers stop", () => {
+      manager.startViewing(testDocKey);
+      manager.startViewing(testDocKey);
+
+      manager.stopViewing(testDocKey);
+
+      expect(manager.isViewing(testDocKey)).toBeTruthy();
+      expect(
+        transport.sentMessages.filter(
+          (m) => m.type === "doc_view" && m.state === "stop"
+        )
+      ).toHaveLength(0);
+
+      manager.stopViewing(testDocKey);
+
+      expect(manager.isViewing(testDocKey)).toBeFalsy();
+      expect(
+        transport.sentMessages.filter(
+          (m) => m.type === "doc_view" && m.state === "stop"
+        )
+      ).toHaveLength(1);
+    });
   });
 
   describe("stopViewing", () => {
@@ -134,6 +157,30 @@ describe(YjsPresenceManager, () => {
         (m) => m.type === "doc_focus" && m.state === "focus"
       );
       expect(focusMessages).toHaveLength(1);
+    });
+
+    it("keeps editing active until all focus holders blur", () => {
+      manager.startViewing(testDocKey);
+      manager.focus(testDocKey);
+      manager.focus(testDocKey);
+
+      manager.blur(testDocKey);
+
+      expect(manager.isEditing(testDocKey)).toBeTruthy();
+      expect(
+        transport.sentMessages.filter(
+          (m) => m.type === "doc_focus" && m.state === "blur"
+        )
+      ).toHaveLength(0);
+
+      manager.blur(testDocKey);
+
+      expect(manager.isEditing(testDocKey)).toBeFalsy();
+      expect(
+        transport.sentMessages.filter(
+          (m) => m.type === "doc_focus" && m.state === "blur"
+        )
+      ).toHaveLength(1);
     });
   });
 

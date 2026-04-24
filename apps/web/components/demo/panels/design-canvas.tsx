@@ -125,7 +125,7 @@ const SelectionOverlay = ({
 
       const startX = e.clientX;
       const startY = e.clientY;
-      const pointerId = e.pointerId;
+      const { pointerId } = e;
       const startBounds = {
         h: layer.height,
         w: layer.width,
@@ -275,7 +275,7 @@ export const DesignCanvas = ({
 
       const startX = e.clientX;
       const startY = e.clientY;
-      const pointerId = e.pointerId;
+      const { pointerId } = e;
       const startLayerX = layer.x;
       const startLayerY = layer.y;
 

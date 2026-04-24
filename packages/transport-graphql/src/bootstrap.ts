@@ -11,10 +11,10 @@ import { joinSyncUrl, normalizeSyncEndpoint } from "./protocol.js";
 import type { AuthProvider, RetryConfig } from "./types.js";
 import {
   buildRequestHeaders,
+  executeWithAuthRetry,
   fetchChecked,
   isRetryableError,
   parseSyncId,
-  resolveAuthToken,
   retryWithBackoff,
 } from "./utils.js";
 
@@ -37,20 +37,20 @@ export async function* createBootstrapStream(
   const url = buildBootstrapUrl(opts.syncEndpoint, opts.bootstrapOptions);
 
   const response = await retryWithBackoff(
-    async () => {
-      const token = await resolveAuthToken(opts.auth);
-      const requestHeaders = buildRequestHeaders({
-        accept: "application/x-ndjson",
-        headers: opts.headers,
-        token,
-      });
-      return fetchChecked(
-        url,
-        { headers: requestHeaders, method: "GET" },
-        opts.timeoutMs,
-        "Bootstrap failed"
-      );
-    },
+    () =>
+      executeWithAuthRetry(opts.auth, (token) => {
+        const requestHeaders = buildRequestHeaders({
+          accept: "application/x-ndjson",
+          headers: opts.headers,
+          token,
+        });
+        return fetchChecked(
+          url,
+          { headers: requestHeaders, method: "GET" },
+          opts.timeoutMs,
+          "Bootstrap failed"
+        );
+      }),
     opts.retryConfig,
     isRetryableError
   );
@@ -101,21 +101,21 @@ export async function* createBatchLoadStream(
   const syncBase = normalizeSyncEndpoint(opts.syncEndpoint);
   const url = joinSyncUrl(syncBase, "/batch");
   const response = await retryWithBackoff(
-    async () => {
-      const token = await resolveAuthToken(opts.auth);
-      const requestHeaders = buildRequestHeaders({
-        accept: "application/x-ndjson",
-        contentType: "application/json",
-        headers: opts.headers,
-        token,
-      });
-      return fetchChecked(
-        url,
-        { body, headers: requestHeaders, method: "POST" },
-        opts.timeoutMs,
-        "Batch load failed"
-      );
-    },
+    () =>
+      executeWithAuthRetry(opts.auth, (token) => {
+        const requestHeaders = buildRequestHeaders({
+          accept: "application/x-ndjson",
+          contentType: "application/json",
+          headers: opts.headers,
+          token,
+        });
+        return fetchChecked(
+          url,
+          { body, headers: requestHeaders, method: "POST" },
+          opts.timeoutMs,
+          "Batch load failed"
+        );
+      }),
     opts.retryConfig,
     isRetryableError
   );

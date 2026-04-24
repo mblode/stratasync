@@ -352,15 +352,13 @@ describe(YjsDocumentManager, () => {
       expect(manager.getDerivedContent(testDocKey)).toBe("Server content");
     });
 
-    it("should merge server content over pre-seeded initial content", () => {
+    it("should not seed initial content into non-empty server documents", () => {
       manager.connect(testDocKey, { initialContent: "Local initial content" });
 
-      // Initial content is seeded immediately
       expect(manager.getDerivedContent(testDocKey)).toBe(
         "Local initial content"
       );
 
-      // Server sends its content via sync step 2
       const serverDoc = new Y.Doc();
       setProsemirrorContent(serverDoc, "Server content");
       const update = Y.encodeStateAsUpdate(serverDoc);
@@ -374,9 +372,37 @@ describe(YjsDocumentManager, () => {
         type: "yjs_sync_step2",
       });
 
-      // Server content is present after CRDT merge
-      const content = manager.getDerivedContent(testDocKey);
-      expect(content).toContain("Server content");
+      expect(manager.getDerivedContent(testDocKey)).toBe("Server content");
+      expect(
+        transport.sentMessages.filter(
+          (message) => message.type === "yjs_update"
+        )
+      ).toHaveLength(0);
+    });
+
+    it("seeds and uploads initial content after an empty server document syncs", () => {
+      manager.connect(testDocKey, { initialContent: "Local initial content" });
+
+      const serverDoc = new Y.Doc();
+      const update = Y.encodeStateAsUpdate(serverDoc);
+
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(update).toString("base64"),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(manager.getDerivedContent(testDocKey)).toBe(
+        "Local initial content"
+      );
+      expect(
+        transport.sentMessages.filter(
+          (message) => message.type === "yjs_update"
+        )
+      ).toHaveLength(1);
     });
 
     it("should apply remote updates", () => {

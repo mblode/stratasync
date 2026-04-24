@@ -26,6 +26,7 @@ export {
   useSyncState,
 } from "./hooks/use-sync-client.js";
 export type {
+  DocumentKey,
   UseYjsDocumentOptions,
   UseYjsDocumentResult,
   YjsConnectionState,

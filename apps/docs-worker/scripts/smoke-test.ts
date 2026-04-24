@@ -78,9 +78,7 @@ const run = async () => {
 
     requests.length = 0;
     await worker.fetch(
-      new Request(
-        "https://stratasync.dev/.well-known/agent-skills/index.json"
-      ),
+      new Request("https://stratasync.dev/.well-known/agent-skills/index.json"),
       env
     );
     // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework

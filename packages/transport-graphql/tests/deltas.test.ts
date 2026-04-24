@@ -163,6 +163,40 @@ describe("delta fetching", () => {
     expect(next.value).toBe("25");
   });
 
+  it("rejects paginated delta responses that do not advance the cursor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        actions: [
+          {
+            action: "I",
+            data: {},
+            id: "10",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        hasMore: true,
+        lastSyncId: "10",
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const iterator = fetchAllDeltas({
+      afterSyncId: "10",
+      auth: createAuthProvider(null),
+      batchSize: 1,
+      syncEndpoint: SYNC_ENDPOINT,
+    });
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: expect.objectContaining({ id: "10" }),
+    });
+    await expect(iterator.next()).rejects.toThrow(
+      "Delta pagination did not advance beyond sync ID 10"
+    );
+  });
+
   it("uses refreshToken fallback when access token is missing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({

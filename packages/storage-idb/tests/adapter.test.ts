@@ -344,6 +344,38 @@ test("indexed relations create foreign key indexes", async () => {
   ]);
 });
 
+test("writeBatch no-ops for empty batches", async () => {
+  const userId = `user-${randomUUID()}`;
+  const dbName = computeWorkspaceDatabaseName({
+    userId,
+    userVersion: 1,
+    version: 1,
+  });
+  const adapter = new IndexedDbStorageAdapter();
+
+  await adapter.open({
+    schema: baseSchema,
+    userId,
+    userVersion: 1,
+    version: 1,
+  });
+  await adapter.put("Task", { id: "task-1", title: "Existing" });
+
+  await adapter.writeBatch([]);
+
+  assert.deepEqual(await adapter.get("Task", "task-1"), {
+    id: "task-1",
+    title: "Existing",
+  });
+
+  await adapter.close();
+  await deleteDatabases([
+    "stratasync_databases",
+    dbName,
+    computePartialDbName(dbName, baseSchema, 1, "Comment"),
+  ]);
+});
+
 test("adding a groupKey repairs the store layout on reopen", async () => {
   const base: SchemaDefinition = {
     models: {

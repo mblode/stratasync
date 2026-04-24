@@ -17,6 +17,15 @@ interface ItemSnapshot {
 const includesModelId = <T>(items: T[], modelId: string): boolean =>
   items.some((item) => (item as Record<string, unknown>).id === modelId);
 
+const includesAnyModelId = <T>(
+  items: T[],
+  modelIds: ReadonlySet<string>
+): boolean =>
+  items.some((item) => {
+    const { id } = item as Record<string, unknown>;
+    return typeof id === "string" && modelIds.has(id);
+  });
+
 const captureSnapshots = <T>(items: T[]): ItemSnapshot[] =>
   items.map((item) => {
     const record = item as Record<string, unknown>;
@@ -202,7 +211,6 @@ export const useQuery = <T>(
     limit: options.limit,
     offset: options.offset,
     orderBy: options.orderBy,
-    skip: options.skip,
     where: options.where,
   });
 
@@ -211,7 +219,6 @@ export const useQuery = <T>(
     limit: options.limit,
     offset: options.offset,
     orderBy: options.orderBy,
-    skip: options.skip,
     where: options.where,
   };
   const previousOptionsSnapshot = optionsSnapshotRef.current;
@@ -221,7 +228,6 @@ export const useQuery = <T>(
     previousOptionsSnapshot.limit !== nextOptionsSnapshot.limit ||
     previousOptionsSnapshot.offset !== nextOptionsSnapshot.offset ||
     previousOptionsSnapshot.orderBy !== nextOptionsSnapshot.orderBy ||
-    previousOptionsSnapshot.skip !== nextOptionsSnapshot.skip ||
     previousOptionsSnapshot.where !== nextOptionsSnapshot.where
   ) {
     optionsVersionRef.current += 1;
@@ -242,7 +248,9 @@ export const useQuery = <T>(
   const errorRef = useRef<Error | null>(null);
   // Microtask debounce flag. Coalesces rapid modelChange events into one refresh.
   const pendingRefreshRef = useRef(false);
+  const pendingChangedModelIdsRef = useRef<Set<string>>(new Set());
   const requestVersionRef = useRef(0);
+  const handledOptionsVersionRef = useRef(optionsVersion);
 
   /**
    * Apply a query result to React state. Only calls setters when values
@@ -372,13 +380,16 @@ export const useQuery = <T>(
     (
       refreshOptions: {
         changedModelId?: string;
+        changedModelIds?: ReadonlySet<string>;
         forceDataUpdate?: boolean;
       } = {}
     ) => {
       if (optionsRef.current.skip) {
+        requestVersionRef.current += 1;
         clearSkipped();
         return;
       }
+      requestVersionRef.current += 1;
 
       const map = client.getIdentityMap<T & Record<string, unknown>>(modelName);
       const result = querySyncFromMap(
@@ -389,7 +400,9 @@ export const useQuery = <T>(
       const forceDataUpdate =
         refreshOptions.forceDataUpdate ||
         (refreshOptions.changedModelId !== undefined &&
-          includesModelId(result.data, refreshOptions.changedModelId));
+          includesModelId(result.data, refreshOptions.changedModelId)) ||
+        (refreshOptions.changedModelIds !== undefined &&
+          includesAnyModelId(result.data, refreshOptions.changedModelIds));
 
       applyResult(result.data as T[], result.totalCount, result.hasMore, {
         forceDataUpdate,
@@ -408,10 +421,16 @@ export const useQuery = <T>(
   }, [isReady, options.skip, executeQuery, clearSkipped]);
 
   useEffect(() => {
-    if (optionsVersion === 0 || !isReady || options.skip) {
+    if (!isReady || options.skip) {
+      handledOptionsVersionRef.current = optionsVersion;
       return;
     }
 
+    if (handledOptionsVersionRef.current === optionsVersion) {
+      return;
+    }
+
+    handledOptionsVersionRef.current = optionsVersion;
     refreshSync();
   }, [optionsVersion, isReady, options.skip, refreshSync]);
 
@@ -428,21 +447,24 @@ export const useQuery = <T>(
     }
 
     let active = true;
+    const pendingChangedModelIds = pendingChangedModelIdsRef.current;
     const unsubscribe = client.onEvent((event) => {
       // Coalesce rapid modelChange events (e.g. a delta packet with many
       // actions for the same model type) into a single refreshSync call.
-      if (
-        event.type === "modelChange" &&
-        event.modelName === modelName &&
-        !pendingRefreshRef.current
-      ) {
+      if (event.type === "modelChange" && event.modelName === modelName) {
+        pendingChangedModelIds.add(event.modelId);
+        if (pendingRefreshRef.current) {
+          return;
+        }
         pendingRefreshRef.current = true;
         queueMicrotask(() => {
           if (!active) {
             return;
           }
           pendingRefreshRef.current = false;
-          refreshSync({ changedModelId: event.modelId });
+          const changedModelIds = new Set(pendingChangedModelIds);
+          pendingChangedModelIds.clear();
+          refreshSync({ changedModelIds });
         });
       }
     });
@@ -451,6 +473,7 @@ export const useQuery = <T>(
       active = false;
       unsubscribe();
       pendingRefreshRef.current = false;
+      pendingChangedModelIds.clear();
     };
   }, [client, modelName, isReady, options.skip, refreshSync]);
 

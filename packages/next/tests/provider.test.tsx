@@ -16,7 +16,7 @@ import {
   seedStorageFromBootstrap,
   serializeBootstrapSnapshot,
 } from "@stratasync/next/server";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 
 const noopUnsubscribe = () => {
@@ -231,8 +231,10 @@ describe(NextSyncProvider, () => {
       expect(onReady).toHaveBeenCalledOnce();
     });
 
-    emitStateChange("error");
-    emitStateChange("syncing");
+    act(() => {
+      emitStateChange("error");
+      emitStateChange("syncing");
+    });
 
     await waitFor(() => {
       expect(onReady).toHaveBeenCalledOnce();
@@ -248,13 +250,17 @@ describe(NextSyncProvider, () => {
       </NextSyncProvider>
     );
 
-    emitEvent({ error: new Error("boom"), type: "syncError" });
+    act(() => {
+      emitEvent({ error: new Error("boom"), type: "syncError" });
+    });
 
     await waitFor(() => {
       expect(screen.getByText("boom")).toBeTruthy();
     });
 
-    emitStateChange("syncing");
+    act(() => {
+      emitStateChange("syncing");
+    });
 
     await waitFor(() => {
       expect(screen.getByText("child")).toBeTruthy();

@@ -200,13 +200,13 @@ export class LazyCollection<T extends Model> {
 
   add(item: T): void {
     this.ensureHydrating();
-    this.elementsCache.push(item);
+    replaceOrAppendCollectionItem(this.elementsCache, item);
     this.recordMutation({ item, type: "add" });
   }
 
   remove(item: T): boolean {
     this.ensureHydrating();
-    const index = this.elementsCache.indexOf(item);
+    const index = findMatchingCollectionItemIndex(this.elementsCache, item);
     if (index === -1) {
       return false;
     }

@@ -1,4 +1,5 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 // Markdown content negotiation for AI agents. Requests to `/` with an
 // `Accept: text/markdown` preference are rewritten to a route that returns
@@ -13,7 +14,10 @@ const prefersMarkdown = (accept: string | null): boolean => {
   }
 
   const entries = accept.split(",").map((entry) => {
-    const [type, ...params] = entry.trim().split(";").map((s) => s.trim());
+    const [type, ...params] = entry
+      .trim()
+      .split(";")
+      .map((s) => s.trim());
     const qParam = params.find((p) => p.startsWith("q="));
     const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
     return { q: Number.isFinite(q) ? q : 0, type: type.toLowerCase() };
@@ -30,7 +34,7 @@ const prefersMarkdown = (accept: string | null): boolean => {
   return !html || markdown.q >= html.q;
 };
 
-export const middleware = (request: NextRequest) => {
+export const proxy = (request: NextRequest) => {
   if (prefersMarkdown(request.headers.get("accept"))) {
     const url = request.nextUrl.clone();
     url.pathname = MARKDOWN_DESTINATION;

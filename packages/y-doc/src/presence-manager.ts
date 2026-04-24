@@ -31,6 +31,8 @@ import {
 interface PresenceState {
   isViewing: boolean;
   isEditing: boolean;
+  viewCount: number;
+  editCount: number;
   sessionState: SessionState | null;
   retryAttempts: number;
   retryTimer?: ReturnType<typeof setTimeout>;
@@ -94,14 +96,17 @@ export class YjsPresenceManager {
 
     if (!state) {
       state = {
+        editCount: 0,
         isEditing: false,
         isViewing: false,
         retryAttempts: 0,
         sessionState: null,
+        viewCount: 0,
       };
       this.presenceStates.set(keyString, state);
     }
 
+    state.viewCount += 1;
     if (state.isViewing) {
       return;
     }
@@ -124,10 +129,17 @@ export class YjsPresenceManager {
       return;
     }
 
-    if (state.isEditing) {
-      this.blur(docKey);
+    state.viewCount = Math.max(0, state.viewCount - 1);
+
+    if (state.viewCount > 0) {
+      return;
     }
 
+    if (state.isEditing) {
+      state.editCount = 0;
+      state.isEditing = false;
+      this.sendDocFocus(docKey, "blur");
+    }
     state.isViewing = false;
     YjsPresenceManager.resetRetryState(state);
 
@@ -150,10 +162,14 @@ export class YjsPresenceManager {
     }
 
     const state = this.presenceStates.get(keyString);
-    if (!state || state.isEditing) {
+    if (!state) {
       return;
     }
 
+    state.editCount += 1;
+    if (state.isEditing) {
+      return;
+    }
     state.isEditing = true;
 
     this.sendDocFocus(docKey, "focus");
@@ -171,6 +187,10 @@ export class YjsPresenceManager {
       return;
     }
 
+    state.editCount = Math.max(0, state.editCount - 1);
+    if (state.editCount > 0) {
+      return;
+    }
     state.isEditing = false;
 
     this.sendDocFocus(docKey, "blur");
@@ -221,9 +241,11 @@ export class YjsPresenceManager {
   }
 
   cleanup(): void {
-    for (const [keyString] of this.presenceStates) {
+    for (const [keyString, state] of this.presenceStates) {
       const docKey = fromDocumentKeyString(keyString);
       if (docKey) {
+        state.viewCount = state.isViewing ? 1 : 0;
+        state.editCount = state.isEditing ? 1 : 0;
         this.stopViewing(docKey);
       }
     }

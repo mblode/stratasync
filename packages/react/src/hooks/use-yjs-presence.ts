@@ -151,6 +151,9 @@ export const useYjsPresence = (
 
     const presenceManager = getPresenceManager();
     if (presenceManager) {
+      if (isEditingRef.current) {
+        presenceManager.blur(docKeyRef.current);
+      }
       presenceManager.stopViewing(docKeyRef.current);
       syncPresenceState();
     }

@@ -388,9 +388,6 @@ export class YjsDocumentManager {
       }
     }
 
-    // Store initial content for immediate seeding during requestSyncStep1.
-    // It is inserted as a local Yjs update so the server receives it after
-    // the initial sync handshake.
     state.pendingInitialContent = options.initialContent;
     this.requestSyncStep1(docKey, keyString, state);
   }
@@ -505,7 +502,12 @@ export class YjsDocumentManager {
       return "";
     }
 
-    return deriveProsemirrorContent(state.doc);
+    const docContent = deriveProsemirrorContent(state.doc);
+    if (docContent.length > 0 || state.pendingInitialContent === undefined) {
+      return docContent;
+    }
+
+    return normalizeDerivedContent(state.pendingInitialContent);
   }
 
   getStateVector(docKey: DocumentKey): Uint8Array {
@@ -675,11 +677,6 @@ export class YjsDocumentManager {
       this.setConnectionState(keyString, "disconnected");
       return;
     }
-
-    // Seed initial content immediately so the editor can render without
-    // waiting for the sync handshake round-trip. The insert is made as a
-    // local Yjs update so it is buffered and sent after the initial sync.
-    YjsDocumentManager.seedPendingContent(state);
 
     if (!this.transport?.isConnected()) {
       this.setConnectionState(keyString, "connecting");
@@ -937,6 +934,7 @@ export class YjsDocumentManager {
       return;
     }
 
+    YjsDocumentManager.seedPendingContent(state);
     state.lastSeq = message.seq;
     YjsDocumentManager.resetRetryState(state);
 

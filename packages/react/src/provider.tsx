@@ -71,6 +71,7 @@ export const SyncProvider = ({
   const [lastSyncId, setLastSyncId] = useState<SyncId>(client.lastSyncId);
   const [backlog, setBacklog] = useState<number>(0);
   const [error, setError] = useState<Error | null>(client.lastError ?? null);
+  const stateClientRef = useRef(client);
   const readyPromiseClientRef = useRef(client);
   const readyPromiseRef = useRef(
     createReadyPromiseController(client.state === "syncing")
@@ -88,9 +89,22 @@ export const SyncProvider = ({
   }
 
   const readyPromise = readyPromiseRef.current.promise;
+  const isCurrentClientSnapshot = stateClientRef.current === client;
+  const effectiveState = isCurrentClientSnapshot ? state : client.state;
+  const effectiveConnectionState = isCurrentClientSnapshot
+    ? connectionState
+    : client.connectionState;
+  const effectiveLastSyncId = isCurrentClientSnapshot
+    ? lastSyncId
+    : client.lastSyncId;
+  const effectiveBacklog = isCurrentClientSnapshot ? backlog : 0;
+  const effectiveError = isCurrentClientSnapshot
+    ? error
+    : (client.lastError ?? null);
 
   useEffect(() => {
     let mounted = true;
+    stateClientRef.current = client;
 
     // Subscribe to state changes
     const unsubState = client.onStateChange((nextState) => {
@@ -189,31 +203,39 @@ export const SyncProvider = ({
   const statusValue = useMemo<SyncStatusContextValue>(
     () => ({
       clientId: client.clientId,
-      connectionState,
-      error,
-      isOffline: connectionState === "disconnected",
-      isReady: state === "syncing",
-      isSyncing: state === "syncing" || state === "bootstrapping",
-      lastSyncId,
+      connectionState: effectiveConnectionState,
+      error: effectiveError,
+      isOffline: effectiveConnectionState === "disconnected",
+      isReady: effectiveState === "syncing",
+      isSyncing:
+        effectiveState === "syncing" || effectiveState === "bootstrapping",
+      lastSyncId: effectiveLastSyncId,
       readyPromise,
-      state,
+      state: effectiveState,
     }),
-    [state, connectionState, error, client.clientId, lastSyncId, readyPromise]
+    [
+      effectiveState,
+      effectiveConnectionState,
+      effectiveError,
+      client.clientId,
+      effectiveLastSyncId,
+      readyPromise,
+    ]
   );
 
   const value = useMemo<SyncContextValue>(
     () => ({
-      backlog,
+      backlog: effectiveBacklog,
       client,
       ...statusValue,
     }),
-    [client, backlog, statusValue]
+    [client, effectiveBacklog, statusValue]
   );
 
   return (
     <SyncClientContext.Provider value={client}>
       <SyncStatusContext.Provider value={statusValue}>
-        <SyncBacklogContext.Provider value={backlog}>
+        <SyncBacklogContext.Provider value={effectiveBacklog}>
           <SyncContext.Provider value={value}>{children}</SyncContext.Provider>
         </SyncBacklogContext.Provider>
       </SyncStatusContext.Provider>

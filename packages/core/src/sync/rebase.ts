@@ -215,23 +215,22 @@ export const rebaseTransactions = (
   for (const action of serverActions) {
     const key = `${action.modelName}:${action.modelId}`;
     const relatedTxs = pendingByKey.get(key) ?? [];
+    const ownEcho = relatedTxs.find(
+      (tx) =>
+        !processed.has(tx.clientTxId) &&
+        action.clientTxId === tx.clientTxId &&
+        action.clientId === options.clientId
+    );
+
+    if (ownEcho) {
+      result.confirmed.push(ownEcho);
+      processed.add(ownEcho.clientTxId);
+      continue;
+    }
 
     for (const tx of relatedTxs) {
       if (processed.has(tx.clientTxId)) {
         continue;
-      }
-
-      // Check if this server action is our own transaction
-      if (
-        action.clientTxId === tx.clientTxId &&
-        action.clientId === options.clientId
-      ) {
-        result.confirmed.push(tx);
-        processed.add(tx.clientTxId);
-        // Our own echo. Don't conflict-check remaining pending txs against it.
-        // Subsequent pending mutations (e.g. undo) were created on top of this
-        // change and should not be rolled back by its server confirmation.
-        break;
       }
 
       // Check for conflicts

@@ -1,3 +1,4 @@
+import type { SyncClient } from "@stratasync/client";
 import {
   useCallback,
   useEffect,
@@ -18,6 +19,15 @@ interface ModelSnapshot<T> {
   model: T | null;
   version: number;
 }
+
+interface ModelLoadKey {
+  client: SyncClient;
+  modelName: string;
+  id: string;
+}
+
+const isSameModelLoadKey = (a: ModelLoadKey | null, b: ModelLoadKey): boolean =>
+  a?.client === b.client && a.modelName === b.modelName && a.id === b.id;
 
 /**
  * Hook to access a single model by ID
@@ -152,6 +162,7 @@ export const useModelState = <T>(
   const modelNameRef = useRef(modelName);
   const idRef = useRef(id);
   const isReadyRef = useRef(isReady);
+  const dataKeyRef = useRef<ModelLoadKey | null>(null);
   const requestVersionRef = useRef(0);
 
   clientRef.current = client;
@@ -164,10 +175,20 @@ export const useModelState = <T>(
     requestVersionRef.current = requestVersion;
 
     if (!idRef.current) {
+      dataKeyRef.current = null;
       setData(null);
       setError(null);
       setIsLoading(false);
       return;
+    }
+
+    const loadKey = {
+      client: clientRef.current,
+      id: idRef.current,
+      modelName: modelNameRef.current,
+    };
+    if (!isSameModelLoadKey(dataKeyRef.current, loadKey)) {
+      setData(null);
     }
 
     if (!isReadyRef.current) {
@@ -179,13 +200,14 @@ export const useModelState = <T>(
     setError(null);
 
     try {
-      const result = await clientRef.current.ensureModel<T>(
-        modelNameRef.current,
-        idRef.current
+      const result = await loadKey.client.ensureModel<T>(
+        loadKey.modelName,
+        loadKey.id
       );
       if (requestVersion !== requestVersionRef.current) {
         return;
       }
+      dataKeyRef.current = loadKey;
       setData(result);
     } catch (loadError) {
       if (requestVersion !== requestVersionRef.current) {

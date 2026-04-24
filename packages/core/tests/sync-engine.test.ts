@@ -659,6 +659,37 @@ test("LazyCollection deduplicates matching ids during hydration", async () => {
   assert.deepEqual(collection.toArray(), [localTask]);
 });
 
+test("LazyCollection replaces matching ids on direct add", () => {
+  class Task extends Model {}
+
+  const firstTask = new Task();
+  firstTask.id = "task-1";
+
+  const replacementTask = new Task();
+  replacementTask.id = "task-1";
+
+  const collection = new LazyCollection<Task>();
+  collection.add(firstTask);
+  collection.add(replacementTask);
+
+  assert.deepEqual(collection.toArray(), [replacementTask]);
+});
+
+test("LazyCollection removes matching ids across instances", () => {
+  class Task extends Model {}
+
+  const existingTask = new Task();
+  existingTask.id = "task-1";
+
+  const matchingTask = new Task();
+  matchingTask.id = "task-1";
+
+  const collection = new LazyCollection<Task>([existingTask]);
+
+  assert.equal(collection.remove(matchingTask), true);
+  assert.deepEqual(collection.toArray(), []);
+});
+
 test("LazyCollection preserves clear during hydration", async () => {
   class User extends Model {}
   class Task extends Model {}

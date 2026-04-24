@@ -11,6 +11,7 @@ import {
   createUnarchivePayload,
   createUnarchiveTransaction,
   createUndoTransaction,
+  createUpdateTransaction,
   readArchivedAt,
   rebaseTransactions,
 } from "../src/index";
@@ -290,6 +291,81 @@ test("applyDeltas skips missing updates instead of creating partial records", as
   assert.equal(result.updates, 0);
 });
 
+test("applyDeltas advances sync state for empty packets", async () => {
+  const target = {
+    delete(): void {
+      assert.fail("delete should not be called for empty packets");
+    },
+    get(): Record<string, unknown> | null {
+      assert.fail("get should not be called for empty packets");
+    },
+    patch(): void {
+      assert.fail("patch should not be called for empty packets");
+    },
+    put(): void {
+      assert.fail("put should not be called for empty packets");
+    },
+  };
+  const registry = {
+    hasModel(): boolean {
+      return true;
+    },
+  };
+
+  const result = await applyDeltas(
+    {
+      actions: [],
+      lastSyncId: "42",
+    },
+    target,
+    registry
+  );
+
+  assert.equal(result.lastSyncId, "42");
+});
+
+test("applyDeltas returns packet cursor when actions lag behind it", async () => {
+  const rows = new Map<string, Record<string, unknown>>();
+  const target = {
+    delete(modelName: string, id: string): void {
+      rows.delete(`${modelName}:${id}`);
+    },
+    get(modelName: string, id: string): Record<string, unknown> | null {
+      return rows.get(`${modelName}:${id}`) ?? null;
+    },
+    patch(): void {
+      assert.fail("patch should not be called for inserts");
+    },
+    put(modelName: string, id: string, data: Record<string, unknown>): void {
+      rows.set(`${modelName}:${id}`, { ...data });
+    },
+  };
+  const registry = {
+    hasModel(modelName: string): boolean {
+      return modelName === "Task";
+    },
+  };
+
+  const result = await applyDeltas(
+    {
+      actions: [
+        {
+          action: "I",
+          data: { id: "task-1" },
+          id: "5",
+          modelId: "task-1",
+          modelName: "Task",
+        },
+      ],
+      lastSyncId: "42",
+    },
+    target,
+    registry
+  );
+
+  assert.equal(result.lastSyncId, "42");
+});
+
 test("rebase detects remote archive conflicts against local unarchive", () => {
   const result = rebaseTransactions(
     [
@@ -318,4 +394,45 @@ test("rebase detects remote archive conflicts against local unarchive", () => {
   assert.equal(result.conflicts.length, 1);
   assert.equal(result.conflicts[0]?.conflictType, "update-update");
   assert.equal(result.conflicts[0]?.resolution, "server-wins");
+});
+
+test("rebase confirms out-of-order own echoes without conflicting older pending txs", () => {
+  const firstTx = createUpdateTransaction(
+    "client-1",
+    "Task",
+    "task-1",
+    { title: "First" },
+    { title: "Original" }
+  );
+  const secondTx = createUpdateTransaction(
+    "client-1",
+    "Task",
+    "task-1",
+    { status: "done" },
+    { status: "todo" }
+  );
+
+  const result = rebaseTransactions(
+    [firstTx, secondTx],
+    [
+      {
+        action: "U",
+        clientId: "client-1",
+        clientTxId: secondTx.clientTxId,
+        data: { status: "done" },
+        id: "10",
+        modelId: "task-1",
+        modelName: "Task",
+      },
+    ],
+    {
+      clientId: "client-1",
+      defaultResolution: "server-wins",
+      fieldLevelConflicts: true,
+    }
+  );
+
+  assert.deepEqual(result.confirmed, [secondTx]);
+  assert.deepEqual(result.pending, [firstTx]);
+  assert.deepEqual(result.conflicts, []);
 });

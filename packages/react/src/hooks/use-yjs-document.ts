@@ -140,6 +140,7 @@ export const useYjsDocument = (
 
   // Track if we've connected to avoid double connections
   const isConnectedRef = useRef(false);
+  const hasFocusedPresenceRef = useRef(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const connectedDocKeyRef = useRef<DocumentKey | null>(null);
   const previousDocKeyStringRef = useRef(toDocumentKeyString(docKey));
@@ -182,6 +183,7 @@ export const useYjsDocument = (
 
       if (currentOptions.editing) {
         yjsManager.presenceManager.focus(currentDocKey);
+        hasFocusedPresenceRef.current = true;
       }
 
       // Subscribe to connection state changes
@@ -218,10 +220,12 @@ export const useYjsDocument = (
       isConnectedRef.current = true;
       connectedDocKeyRef.current = currentDocKey;
     } catch (connectError) {
+      const wasFocused = hasFocusedPresenceRef.current;
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       connectedDocKeyRef.current = null;
       isConnectedRef.current = false;
+      hasFocusedPresenceRef.current = false;
       setDoc(null);
       setContent("");
       setConnectionState("disconnected");
@@ -230,6 +234,9 @@ export const useYjsDocument = (
       const yjsManager = client.yjs;
       if (yjsManager) {
         try {
+          if (wasFocused) {
+            yjsManager.presenceManager.blur(currentDocKey);
+          }
           yjsManager.presenceManager.stopViewing(currentDocKey);
           yjsManager.documentManager.disconnect(currentDocKey);
         } catch {
@@ -255,6 +262,9 @@ export const useYjsDocument = (
       const yjsManager = client.yjs;
       const connectedDocKey = connectedDocKeyRef.current ?? docKeyRef.current;
       if (yjsManager) {
+        if (hasFocusedPresenceRef.current) {
+          yjsManager.presenceManager.blur(connectedDocKey);
+        }
         yjsManager.presenceManager.stopViewing(connectedDocKey);
         yjsManager.documentManager.disconnect(connectedDocKey);
       }
@@ -262,6 +272,7 @@ export const useYjsDocument = (
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       isConnectedRef.current = false;
+      hasFocusedPresenceRef.current = false;
       connectedDocKeyRef.current = null;
       setDoc(null);
       setContent("");
@@ -305,6 +316,7 @@ export const useYjsDocument = (
     }
     const focusDocKey = connectedDocKeyRef.current ?? docKeyRef.current;
     yjsManager.presenceManager.focus(focusDocKey);
+    hasFocusedPresenceRef.current = true;
   }, [client, skip]);
 
   const blur = useCallback(() => {
@@ -317,6 +329,7 @@ export const useYjsDocument = (
     }
     const blurDocKey = connectedDocKeyRef.current ?? docKeyRef.current;
     yjsManager.presenceManager.blur(blurDocKey);
+    hasFocusedPresenceRef.current = false;
   }, [client, skip]);
 
   // Auto-connect on mount if enabled

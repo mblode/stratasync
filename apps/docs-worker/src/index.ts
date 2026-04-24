@@ -4,6 +4,12 @@ interface Env {
   LANDING_URL?: string;
 }
 
+interface WorkerConfig {
+  customUrl: string;
+  docsUrl: string;
+  landingHost: string;
+}
+
 const DOCS_PREFIX = "/docs";
 const DOCS_PAGE_PATHS = [
   "/manifesto",
@@ -196,131 +202,185 @@ const rewriteDocsHtml = (
   return rewrittenHtml;
 };
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    try {
-      const docsUrl = env?.DOCS_URL ?? "stratasync.blode.md";
-      const customUrl = env?.CUSTOM_URL ?? "stratasync.dev";
-      const landingHost = env?.LANDING_URL ?? "landing.stratasync.dev";
-      const urlObject = new URL(request.url);
+const getWorkerConfig = (env: Env): WorkerConfig => ({
+  customUrl: env?.CUSTOM_URL ?? "stratasync.dev",
+  docsUrl: env?.DOCS_URL ?? "stratasync.blode.md",
+  landingHost: env?.LANDING_URL ?? "landing.stratasync.dev",
+});
 
-      // Agent discovery endpoints are served by the landing app, so forward
-      // them explicitly to the landing host. All other /.well-known/ paths
-      // (Vercel/Let's Encrypt verification, etc.) pass through to origin.
-      if (
-        urlObject.pathname === "/.well-known/api-catalog" ||
-        urlObject.pathname === "/.well-known/agent-skills/index.json"
-      ) {
-        const landingUrl = new URL(request.url);
-        landingUrl.hostname = landingHost;
-        return await fetch(landingUrl, {
-          body: request.body,
-          headers: request.headers,
-          method: request.method,
-        });
-      }
-      if (urlObject.pathname.startsWith("/.well-known/")) {
-        return await fetch(request);
-      }
+const forwardRequestToHost = (
+  request: Request,
+  hostname: string,
+  includeBody = true
+): Promise<Response> => {
+  const url = new URL(request.url);
+  url.hostname = hostname;
+  return fetch(url, {
+    body: includeBody ? request.body : undefined,
+    headers: request.headers,
+    method: request.method,
+  });
+};
 
-      // Redirect docs.stratasync.dev → stratasync.dev/docs
-      if (urlObject.hostname === `docs.${customUrl}`) {
-        const redirectUrl = new URL(urlObject.pathname, `https://${customUrl}`);
-        redirectUrl.pathname = `/docs${urlObject.pathname === "/" ? "" : urlObject.pathname}`;
-        redirectUrl.search = urlObject.search;
-        return Response.redirect(redirectUrl.toString(), 301);
-      }
+const getWellKnownResponse = (
+  request: Request,
+  pathname: string,
+  landingHost: string
+): Promise<Response> | null => {
+  // Agent discovery endpoints are served by the landing app, so forward
+  // them explicitly to the landing host. All other /.well-known/ paths
+  // (Vercel/Let's Encrypt verification, etc.) pass through to origin.
+  if (
+    pathname === "/.well-known/api-catalog" ||
+    pathname === "/.well-known/agent-skills/index.json"
+  ) {
+    return forwardRequestToHost(request, landingHost);
+  }
 
-      const docsRedirectPath = getDocsRedirectPath(
-        urlObject.pathname,
-        request.headers.get("Referer")
-      );
-      if (docsRedirectPath) {
-        const redirectUrl = new URL(request.url);
-        redirectUrl.pathname = docsRedirectPath;
-        redirectUrl.search = urlObject.search;
-        return Response.redirect(redirectUrl.toString(), 308);
-      }
+  return pathname.startsWith("/.well-known/") ? fetch(request) : null;
+};
 
-      // Proxy OpenGraph image requests to landing page
-      if (urlObject.pathname === "/opengraph-image.png") {
-        const landingUrl = new URL(request.url);
-        landingUrl.hostname = landingHost;
-        return await fetch(landingUrl, {
-          headers: request.headers,
-          method: request.method,
-        });
-      }
+const getDocsHostRedirectResponse = (
+  urlObject: URL,
+  customUrl: string
+): Response | null => {
+  if (urlObject.hostname !== `docs.${customUrl}`) {
+    return null;
+  }
 
-      // Proxy requests to /docs path to Blode docs
-      if (
-        isDocsPath(urlObject.pathname) ||
-        shouldProxyAssetToDocs(
-          urlObject.pathname,
-          request.headers.get("Referer")
-        )
-      ) {
-        const url = new URL(request.url);
-        url.hostname = docsUrl;
+  const redirectUrl = new URL(urlObject.pathname, `https://${customUrl}`);
+  redirectUrl.pathname = `/docs${urlObject.pathname === "/" ? "" : urlObject.pathname}`;
+  redirectUrl.search = urlObject.search;
+  return Response.redirect(redirectUrl.toString(), 301);
+};
 
-        const proxyRequest = new Request(url, request);
-        proxyRequest.headers.set("Host", docsUrl);
-        proxyRequest.headers.set("X-Forwarded-Host", customUrl);
-        proxyRequest.headers.set("X-Forwarded-Proto", "https");
+const getDocsPathRedirectResponse = (
+  request: Request,
+  urlObject: URL,
+  referer: string | null
+): Response | null => {
+  const docsRedirectPath = getDocsRedirectPath(urlObject.pathname, referer);
+  if (!docsRedirectPath) {
+    return null;
+  }
 
-        const clientIP = request.headers.get("CF-Connecting-IP");
-        if (clientIP) {
-          proxyRequest.headers.set("CF-Connecting-IP", clientIP);
-        }
+  const redirectUrl = new URL(request.url);
+  redirectUrl.pathname = docsRedirectPath;
+  redirectUrl.search = urlObject.search;
+  return Response.redirect(redirectUrl.toString(), 308);
+};
 
-        const docsResponse = await fetch(proxyRequest);
-        const location = docsResponse.headers.get("Location");
-        if (location) {
-          const rewrittenLocation = rewriteDocsLocation(
-            location,
-            urlObject,
-            docsUrl,
-            customUrl
-          );
+const shouldRouteToDocs = (pathname: string, referer: string | null): boolean =>
+  isDocsPath(pathname) || shouldProxyAssetToDocs(pathname, referer);
 
-          if (rewrittenLocation) {
-            const headers = new Headers(docsResponse.headers);
-            headers.set("Location", rewrittenLocation);
-            return new Response(docsResponse.body, {
-              headers,
-              status: docsResponse.status,
-              statusText: docsResponse.statusText,
-            });
-          }
-        }
+const proxyDocsRequest = async (
+  request: Request,
+  urlObject: URL,
+  config: WorkerConfig
+): Promise<Response> => {
+  const url = new URL(request.url);
+  url.hostname = config.docsUrl;
 
-        const contentType = docsResponse.headers.get("content-type") ?? "";
-        if (!contentType.includes("text/html")) {
-          return docsResponse;
-        }
+  const proxyRequest = new Request(url, request);
+  proxyRequest.headers.set("Host", config.docsUrl);
+  proxyRequest.headers.set("X-Forwarded-Host", config.customUrl);
+  proxyRequest.headers.set("X-Forwarded-Proto", "https");
 
-        const rewrittenHtml = rewriteDocsHtml(
-          await docsResponse.text(),
-          customUrl,
-          docsUrl
-        );
-        return new Response(rewrittenHtml, {
-          headers: docsResponse.headers,
-          status: docsResponse.status,
-          statusText: docsResponse.statusText,
-        });
-      }
+  const clientIP = request.headers.get("CF-Connecting-IP");
+  if (clientIP) {
+    proxyRequest.headers.set("CF-Connecting-IP", clientIP);
+  }
 
-      // Route all other traffic to landing page
-      const landingUrl = new URL(request.url);
-      landingUrl.hostname = landingHost;
-      return await fetch(landingUrl, {
-        body: request.body,
-        headers: request.headers,
-        method: request.method,
+  const docsResponse = await fetch(proxyRequest);
+  const location = docsResponse.headers.get("Location");
+  if (location) {
+    const rewrittenLocation = rewriteDocsLocation(
+      location,
+      urlObject,
+      config.docsUrl,
+      config.customUrl
+    );
+
+    if (rewrittenLocation) {
+      const headers = new Headers(docsResponse.headers);
+      headers.set("Location", rewrittenLocation);
+      return new Response(docsResponse.body, {
+        headers,
+        status: docsResponse.status,
+        statusText: docsResponse.statusText,
       });
-    } catch {
-      return await fetch(request);
     }
-  },
+  }
+
+  const contentType = docsResponse.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) {
+    return docsResponse;
+  }
+
+  const rewrittenHtml = rewriteDocsHtml(
+    await docsResponse.text(),
+    config.customUrl,
+    config.docsUrl
+  );
+  return new Response(rewrittenHtml, {
+    headers: docsResponse.headers,
+    status: docsResponse.status,
+    statusText: docsResponse.statusText,
+  });
+};
+
+const routeRequest = (
+  request: Request,
+  env: Env
+): Promise<Response> | Response => {
+  const config = getWorkerConfig(env);
+  const urlObject = new URL(request.url);
+  const referer = request.headers.get("Referer");
+  const wellKnownResponse = getWellKnownResponse(
+    request,
+    urlObject.pathname,
+    config.landingHost
+  );
+  if (wellKnownResponse) {
+    return wellKnownResponse;
+  }
+
+  const docsHostRedirect = getDocsHostRedirectResponse(
+    urlObject,
+    config.customUrl
+  );
+  if (docsHostRedirect) {
+    return docsHostRedirect;
+  }
+
+  const docsPathRedirect = getDocsPathRedirectResponse(
+    request,
+    urlObject,
+    referer
+  );
+  if (docsPathRedirect) {
+    return docsPathRedirect;
+  }
+
+  if (urlObject.pathname === "/opengraph-image.png") {
+    return forwardRequestToHost(request, config.landingHost, false);
+  }
+
+  if (shouldRouteToDocs(urlObject.pathname, referer)) {
+    return proxyDocsRequest(request, urlObject, config);
+  }
+
+  return forwardRequestToHost(request, config.landingHost);
+};
+
+const handleFetch = async (request: Request, env: Env): Promise<Response> => {
+  try {
+    return await routeRequest(request, env);
+  } catch {
+    return fetch(request);
+  }
+};
+
+export default {
+  fetch: handleFetch,
 };

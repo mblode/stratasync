@@ -586,6 +586,9 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
 
   async writeBatch(ops: BatchOperation[]): Promise<void> {
     const db = this.ensureOpen();
+    if (ops.length === 0) {
+      return;
+    }
 
     const tx = db.transaction(
       ops.map((op) => this.getStoreName(op.modelName)),

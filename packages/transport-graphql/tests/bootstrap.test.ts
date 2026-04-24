@@ -221,6 +221,40 @@ describe("bootstrap streaming", () => {
     expect(secondHeaders.Authorization).toBe("Bearer fresh-bootstrap-token");
   });
 
+  it("refreshes and retries after a 401 bootstrap response", async () => {
+    const refreshToken = vi.fn().mockResolvedValue("fresh-bootstrap-token");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        createNdjsonResponse([
+          buildModelLine("Task", { id: "task-1", title: "Recovered" }),
+          `_metadata_=${JSON.stringify({ lastSyncId: "11" })}`,
+        ])
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generator = createBootstrapStream({
+      auth: {
+        getAccessToken: () => "stale-bootstrap-token",
+        refreshToken,
+      },
+      bootstrapOptions: { onlyModels: ["Task"], type: "full" },
+      syncEndpoint: SYNC_ENDPOINT,
+    });
+    await collectAsyncGenerator(generator);
+
+    expect(refreshToken).toHaveBeenCalledOnce();
+    const firstHeaders = headersToRecord(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers
+    );
+    const secondHeaders = headersToRecord(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].headers
+    );
+    expect(firstHeaders.Authorization).toBe("Bearer stale-bootstrap-token");
+    expect(secondHeaders.Authorization).toBe("Bearer fresh-bootstrap-token");
+  });
+
   it("times out when the bootstrap stream stalls between chunks", async () => {
     const encoder = new TextEncoder();
     let firstChunkSent = false;
@@ -350,6 +384,43 @@ describe("batch load", () => {
       (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers
     );
     expect(headers.Authorization).toBe("Bearer refreshed-batch-token");
+  });
+
+  it("refreshes and retries after a 401 batch load response", async () => {
+    const refreshToken = vi.fn().mockResolvedValue("fresh-batch-token");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        createNdjsonResponse([buildModelLine("Task", { id: "task-2" })])
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const rows: ModelRow[] = [];
+    for await (const row of createBatchLoadStream({
+      auth: {
+        getAccessToken: () => "stale-batch-token",
+        refreshToken,
+      },
+      batchLoadOptions: {
+        firstSyncId: "123",
+        requests: [{ indexedKey: "id", keyValue: "task-2", modelName: "Task" }],
+      },
+      syncEndpoint: SYNC_ENDPOINT,
+    })) {
+      rows.push(row);
+    }
+
+    expect(rows).toEqual([{ data: { id: "task-2" }, modelName: "Task" }]);
+    expect(refreshToken).toHaveBeenCalledOnce();
+    const firstHeaders = headersToRecord(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers
+    );
+    const secondHeaders = headersToRecord(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].headers
+    );
+    expect(firstHeaders.Authorization).toBe("Bearer stale-batch-token");
+    expect(secondHeaders.Authorization).toBe("Bearer fresh-batch-token");
   });
 
   it("rejects numeric bootstrap metadata sync IDs", async () => {

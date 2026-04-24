@@ -227,5 +227,6 @@ export const applyDeltas = async (
     updateResult(result, action);
   }
 
+  result.lastSyncId = maxSyncId(result.lastSyncId, packet.lastSyncId);
   return result;
 };

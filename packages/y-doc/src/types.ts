@@ -196,6 +196,15 @@ const hasMessageType = (msg: unknown, type: string): boolean =>
   msg !== null &&
   (msg as { type: unknown }).type === type;
 
+const isValidSequenceNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const isSessionParticipant = (value: unknown): value is SessionParticipant =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { userId: unknown }).userId === "string" &&
+  typeof (value as { isEditing: unknown }).isEditing === "boolean";
+
 export const isYjsSyncStep2Message = (
   msg: unknown
 ): msg is YjsSyncStep2Message => {
@@ -209,7 +218,7 @@ export const isYjsSyncStep2Message = (
     typeof message.entityId === "string" &&
     typeof message.fieldName === "string" &&
     typeof message.payload === "string" &&
-    typeof message.seq === "number"
+    isValidSequenceNumber(message.seq)
   );
 };
 
@@ -226,7 +235,7 @@ export const isYjsUpdateMessage = (msg: unknown): msg is YjsUpdateMessage => {
     typeof message.payload === "string" &&
     typeof message.clientId === "string" &&
     typeof message.connId === "string" &&
-    typeof message.seq === "number"
+    isValidSequenceNumber(message.seq)
   );
 };
 
@@ -243,7 +252,8 @@ export const isSessionStateMessage = (
     typeof message.entityId === "string" &&
     typeof message.fieldName === "string" &&
     typeof message.active === "boolean" &&
-    Array.isArray(message.participants)
+    Array.isArray(message.participants) &&
+    message.participants.every(isSessionParticipant)
   );
 };
 
