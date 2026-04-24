@@ -1,18 +1,7 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "$schema": "https://blode.md/docs.json",
   "name": "Strata Sync",
   "description": "Build instant, offline-capable apps that sync with Strata Sync.",
-  "seo": {
-    "metatags": {
-      "canonical": "https://stratasync.dev/docs"
-    }
-  },
-  "colors": {
-    "primary": "#1d4ed8",
-    "light": "#dbeafe",
-    "dark": "#1e3a8a"
-  },
   "navbar": {
     "links": [
       {
