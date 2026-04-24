@@ -1,5 +1,11 @@
 # @stratasync/core
 
+## 0.2.5
+
+### Patch Changes
+
+- a18b3c8: Fix sync cursor advancement, own-echo rebase handling, Yjs initial content and presence cleanup, React stale query/client state, authenticated bootstrap retry, delta pagination guards, and IndexedDB empty batch handling.
+
 ## 0.2.4
 
 ### Patch Changes
