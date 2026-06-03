@@ -405,6 +405,97 @@ describe(YjsDocumentManager, () => {
       ).toHaveLength(1);
     });
 
+    it("seeds initial content when the server doc has only a textless paragraph", () => {
+      manager.connect(testDocKey, { initialContent: "Recovered description" });
+
+      // Simulate the empty <paragraph> that y-prosemirror writes into the
+      // fragment on mount, when that was the only Yjs update that reached the
+      // server (the text-bearing updates were dropped by a flaky socket). The
+      // fragment is non-empty (length 1) but holds no text.
+      const serverDoc = new Y.Doc();
+      serverDoc
+        .getXmlFragment(PROSEMIRROR_FIELD)
+        .insert(0, [new Y.XmlElement("paragraph")]);
+      const update = Y.encodeStateAsUpdate(serverDoc);
+
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(update).toString("base64"),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      // The editor recovers the canonical text instead of staying blank.
+      expect(manager.getDerivedContent(testDocKey)).toBe(
+        "Recovered description"
+      );
+
+      // The heal is uploaded so the server CRDT converges. Apply the client's
+      // delta(s) onto the server's own state (which has the empty paragraph the
+      // delete targets), mirroring how the server reconciles in production.
+      const updateMessages = transport.sentMessages.filter(
+        (message) => message.type === "yjs_update"
+      );
+      expect(updateMessages.length).toBeGreaterThan(0);
+
+      const verifyDoc = new Y.Doc();
+      Y.applyUpdate(verifyDoc, update);
+      for (const message of updateMessages) {
+        Y.applyUpdate(verifyDoc, Buffer.from(message.payload ?? "", "base64"));
+      }
+      expect(getProsemirrorText(verifyDoc)).toBe("Recovered description");
+    });
+
+    it("does not overwrite a server doc that already has real text", () => {
+      manager.connect(testDocKey, { initialContent: "Stale local content" });
+
+      const serverDoc = new Y.Doc();
+      setProsemirrorContent(serverDoc, "Authoritative server text");
+      const update = Y.encodeStateAsUpdate(serverDoc);
+
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(update).toString("base64"),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(manager.getDerivedContent(testDocKey)).toBe(
+        "Authoritative server text"
+      );
+      expect(
+        transport.sentMessages.filter(
+          (message) => message.type === "yjs_update"
+        )
+      ).toHaveLength(0);
+    });
+
+    it("leaves a textless server doc empty when there is no initial content", () => {
+      manager.connect(testDocKey, { initialContent: "" });
+
+      const serverDoc = new Y.Doc();
+      serverDoc
+        .getXmlFragment(PROSEMIRROR_FIELD)
+        .insert(0, [new Y.XmlElement("paragraph")]);
+
+      transport.triggerMessage({
+        entityId: testDocKey.entityId,
+        entityType: testDocKey.entityType,
+        fieldName: testDocKey.fieldName,
+        payload: Buffer.from(Y.encodeStateAsUpdate(serverDoc)).toString(
+          "base64"
+        ),
+        seq: 1,
+        type: "yjs_sync_step2",
+      });
+
+      expect(manager.getDerivedContent(testDocKey)).toBe("");
+    });
+
     it("should apply remote updates", () => {
       manager.connect(testDocKey);
 

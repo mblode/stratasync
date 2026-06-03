@@ -269,9 +269,19 @@ const seedProsemirrorFragment = (doc: Y.Doc, content: string): void => {
     return;
   }
 
-  const fragment = doc.getXmlFragment(PROSEMIRROR_FIELD);
-  if (fragment.length > 0) {
+  // Only skip when the fragment already holds real text. A textless-but-present
+  // fragment (e.g. an empty paragraph that y-prosemirror writes on mount, then
+  // never gets the typed text because the live-editing socket dropped the
+  // updates) must still be seeded from canonical content — keying off
+  // fragment.length here would leave the editor permanently empty.
+  if (deriveProsemirrorContent(doc).length > 0) {
     return;
+  }
+
+  const fragment = doc.getXmlFragment(PROSEMIRROR_FIELD);
+  // Drop any textless children first so we don't leave a leading blank line.
+  if (fragment.length > 0) {
+    fragment.delete(0, fragment.length);
   }
 
   const paragraph = new Y.XmlElement("paragraph");
@@ -696,7 +706,10 @@ export class YjsDocumentManager {
       return false;
     }
     state.pendingInitialContent = undefined;
-    if (state.doc.getXmlFragment(PROSEMIRROR_FIELD).length > 0) {
+    // Seed unless the doc already has real text. seedProsemirrorFragment itself
+    // is text-aware and clears textless children, so a stray empty paragraph
+    // from a half-synced remote doc no longer blocks canonical seeding.
+    if (deriveProsemirrorContent(state.doc).length > 0) {
       return false;
     }
     state.doc.transact(() => {
