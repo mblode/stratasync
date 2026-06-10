@@ -25,6 +25,8 @@ import {
 } from "@stratasync/core";
 
 import type { IdentityMapRegistry } from "./identity-map.js";
+import { AsyncQueue } from "./internal/async-queue.js";
+import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
 import type {
   StorageAdapter,
@@ -81,12 +83,21 @@ export class SyncOrchestrator {
   private transportConnectionCleanup: (() => void) | null = null;
 
   private deltaSubscription: AsyncIterator<DeltaPacket> | null = null;
-  // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-  private deltaPacketQueue: Promise<void> = Promise.resolve();
-  // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-  private deltaReplayBarrier: Promise<void> = Promise.resolve();
-  // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-  private stateUpdateLock: Promise<void> = Promise.resolve();
+  /**
+   * Orders delta packets against each other. Each packet's application is
+   * funnelled through stateQueue too, so packets and mutations stay serialized
+   * against one another (nested queues).
+   */
+  private packetQueue = new AsyncQueue();
+  /**
+   * Counting barrier: held while a multi-page catch-up replay is in flight so
+   * live subscription packets wait until the replay finishes.
+   */
+  private deltaReplayGate = new Gate();
+  /**
+   * Serial executor for state-mutating work (mutations + delta application).
+   */
+  private stateQueue = new AsyncQueue();
   private running = false;
   private runToken = 0;
   private readonly emitEvent?: (event: SyncClientEvent) => void;
@@ -510,15 +521,11 @@ export class SyncOrchestrator {
     this.transportConnectionCleanup?.();
     this.transportConnectionCleanup = null;
     await this.transport.close();
-    await this.deltaPacketQueue.catch(() => {
-      /* noop */
-    });
-    // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-    this.deltaPacketQueue = Promise.resolve();
-    // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-    this.deltaReplayBarrier = Promise.resolve();
-    // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-    this.stateUpdateLock = Promise.resolve();
+    await this.packetQueue.drain();
+    // Start fresh queues; a fresh Gate is open (no holds).
+    this.packetQueue = new AsyncQueue();
+    this.stateQueue = new AsyncQueue();
+    this.deltaReplayGate = new Gate();
     this.deferredConflictTxs = [];
     this.clientId = "";
     this.lastSyncId = ZERO_SYNC_ID;
@@ -573,32 +580,8 @@ export class SyncOrchestrator {
     };
   }
 
-  async runWithStateLock<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.stateUpdateLock;
-    let releaseCurrent: (() => void) | undefined;
-    // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve;
-    });
-    this.stateUpdateLock = (async () => {
-      try {
-        await previous;
-      } catch {
-        /* noop */
-      }
-      await current;
-    })();
-    try {
-      await previous;
-    } catch {
-      /* noop */
-    }
-
-    try {
-      return await operation();
-    } finally {
-      releaseCurrent?.();
-    }
+  runWithStateLock<T>(operation: () => Promise<T>): Promise<T> {
+    return this.stateQueue.run(operation);
   }
 
   /**
@@ -848,7 +831,7 @@ export class SyncOrchestrator {
         if (!this.isRunActive(this.runToken)) {
           break;
         }
-        await this.deltaReplayBarrier;
+        await this.deltaReplayGate.whenOpen();
 
         if (this.deltaSubscription !== subscription) {
           break;
@@ -867,7 +850,7 @@ export class SyncOrchestrator {
           break;
         }
 
-        await this.deltaReplayBarrier;
+        await this.deltaReplayGate.whenOpen();
         if (this.deltaSubscription !== subscription) {
           break;
         }
@@ -934,21 +917,14 @@ export class SyncOrchestrator {
   }
 
   private enqueueDeltaPacket(packet: DeltaPacket): Promise<void> {
-    const previous = this.deltaPacketQueue;
-    const run = (async () => {
-      await previous;
+    // packetQueue serializes packets against each other; the nested state-lock
+    // run keeps packet application serialized against mutations too.
+    return this.packetQueue.run(() => {
       if (!this.running) {
         return;
       }
-      await this.runWithStateLock(async () => {
-        await this.applyDeltaPacket(packet);
-      });
-    })();
-    // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-    this.deltaPacketQueue = run.catch(() => {
-      /* noop */
+      return this.runWithStateLock(() => this.applyDeltaPacket(packet));
     });
-    return run;
   }
 
   private handleSyncError(error: unknown): void {
@@ -1678,22 +1654,6 @@ export class SyncOrchestrator {
   }
 
   private acquireDeltaReplayBarrier(): () => void {
-    const previousBarrier = this.deltaReplayBarrier;
-    // eslint-disable-next-line unicorn/consistent-function-scoping -- releaseBarrier is reassigned inside Promise constructor
-    let releaseBarrier = (): void => undefined;
-
-    // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-    const currentBarrier = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-
-    this.deltaReplayBarrier = (async () => {
-      await previousBarrier;
-      await currentBarrier;
-    })();
-
-    return () => {
-      releaseBarrier();
-    };
+    return this.deltaReplayGate.hold();
   }
 }
