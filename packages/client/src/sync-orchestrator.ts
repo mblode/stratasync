@@ -28,6 +28,7 @@ import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
 import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
+import { SyncStateMachine } from "./sync/state.js";
 import type {
   StorageAdapter,
   StorageMeta,
@@ -67,17 +68,11 @@ export class SyncOrchestrator {
   private readonly options: SyncClientOptions;
   private readonly registry: ModelRegistry;
 
-  private _state: SyncClientState = "disconnected";
-  private _connectionState: ConnectionState = "disconnected";
-  private readonly stateListeners = new Set<(state: SyncClientState) => void>();
-  private readonly connectionListeners = new Set<
-    (state: ConnectionState) => void
-  >();
+  private readonly stateMachine: SyncStateMachine;
 
   private readonly schemaHash: string;
   private clientId = "";
   private lastSyncId: SyncId = ZERO_SYNC_ID;
-  private lastError: Error | null = null;
   private firstSyncId: SyncId = ZERO_SYNC_ID;
   private groups: string[] = [];
   private transportConnectionCleanup: (() => void) | null = null;
@@ -121,6 +116,7 @@ export class SyncOrchestrator {
     this.schemaHash = this.registry.getSchemaHash();
     this.groups = options.groups ?? [];
     this.emitEvent = emitEvent;
+    this.stateMachine = new SyncStateMachine(emitEvent);
 
     this.attachTransportConnectionListener();
   }
@@ -132,7 +128,7 @@ export class SyncOrchestrator {
 
     this.transportConnectionCleanup = this.transport.onConnectionStateChange(
       (state) => {
-        const previousState = this._connectionState;
+        const previousState = this.stateMachine.connectionState;
         this.setConnectionState(state);
         this.handleConnectionChange(previousState, state);
       }
@@ -151,14 +147,14 @@ export class SyncOrchestrator {
    * Gets the current sync state
    */
   get state(): SyncClientState {
-    return this._state;
+    return this.stateMachine.state;
   }
 
   /**
    * Gets the current connection state
    */
   get connectionState(): ConnectionState {
-    return this._connectionState;
+    return this.stateMachine.connectionState;
   }
 
   /**
@@ -186,7 +182,7 @@ export class SyncOrchestrator {
    * Gets the last error
    */
   getLastError(): Error | null {
-    return this.lastError;
+    return this.stateMachine.lastError;
   }
 
   /**
@@ -531,7 +527,7 @@ export class SyncOrchestrator {
     this.lastSyncId = ZERO_SYNC_ID;
     this.firstSyncId = ZERO_SYNC_ID;
     this.groups = this.options.groups ?? [];
-    this.lastError = null;
+    this.stateMachine.clearError();
 
     this.setConnectionState("disconnected");
     this.setState("disconnected");
@@ -561,10 +557,7 @@ export class SyncOrchestrator {
    */
   // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
   onStateChange(callback: (state: SyncClientState) => void): () => void {
-    this.stateListeners.add(callback);
-    return () => {
-      this.stateListeners.delete(callback);
-    };
+    return this.stateMachine.onStateChange(callback);
   }
 
   /**
@@ -574,10 +567,7 @@ export class SyncOrchestrator {
     // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
     callback: (state: ConnectionState) => void
   ): () => void {
-    this.connectionListeners.add(callback);
-    return () => {
-      this.connectionListeners.delete(callback);
-    };
+    return this.stateMachine.onConnectionStateChange(callback);
   }
 
   runWithStateLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -840,7 +830,7 @@ export class SyncOrchestrator {
         const { value, done } = await subscription.next();
         if (done) {
           const shouldRestart =
-            this.running && this._connectionState === "connected";
+            this.running && this.stateMachine.connectionState === "connected";
           if (this.deltaSubscription === subscription) {
             this.deltaSubscription = null;
           }
@@ -928,9 +918,7 @@ export class SyncOrchestrator {
   }
 
   private handleSyncError(error: unknown): void {
-    this.lastError = error instanceof Error ? error : new Error(String(error));
-    this.emitEvent?.({ error: this.lastError, type: "syncError" });
-    this.setState("error");
+    this.stateMachine.recordError(error);
   }
 
   /**
@@ -1585,8 +1573,8 @@ export class SyncOrchestrator {
       !this.running ||
       state !== "connected" ||
       previousState === "connected" ||
-      this._state === "connecting" ||
-      this._state === "bootstrapping"
+      this.stateMachine.state === "connecting" ||
+      this.stateMachine.state === "bootstrapping"
     ) {
       return;
     }
@@ -1610,33 +1598,12 @@ export class SyncOrchestrator {
     })();
   }
 
-  /**
-   * Sets the sync state
-   */
   private setState(state: SyncClientState): void {
-    if (this._state !== state) {
-      this._state = state;
-      if (state !== "error") {
-        this.lastError = null;
-      }
-      this.emitEvent?.({ state, type: "stateChange" });
-      for (const listener of this.stateListeners) {
-        listener(state);
-      }
-    }
+    this.stateMachine.setState(state);
   }
 
-  /**
-   * Sets the connection state
-   */
   private setConnectionState(state: ConnectionState): void {
-    if (this._connectionState !== state) {
-      this._connectionState = state;
-      this.emitEvent?.({ state, type: "connectionChange" });
-      for (const listener of this.connectionListeners) {
-        listener(state);
-      }
-    }
+    this.stateMachine.setConnectionState(state);
   }
 
   /**
