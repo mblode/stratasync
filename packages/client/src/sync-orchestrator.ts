@@ -1163,8 +1163,14 @@ export class SyncOrchestrator {
     }
   }
 
-  private updateSyncMetadata(lastSyncId: SyncId): Promise<boolean> {
-    return this.cursor.advance(lastSyncId);
+  private async updateSyncMetadata(lastSyncId: SyncId): Promise<boolean> {
+    const advanced = await this.cursor.advance(lastSyncId);
+    if (advanced) {
+      // Bound the sync-actions store: actions at or below the bootstrap floor
+      // are superseded by the snapshot and never replayed.
+      await this.storage.pruneSyncActions(this.cursor.firstSyncId);
+    }
+    return advanced;
   }
 
   private async finishOutboxProcessing(

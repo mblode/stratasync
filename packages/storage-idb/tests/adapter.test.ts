@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
+import { isQuotaExceededError, StorageQuotaError } from "@stratasync/client";
 import { ModelRegistry } from "@stratasync/core";
-import type { SchemaDefinition } from "@stratasync/core";
+import type { SchemaDefinition, SyncAction } from "@stratasync/core";
 import { openDB } from "idb";
 
 import {
@@ -695,4 +696,82 @@ test("blocked adapters clear their closed workspace handle", async () => {
     computePartialDbName(dbName, baseSchema, 1, "Comment"),
     computePartialDbName(dbName, evolvedSchema, 2, "Comment"),
   ]);
+});
+
+const makeSyncAction = (id: string): SyncAction => ({
+  action: "U",
+  data: { id, title: `t-${id}` },
+  id,
+  modelId: id,
+  modelName: "Task",
+});
+
+test("pruneSyncActions removes actions numerically <= the floor", async () => {
+  const userId = `user-${randomUUID()}`;
+  const version = 1;
+  const userVersion = 1;
+  const dbName = computeWorkspaceDatabaseName({ userId, userVersion, version });
+
+  const adapter = createIndexedDbStorage();
+  await adapter.open({ schema: baseSchema, userId, userVersion, version });
+
+  // Mix single- and multi-digit ids to catch lexicographic mistakes
+  // ("100" < "9" lexicographically but 100 > 9 numerically).
+  await adapter.addSyncActions(
+    ["1", "9", "10", "100"].map((id) => makeSyncAction(id))
+  );
+
+  await adapter.pruneSyncActions("9");
+
+  const remaining = await adapter.getSyncActions("0");
+  assert.deepEqual(
+    remaining.map((action) => action.id),
+    ["10", "100"]
+  );
+
+  await adapter.close();
+  await deleteDatabases(["stratasync_databases", dbName]);
+});
+
+test("open() runs migration hooks newer than the previous version", async () => {
+  const userId = `user-${randomUUID()}`;
+  const version = 1;
+  const userVersion = 1;
+  const dbName = computeWorkspaceDatabaseName({ userId, userVersion, version });
+
+  const invoked: number[] = [];
+  const adapter = createIndexedDbStorage();
+  await adapter.open({
+    migrations: {
+      1: () => {
+        invoked.push(1);
+      },
+      2: () => {
+        invoked.push(2);
+      },
+    },
+    schema: baseSchema,
+    userId,
+    userVersion,
+    version,
+  });
+
+  // Fresh DB upgrades from version 0, so both hooks run in ascending order.
+  assert.deepEqual(invoked, [1, 2]);
+
+  await adapter.close();
+  await deleteDatabases(["stratasync_databases", dbName]);
+});
+
+test("isQuotaExceededError classifies quota errors and StorageQuotaError", () => {
+  const domLike = Object.assign(new Error("full"), {
+    name: "QuotaExceededError",
+  });
+  assert.equal(isQuotaExceededError(domLike), true);
+
+  const codeLike = Object.assign(new Error("full"), { code: 22 });
+  assert.equal(isQuotaExceededError(codeLike), true);
+
+  assert.equal(isQuotaExceededError(new StorageQuotaError()), true);
+  assert.equal(isQuotaExceededError(new Error("nope")), false);
 });

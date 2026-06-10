@@ -6,6 +6,7 @@ import type {
   StorageMeta,
   StorageOptions,
 } from "@stratasync/client";
+import { isQuotaExceededError, StorageQuotaError } from "@stratasync/client";
 import { compareSyncId, isSyncIdGreaterThan } from "@stratasync/core";
 import type { SyncAction, Transaction } from "@stratasync/core";
 
@@ -233,6 +234,14 @@ export class LocalStorageAdapter implements StorageAdapter {
     return Promise.resolve();
   }
 
+  pruneSyncActions(beforeSyncId: string): Promise<void> {
+    const kept = this.readSyncActions().filter(
+      (action) => compareSyncId(action.id, beforeSyncId) > 0
+    );
+    this.writeSyncActions(kept);
+    return Promise.resolve();
+  }
+
   clear(options?: { preserveOutbox?: boolean }): Promise<void> {
     const preserveOutbox = options?.preserveOutbox === true;
     let savedOutbox: Transaction[] = [];
@@ -272,6 +281,21 @@ export class LocalStorageAdapter implements StorageAdapter {
     return `${this.prefix}:${this.dbName}:${suffix}`;
   }
 
+  /**
+   * Writes to the backend, translating a quota-exceeded throw into a typed
+   * {@link StorageQuotaError}. localStorage throws synchronously when full.
+   */
+  private safeSetItem(key: string, value: string): void {
+    try {
+      this.backend.setItem(key, value);
+    } catch (error) {
+      if (isQuotaExceededError(error)) {
+        throw new StorageQuotaError(undefined, error);
+      }
+      throw error;
+    }
+  }
+
   private readModelStore(
     modelName: string
   ): Record<string, Record<string, unknown>> {
@@ -286,7 +310,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     modelName: string,
     store: Record<string, Record<string, unknown>>
   ): void {
-    this.backend.setItem(this.key(`model:${modelName}`), JSON.stringify(store));
+    this.safeSetItem(this.key(`model:${modelName}`), JSON.stringify(store));
   }
 
   private readOutbox(): Transaction[] {
@@ -298,7 +322,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private writeOutbox(outbox: Transaction[]): void {
-    this.backend.setItem(this.key("outbox"), JSON.stringify(outbox));
+    this.safeSetItem(this.key("outbox"), JSON.stringify(outbox));
   }
 
   private readPartialIndexes(): Set<string> {
@@ -322,7 +346,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private writeSyncActions(actions: SyncAction[]): void {
-    this.backend.setItem(this.key("sync-actions"), JSON.stringify(actions));
+    this.safeSetItem(this.key("sync-actions"), JSON.stringify(actions));
   }
 }
 

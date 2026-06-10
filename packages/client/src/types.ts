@@ -39,6 +39,13 @@ export interface StorageOptions {
   userVersion?: number;
   /** Schema definition or registry snapshot */
   schema?: SchemaDefinition | ModelRegistrySnapshot;
+  /**
+   * Optional version-keyed migration hooks invoked during an IndexedDB upgrade.
+   * Each entry runs when the database upgrades to (or past) its key version.
+   * The arguments are the platform database/transaction handles (IDB-specific);
+   * adapters that have no upgrade concept ignore this field.
+   */
+  migrations?: Record<number, (db: unknown, tx: unknown) => void>;
 }
 
 /**
@@ -116,6 +123,12 @@ export interface StorageAdapter {
   addSyncActions(actions: SyncAction[]): Promise<void>;
   getSyncActions(afterSyncId?: SyncId, limit?: number): Promise<SyncAction[]>;
   clearSyncActions(): Promise<void>;
+  /**
+   * Removes persisted sync actions with an id at or below `beforeSyncId`,
+   * bounding the otherwise-unbounded sync-actions store. Called from cursor
+   * persistence once a packet has been durably applied.
+   */
+  pruneSyncActions(beforeSyncId: SyncId): Promise<void>;
   clear(options?: ClearStorageOptions): Promise<void>;
   count(modelName: string): Promise<number>;
 }

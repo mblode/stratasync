@@ -1,3 +1,4 @@
+import { StorageQuotaError } from "@stratasync/client";
 import type { SyncAction, Transaction } from "@stratasync/core";
 
 import { LocalStorageAdapter } from "../src/adapter.js";
@@ -302,6 +303,25 @@ describe(LocalStorageAdapter, () => {
       const result = await adapter.getSyncActions();
       expect(result).toHaveLength(0);
     });
+
+    it("should prune sync actions numerically <= the floor", async () => {
+      await adapter.addSyncActions(
+        ["1", "9", "10", "100"].map((id) => ({
+          action: "I" as const,
+          data: {},
+          id,
+          modelId: id,
+          modelName: "Todo",
+        }))
+      );
+
+      await adapter.pruneSyncActions("9");
+
+      const result = await adapter.getSyncActions("0");
+      // Numeric comparison: "10" and "100" survive even though "100" < "9"
+      // lexicographically.
+      expect(result.map((action) => action.id)).toEqual(["10", "100"]);
+    });
   });
 
   describe("clear", () => {
@@ -350,6 +370,29 @@ describe(LocalStorageAdapter, () => {
 
       expect(fromDb1?.title).toBe("DB1");
       expect(fromDb2?.title).toBe("DB2");
+    });
+  });
+
+  describe("quota handling", () => {
+    it("rethrows quota-exceeded writes as StorageQuotaError", async () => {
+      const quotaStorage = new MemoryStorage();
+      quotaStorage.setItem = () => {
+        throw Object.assign(new Error("full"), {
+          name: "QuotaExceededError",
+        });
+      };
+      const quotaAdapter = new LocalStorageAdapter({
+        prefix: "quota",
+        storage: quotaStorage,
+      });
+      await quotaAdapter.open({ name: "quotadb" });
+
+      // put() surfaces the typed error; wrap so a sync throw is observed too.
+      await expect(
+        (async () => {
+          await quotaAdapter.put("Todo", { id: "1", title: "A" });
+        })()
+      ).rejects.toBeInstanceOf(StorageQuotaError);
     });
   });
 });

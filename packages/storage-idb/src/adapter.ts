@@ -1,3 +1,4 @@
+import { wrapQuotaErrors } from "@stratasync/client";
 import {
   compareSyncId,
   isSyncIdGreaterThan,
@@ -116,9 +117,11 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     Promise<IDBPDatabase<PartialIndexDBSchema>>
   >();
   private readonly databaseManager = new DatabaseManager();
+  private migrations: Record<number, (db: unknown, tx: unknown) => void> = {};
 
   async open(options: StorageOptions): Promise<void> {
     await this.close();
+    this.migrations = options.migrations ?? {};
     this.initializeRegistry(options);
 
     const userId = options.userId ?? "anonymous";
@@ -219,8 +222,14 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     includeBlockingHandlers: boolean
   ): Promise<IDBPDatabase<unknown>> {
     const baseOptions = {
-      upgrade: (database: IDBPDatabase<SyncDBSchema>) => {
+      upgrade: (
+        database: IDBPDatabase<SyncDBSchema>,
+        oldVersion: number,
+        _newVersion: number | null,
+        transaction: unknown
+      ) => {
         this.upgradeDatabase(database);
+        this.runMigrations(database, oldVersion, transaction);
       },
     };
 
@@ -292,6 +301,25 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     IndexedDbStorageAdapter.ensureTransactionStore(db);
     IndexedDbStorageAdapter.ensureSyncActionStore(db);
     this.ensureModelStores(db as IDBPDatabase<unknown>);
+  }
+
+  /**
+   * Runs caller-supplied migration hooks whose version is newer than the
+   * database's previous version, in ascending version order, inside the
+   * upgrade transaction. Mechanism only — the hooks own their own logic.
+   */
+  private runMigrations(
+    db: IDBPDatabase<SyncDBSchema>,
+    oldVersion: number,
+    transaction: unknown
+  ): void {
+    const versions = Object.keys(this.migrations)
+      .map(Number)
+      .filter((version) => version > oldVersion)
+      .toSorted((a, b) => a - b);
+    for (const version of versions) {
+      this.migrations[version]?.(db, transaction);
+    }
   }
 
   private static ensureMetaStore(db: IDBPDatabase<SyncDBSchema>): void {
@@ -565,7 +593,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   ): Promise<void> {
     const db = this.ensureOpen();
     const storeName = this.getStoreName(modelName);
-    await db.put(storeName, row);
+    await wrapQuotaErrors(() => db.put(storeName, row));
   }
 
   async delete(modelName: string, id: string): Promise<void> {
@@ -590,25 +618,27 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       return;
     }
 
-    const tx = db.transaction(
-      ops.map((op) => this.getStoreName(op.modelName)),
-      "readwrite"
-    );
+    await wrapQuotaErrors(async () => {
+      const tx = db.transaction(
+        ops.map((op) => this.getStoreName(op.modelName)),
+        "readwrite"
+      );
 
-    const promises: Promise<unknown>[] = [];
+      const promises: Promise<unknown>[] = [];
 
-    for (const op of ops) {
-      const storeName = this.getStoreName(op.modelName);
-      const store = tx.objectStore(storeName);
+      for (const op of ops) {
+        const storeName = this.getStoreName(op.modelName);
+        const store = tx.objectStore(storeName);
 
-      if (op.type === "put" && op.data) {
-        promises.push(store.put(op.data));
-      } else if (op.type === "delete" && op.id) {
-        promises.push(store.delete(op.id));
+        if (op.type === "put" && op.data) {
+          promises.push(store.put(op.data));
+        } else if (op.type === "delete" && op.id) {
+          promises.push(store.delete(op.id));
+        }
       }
-    }
 
-    await Promise.all([...promises, tx.done]);
+      await Promise.all([...promises, tx.done]);
+    });
   }
 
   getMeta(): Promise<StorageMeta> {
@@ -644,7 +674,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
 
   async addToOutbox(tx: Transaction): Promise<void> {
     const db = this.ensureOpen();
-    await addTransaction(db, tx);
+    await wrapQuotaErrors(() => addTransaction(db, tx));
   }
 
   async removeFromOutbox(clientTxId: string): Promise<void> {
@@ -701,13 +731,15 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     if (!db.objectStoreNames.contains(SYNC_ACTION_STORE)) {
       return;
     }
-    const tx = db.transaction(SYNC_ACTION_STORE, "readwrite");
-    const store = tx.objectStore(SYNC_ACTION_STORE);
-    const writes: Promise<unknown>[] = [];
-    for (const action of actions) {
-      writes.push(store.put(action));
-    }
-    await Promise.all([...writes, tx.done]);
+    await wrapQuotaErrors(async () => {
+      const tx = db.transaction(SYNC_ACTION_STORE, "readwrite");
+      const store = tx.objectStore(SYNC_ACTION_STORE);
+      const writes: Promise<unknown>[] = [];
+      for (const action of actions) {
+        writes.push(store.put(action));
+      }
+      await Promise.all([...writes, tx.done]);
+    });
   }
 
   async getSyncActions(
@@ -735,6 +767,28 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
     const tx = db.transaction(SYNC_ACTION_STORE, "readwrite");
     await tx.objectStore(SYNC_ACTION_STORE).clear();
+    await tx.done;
+  }
+
+  async pruneSyncActions(beforeSyncId: string): Promise<void> {
+    const db = this.ensureOpen();
+    if (!db.objectStoreNames.contains(SYNC_ACTION_STORE)) {
+      return;
+    }
+    // Sync ids are variable-length numeric strings, so a lexicographic
+    // IDBKeyRange would be wrong (e.g. "100" < "9"). Stream the store with a
+    // cursor and delete entries numerically <= beforeSyncId — this avoids
+    // loading every action into memory via getAll.
+    const tx = db.transaction(SYNC_ACTION_STORE, "readwrite");
+    const store = tx.objectStore(SYNC_ACTION_STORE);
+    let cursor = await store.openCursor();
+    while (cursor) {
+      const action = cursor.value as SyncAction;
+      if (compareSyncId(action.id, beforeSyncId) <= 0) {
+        await cursor.delete();
+      }
+      cursor = await cursor.continue();
+    }
     await tx.done;
   }
 

@@ -191,6 +191,12 @@ class InMemoryStorage implements StorageAdapter {
     this.syncActions.length = 0;
     return Promise.resolve();
   }
+  pruneSyncActions(beforeSyncId: string): Promise<void> {
+    const kept = this.syncActions.filter((a) => a.id > beforeSyncId);
+    this.syncActions.length = 0;
+    this.syncActions.push(...kept);
+    return Promise.resolve();
+  }
   clear(options?: ClearStorageOptions): Promise<void> {
     this.data.clear();
     this.modelPersistence.clear();
