@@ -51,5 +51,5 @@ export interface SeedStorageOptions {
 export interface SeedStorageResult {
   applied: boolean;
   rowCount: number;
-  reason?: "schema_mismatch";
+  reason?: "schema_mismatch" | "schema_hash_missing";
 }

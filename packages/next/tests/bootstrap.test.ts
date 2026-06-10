@@ -474,6 +474,57 @@ describe(seedStorageFromBootstrap, () => {
     expect(storage.opened).toBeFalsy();
   });
 
+  it("refuses to seed when the snapshot has no schemaHash", async () => {
+    const schema: SchemaDefinition = { models: { Task: { name: "Task" } } };
+    const storage = new MemoryStorage({
+      clientId: "client-1",
+      lastSyncId: "0",
+    });
+
+    const result = await seedStorageFromBootstrap({
+      schema,
+      snapshot: {
+        fetchedAt: 1,
+        groups: [],
+        lastSyncId: "1",
+        rows: [{ data: { id: "task-1" }, modelName: "Task" }],
+        version: 1,
+      },
+      storage,
+    });
+
+    expect(result).toEqual({
+      applied: false,
+      reason: "schema_hash_missing",
+      rowCount: 0,
+    });
+    expect(storage.opened).toBeFalsy();
+  });
+
+  it("seeds an unvalidated snapshot when validateSchemaHash is false", async () => {
+    const schema: SchemaDefinition = { models: { Task: { name: "Task" } } };
+    const storage = new MemoryStorage({
+      clientId: "client-1",
+      lastSyncId: "0",
+    });
+
+    const result = await seedStorageFromBootstrap({
+      schema,
+      snapshot: {
+        fetchedAt: 1,
+        groups: [],
+        lastSyncId: "1",
+        rows: [{ data: { id: "task-1" }, modelName: "Task" }],
+        version: 1,
+      },
+      storage,
+      validateSchemaHash: false,
+    });
+
+    expect(result).toEqual({ applied: true, rowCount: 1 });
+    expect(storage.opened).toBeTruthy();
+  });
+
   it("writes rows and metadata when schema matches", async () => {
     const schema: SchemaDefinition = { models: { Task: { name: "Task" } } };
     const schemaHash = computeSchemaHash(schema);

@@ -31,12 +31,16 @@ export const seedStorageFromBootstrap = async (
   const registry = new ModelRegistry(schema ?? ModelRegistry.snapshot());
   const localSchemaHash = computeSchemaHash(registry.snapshot());
 
-  if (
-    validateSchemaHash &&
-    resolvedSnapshot.schemaHash &&
-    resolvedSnapshot.schemaHash !== localSchemaHash
-  ) {
-    return { applied: false, reason: "schema_mismatch", rowCount: 0 };
+  if (validateSchemaHash) {
+    // A snapshot with no schemaHash can't be validated; refuse rather than
+    // silently seeding data that may not match the local schema. Callers that
+    // genuinely want to skip the check must pass validateSchemaHash: false.
+    if (!resolvedSnapshot.schemaHash) {
+      return { applied: false, reason: "schema_hash_missing", rowCount: 0 };
+    }
+    if (resolvedSnapshot.schemaHash !== localSchemaHash) {
+      return { applied: false, reason: "schema_mismatch", rowCount: 0 };
+    }
   }
 
   let opened = false;
