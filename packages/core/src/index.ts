@@ -22,6 +22,15 @@ export {
   Reference,
   ReferenceArray,
 } from "./schema/decorators.js";
+export type { ParsedBootstrapLine } from "./protocol/index.js";
+export {
+  finalizeBootstrapMetadata,
+  normalizeBootstrapMetadata,
+  parseBootstrapLine,
+  parseDeltaPacket,
+  parseSyncAction,
+  readNdjsonLines,
+} from "./protocol/index.js";
 export { computeSchemaHash } from "./schema/hash.js";
 export { ModelRegistry } from "./schema/registry.js";
 export type {
@@ -39,6 +48,7 @@ export {
   compareSyncId,
   isSyncIdGreaterThan,
   maxSyncId,
+  parseSyncId,
   ZERO_SYNC_ID,
 } from "./sync/sync-id.js";
 export type {

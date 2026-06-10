@@ -296,7 +296,7 @@ describe(prefetchBootstrap, () => {
   it("normalizes sync endpoints and query params", async () => {
     const rowLine = JSON.stringify({ __class: "Task", id: "task-1" });
     const metadataLine = `_metadata_=${JSON.stringify({
-      lastSyncId: 1,
+      lastSyncId: "1",
       subscribedSyncGroups: [],
     })}`;
     const endLine = JSON.stringify({ rowCount: 1, type: "end" });
@@ -329,7 +329,7 @@ describe(prefetchBootstrap, () => {
 
   it("aborts stalled body reads after the configured timeout", async () => {
     const metadataLine = `_metadata_=${JSON.stringify({
-      lastSyncId: 1,
+      lastSyncId: "1",
       subscribedSyncGroups: [],
     })}`;
 

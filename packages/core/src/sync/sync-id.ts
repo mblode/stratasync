@@ -8,6 +8,22 @@ export type SyncId = string;
 export const ZERO_SYNC_ID: SyncId = "0";
 
 const LEADING_ZEROS = /^0+/;
+const SYNC_ID_RE = /^\d+$/;
+
+/**
+ * Validates a wire-encoded sync ID. Sync IDs are strings on the wire (not
+ * numbers) so values above Number.MAX_SAFE_INTEGER survive without precision
+ * loss; a numeric input is therefore rejected rather than coerced.
+ */
+export const parseSyncId = (value: unknown, fieldName = "syncId"): SyncId => {
+  if (typeof value !== "string") {
+    throw new TypeError(`${fieldName} must be a string`);
+  }
+  if (!SYNC_ID_RE.test(value)) {
+    throw new TypeError(`${fieldName} must be a string-encoded integer`);
+  }
+  return value;
+};
 
 /**
  * Compares two string-encoded sync IDs numerically.

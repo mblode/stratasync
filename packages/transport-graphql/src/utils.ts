@@ -1,6 +1,10 @@
 import type { AuthProvider, RetryConfig } from "./types.js";
 import { DEFAULT_RETRY_CONFIG } from "./types.js";
 
+// Sync-id validation lives in @stratasync/core (single source of truth);
+// re-exported here so existing `./utils.js` import sites stay stable.
+export { parseSyncId } from "@stratasync/core";
+
 /**
  * Delays execution for a specified duration
  */
@@ -241,23 +245,6 @@ export const isRetryableError = (error: unknown): boolean => {
 
 export const isAuthHttpError = (error: unknown): error is HttpError =>
   error instanceof HttpError && (error.status === 401 || error.status === 403);
-
-const SYNC_ID_RE = /^\d+$/;
-
-/**
- * Validates a string-encoded sync ID.
- */
-export const parseSyncId = (value: unknown, fieldName = "syncId"): string => {
-  if (typeof value !== "string") {
-    throw new TypeError(`${fieldName} must be a string`);
-  }
-
-  if (!SYNC_ID_RE.test(value)) {
-    throw new TypeError(`${fieldName} must be a string-encoded integer`);
-  }
-
-  return value;
-};
 
 /**
  * Resolves an auth token, falling back to refreshToken if available
