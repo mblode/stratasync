@@ -38,8 +38,9 @@ export class IdentityMap<T extends Record<string, unknown>> {
   private readonly modelName: string;
   private readonly reactivity: ReactivityAdapter;
   private readonly maxSize: number;
-  private readonly accessOrder = new Map<string, number>();
-  private accessTick = 0;
+  // Insertion order is access order: oldest-touched id first, most-recent last.
+  // Gives O(1) touch (delete + re-add) and O(1) eviction (drop the first key).
+  private readonly accessOrder = new Set<string>();
   private modelFactory?: ModelFactory;
 
   constructor(
@@ -274,8 +275,9 @@ export class IdentityMap<T extends Record<string, unknown>> {
   }
 
   private touch(id: string): void {
-    this.accessTick += 1;
-    this.accessOrder.set(id, this.accessTick);
+    // Re-insert to move this id to the most-recently-used end of the order.
+    this.accessOrder.delete(id);
+    this.accessOrder.add(id);
   }
 
   private evictIfNeeded(): void {
@@ -284,21 +286,10 @@ export class IdentityMap<T extends Record<string, unknown>> {
     }
 
     while (this.map.size > this.maxSize) {
-      let oldestKey: string | null = null;
-      let oldestAccess = Number.POSITIVE_INFINITY;
-
-      for (const [key, accessTick] of this.accessOrder.entries()) {
-        if (accessTick >= oldestAccess) {
-          continue;
-        }
-        oldestKey = key;
-        oldestAccess = accessTick;
-      }
-
-      if (!oldestKey) {
+      const oldestKey = this.accessOrder.values().next().value;
+      if (oldestKey === undefined) {
         break;
       }
-
       this.accessOrder.delete(oldestKey);
       this.map.delete(oldestKey);
     }
