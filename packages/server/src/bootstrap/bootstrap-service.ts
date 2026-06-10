@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, or } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
@@ -9,16 +9,15 @@ import type {
   SyncModelConfig,
 } from "../config.js";
 import { noopLogger } from "../config.js";
+import { parseSyncIdString, serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { SyncDb } from "../db.js";
 import type { BootstrapRequest, SyncUserContext } from "../types.js";
-import { toDateOnlyEpoch, toInstantEpoch } from "../utils/dates.js";
 import { resolveRequestedSyncGroups } from "../utils/sync-scope.js";
-import {
-  getColumn,
-  parseSyncIdString,
-  serializeSyncId,
-} from "../utils/sync-utils.js";
+import { getColumn } from "../utils/sync-utils.js";
+import { streamModel } from "./cursor.js";
+import type { BootstrapFieldDef } from "./row-mapper.js";
+import { mapRow, normalizeModelId, serializeBatchRow } from "./row-mapper.js";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -26,17 +25,22 @@ import {
 
 interface BootstrapModelDef {
   table: AnyPgTable;
-  fieldDef: {
-    fields: readonly string[];
-    dateOnlyFields?: readonly string[];
-    instantFields?: readonly string[];
-  };
+  fieldDef: BootstrapFieldDef;
   cursor: CursorConfig;
   buildScopeWhere: (
     filter: BootstrapFilterContext,
     db: unknown
   ) => SQL<unknown>;
   allowedIndexedKeys?: readonly string[];
+}
+
+// oxlint-disable-next-line func-style, require-yields -- intentionally empty stream
+async function* EMPTY_ROW_STREAM(): AsyncGenerator<
+  Record<string, unknown>,
+  void,
+  unknown
+> {
+  // No rows for an unknown model.
 }
 
 interface BatchLoadRequestIndexed {
@@ -88,51 +92,6 @@ const scopedWhere = (
   scope: SQL<unknown>,
   ...conditions: (SQL<unknown> | undefined)[]
 ): SQL<unknown> => combineWhere([scope, ...conditions]) ?? scope;
-
-const isCursorValue = (value: unknown): boolean =>
-  value !== undefined && value !== null;
-
-const normalizeModelId = (value: unknown): string | null => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (typeof value === "number" || typeof value === "bigint") {
-    return String(value);
-  }
-
-  return null;
-};
-
-const mapRow = (
-  item: Record<string, unknown>,
-  def: BootstrapModelDef
-): Record<string, unknown> => {
-  const dateOnlySet = new Set(def.fieldDef.dateOnlyFields);
-  const instantSet = new Set(def.fieldDef.instantFields);
-  const row: Record<string, unknown> = {};
-
-  for (const field of def.fieldDef.fields) {
-    if (dateOnlySet.has(field)) {
-      row[field] = toDateOnlyEpoch(item[field]);
-      continue;
-    }
-
-    if (instantSet.has(field)) {
-      row[field] = toInstantEpoch(item[field]);
-      continue;
-    }
-
-    row[field] = item[field];
-  }
-
-  row.id =
-    def.cursor.type === "simple"
-      ? item[def.cursor.idField]
-      : def.cursor.syntheticId(item);
-
-  return row;
-};
 
 const toCountNumber = (value: unknown): number => {
   if (typeof value === "number") {
@@ -334,252 +293,6 @@ export class BootstrapService {
     return combineWhere(conditions);
   }
 
-  private static simpleCursorCondition(
-    table: AnyPgTable,
-    idField: string,
-    cursor: unknown
-  ): SQL<unknown> | undefined {
-    if (!isCursorValue(cursor)) {
-      return undefined;
-    }
-
-    return gt(getColumn(table, idField), cursor);
-  }
-
-  private static compositeCursorCondition(
-    table: AnyPgTable,
-    fields: readonly string[],
-    cursorValues: Record<string, unknown> | undefined
-  ): SQL<unknown> | undefined {
-    if (!cursorValues || fields.length === 0) {
-      return undefined;
-    }
-
-    const orConditions: SQL<unknown>[] = [];
-
-    for (let index = 0; index < fields.length; index += 1) {
-      const branch = BootstrapService.compositeCursorBranch(
-        table,
-        fields,
-        cursorValues,
-        index
-      );
-      if (branch) {
-        orConditions.push(branch);
-      }
-    }
-
-    if (orConditions.length === 0) {
-      return undefined;
-    }
-
-    const [first, ...rest] = orConditions;
-    if (!first) {
-      return undefined;
-    }
-
-    if (rest.length === 0) {
-      return first;
-    }
-
-    return or(first, ...rest) as SQL<unknown>;
-  }
-
-  private static compositeCursorBranch(
-    table: AnyPgTable,
-    fields: readonly string[],
-    cursorValues: Record<string, unknown>,
-    index: number
-  ): SQL<unknown> | undefined {
-    const field = fields[index];
-    if (!field) {
-      return undefined;
-    }
-
-    const fieldValue = cursorValues[field];
-    if (!isCursorValue(fieldValue)) {
-      return undefined;
-    }
-
-    const currentGreaterThan = gt(getColumn(table, field), fieldValue);
-    if (index === 0) {
-      return currentGreaterThan;
-    }
-
-    const prefix = BootstrapService.compositeCursorPrefix(
-      table,
-      fields,
-      cursorValues,
-      index
-    );
-    return prefix
-      ? (and(prefix, currentGreaterThan) as SQL<unknown>)
-      : currentGreaterThan;
-  }
-
-  private static compositeCursorPrefix(
-    table: AnyPgTable,
-    fields: readonly string[],
-    cursorValues: Record<string, unknown>,
-    index: number
-  ): SQL<unknown> | undefined {
-    const prefixConditions: SQL<unknown>[] = [];
-
-    for (let prefixIndex = 0; prefixIndex < index; prefixIndex += 1) {
-      const prefixField = fields[prefixIndex];
-      if (!prefixField) {
-        continue;
-      }
-
-      const prefixValue = cursorValues[prefixField];
-      if (!isCursorValue(prefixValue)) {
-        continue;
-      }
-
-      prefixConditions.push(eq(getColumn(table, prefixField), prefixValue));
-    }
-
-    return combineWhere(prefixConditions);
-  }
-
-  // -------------------------------------------------------------------------
-  // Generic streaming (cursor-based pagination)
-  // -------------------------------------------------------------------------
-
-  private async *streamModel(
-    modelName: string,
-    batchSize: number,
-    filter: BootstrapFilterContext
-  ): AsyncGenerator<Record<string, unknown>, void, unknown> {
-    const def = this.modelRegistry[modelName];
-    if (!def) {
-      return;
-    }
-
-    await Promise.resolve();
-
-    // oxlint-disable-next-line prefer-ternary -- yield* cannot appear inside a ternary expression
-    if (def.cursor.type === "simple") {
-      yield* this.streamSimpleCursor(def, batchSize, filter);
-    } else {
-      yield* this.streamCompositeCursor(def, batchSize, filter);
-    }
-  }
-
-  private async *streamSimpleCursor(
-    def: BootstrapModelDef,
-    batchSize: number,
-    filter: BootstrapFilterContext
-  ): AsyncGenerator<Record<string, unknown>, void, unknown> {
-    if (def.cursor.type !== "simple") {
-      return;
-    }
-
-    const scopeWhere = def.buildScopeWhere(filter, this.db);
-    const idColumn = getColumn(def.table, def.cursor.idField);
-    let cursor: unknown;
-
-    while (true) {
-      const cursorWhere = BootstrapService.simpleCursorCondition(
-        def.table,
-        def.cursor.idField,
-        cursor
-      );
-      const where = scopedWhere(scopeWhere, cursorWhere);
-
-      const rows = (await this.db
-        .select()
-        .from(def.table)
-        .where(where)
-        .orderBy(asc(idColumn))
-        .limit(batchSize)) as Record<string, unknown>[];
-
-      if (rows.length === 0) {
-        break;
-      }
-
-      for (const row of rows) {
-        yield mapRow(row, def);
-      }
-
-      const last = rows.at(-1);
-      const nextCursor = last?.[def.cursor.idField];
-      if (rows.length === batchSize && isCursorValue(nextCursor)) {
-        cursor = nextCursor;
-      } else {
-        break;
-      }
-    }
-  }
-
-  private async *streamCompositeCursor(
-    def: BootstrapModelDef,
-    batchSize: number,
-    filter: BootstrapFilterContext
-  ): AsyncGenerator<Record<string, unknown>, void, unknown> {
-    if (def.cursor.type !== "composite") {
-      return;
-    }
-
-    const scopeWhere = def.buildScopeWhere(filter, this.db);
-    const orderByColumns = def.cursor.fields.map((field) =>
-      asc(getColumn(def.table, field))
-    );
-
-    const [firstOrder, ...restOrder] = orderByColumns;
-    if (!firstOrder) {
-      return;
-    }
-
-    let cursorValues: Record<string, unknown> | undefined;
-
-    while (true) {
-      const cursorWhere = BootstrapService.compositeCursorCondition(
-        def.table,
-        def.cursor.fields,
-        cursorValues
-      );
-      const where = scopedWhere(scopeWhere, cursorWhere);
-
-      const rows = (await this.db
-        .select()
-        .from(def.table)
-        .where(where)
-        .orderBy(firstOrder, ...restOrder)
-        .limit(batchSize)) as Record<string, unknown>[];
-
-      if (rows.length === 0) {
-        break;
-      }
-
-      for (const row of rows) {
-        yield mapRow(row, def);
-      }
-
-      const last = rows.at(-1);
-      if (!(last && rows.length === batchSize)) {
-        break;
-      }
-
-      const nextCursor: Record<string, unknown> = {};
-      let validCursor = true;
-      for (const field of def.cursor.fields) {
-        const value = last[field];
-        if (!isCursorValue(value)) {
-          validCursor = false;
-          break;
-        }
-        nextCursor[field] = value;
-      }
-
-      if (!validCursor) {
-        break;
-      }
-
-      cursorValues = nextCursor;
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Generic batch loading
   // -------------------------------------------------------------------------
@@ -632,7 +345,7 @@ export class BootstrapService {
       );
     }
 
-    const mappedRows = rows.map((row) => mapRow(row, def));
+    const mappedRows = rows.map((row) => mapRow(row, def.fieldDef, def.cursor));
     yield* this.filterBatchRowsByFirstSyncId(
       modelName,
       mappedRows,
@@ -649,7 +362,7 @@ export class BootstrapService {
   ): AsyncGenerator<string, void, unknown> {
     if (!(firstSyncId && rows.length > 0)) {
       for (const row of rows) {
-        yield BootstrapService.serializeBatchRow(modelName, row);
+        yield serializeBatchRow(modelName, row);
       }
       return;
     }
@@ -671,18 +384,8 @@ export class BootstrapService {
         continue;
       }
 
-      yield BootstrapService.serializeBatchRow(modelName, row);
+      yield serializeBatchRow(modelName, row);
     }
-  }
-
-  private static serializeBatchRow(
-    modelName: string,
-    row: Record<string, unknown>
-  ): string {
-    return JSON.stringify({
-      __class: modelName,
-      ...row,
-    });
   }
 
   private async *streamFilteredModelRows(
@@ -768,6 +471,17 @@ export class BootstrapService {
     modelName: string,
     filter: BootstrapFilterContext
   ): AsyncGenerator<Record<string, unknown>, void, unknown> {
-    return this.streamModel(modelName, 1000, filter);
+    const def = this.modelRegistry[modelName];
+    if (!def) {
+      return EMPTY_ROW_STREAM();
+    }
+
+    return streamModel(
+      this.db,
+      def.table,
+      def.buildScopeWhere(filter, this.db),
+      def.fieldDef,
+      def.cursor
+    );
   }
 }
