@@ -1,4 +1,4 @@
-// oxlint-disable no-use-before-define -- closure pattern requires forward references (clientRef, emitPendingCount)
+// oxlint-disable no-use-before-define -- closure pattern requires forward references (mutations, materializeModelResult, emitPendingCount)
 import type {
   ArchiveTransactionOptions,
   ConnectionState,
@@ -10,9 +10,6 @@ import type {
 } from "@stratasync/core";
 import {
   captureArchiveState,
-  createArchivePayload,
-  createUnarchivePatch,
-  createUnarchivePayload,
   generateUUID,
   getOrCreateClientId,
   readArchivedAt,
@@ -28,6 +25,7 @@ import {
   createMaterializer,
   resolveModelFactory,
 } from "./materializer.js";
+import { MutationCoordinator } from "./mutations.js";
 import { OutboxManager } from "./outbox-manager.js";
 import { executeQuery } from "./query.js";
 import { SyncOrchestrator } from "./sync-orchestrator.js";
@@ -40,30 +38,7 @@ import type {
   SyncClientEvent,
   SyncClientOptions,
 } from "./types.js";
-import { getModelData, getModelKey, pickOriginal } from "./utils.js";
-
-const buildEffectiveUpdate = <T extends Record<string, unknown>>(
-  existingData: T,
-  changes: Partial<T>
-): {
-  effectiveChanges: Partial<T>;
-  effectiveChangeRecord: Record<string, unknown>;
-} => {
-  const effectiveChanges: Partial<T> = {};
-  for (const [key, value] of Object.entries(changes) as [
-    keyof T,
-    T[keyof T],
-  ][]) {
-    if (!Object.is(existingData[key as string], value)) {
-      effectiveChanges[key] = value;
-    }
-  }
-
-  return {
-    effectiveChangeRecord: effectiveChanges as Record<string, unknown>,
-    effectiveChanges,
-  };
-};
+import { getModelKey } from "./utils.js";
 
 const MUTATION_START_REQUIRED_ERROR =
   "Sync client must be started before mutations";
@@ -214,7 +189,6 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const applyHistoryOperation = async (
     operation: HistoryOperation
   ): Promise<string | undefined> => {
-    const client = getClientRef();
     let txId: string | undefined;
     const capture = (tx: Transaction) => {
       txId = tx.clientTxId;
@@ -222,13 +196,13 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
 
     switch (operation.action) {
       case "I": {
-        await client.create(operation.modelName, operation.payload, {
+        await mutations.create(operation.modelName, operation.payload, {
           onTransactionCreated: capture,
         });
         break;
       }
       case "U": {
-        await client.update(
+        await mutations.update(
           operation.modelName,
           operation.modelId,
           operation.payload,
@@ -240,14 +214,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         break;
       }
       case "D": {
-        await client.delete(operation.modelName, operation.modelId, {
+        await mutations.delete(operation.modelName, operation.modelId, {
           onTransactionCreated: capture,
           original: operation.original,
         });
         break;
       }
       case "A": {
-        await client.archive(operation.modelName, operation.modelId, {
+        await mutations.archive(operation.modelName, operation.modelId, {
           archivedAt: readArchivedAt(operation.payload),
           onTransactionCreated: capture,
           original: operation.original,
@@ -255,7 +229,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         break;
       }
       case "V": {
-        await client.unarchive(operation.modelName, operation.modelId, {
+        await mutations.unarchive(operation.modelName, operation.modelId, {
           onTransactionCreated: capture,
           original: operation.original,
         });
@@ -456,31 +430,15 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     keyValue: string
   ): Promise<T[]> => loader.loadByIndex<T>(modelName, indexedKey, keyValue);
 
-  // clientRef / getClientRef: The client object literal references itself
-  // (via getClientRef) for history replay operations, but it hasn't been
-  // assigned yet at definition time. clientRef is set after the object is built.
-  let clientRef: SyncClient | null = null;
-
-  const getClientRef = (): SyncClient => {
-    if (!clientRef) {
-      throw new Error("Sync client is not initialized");
-    }
-    return clientRef;
-  };
-
+  // The model store routes mutations through the MutationCoordinator (declared
+  // below). The delegating arrows resolve `mutations` lazily at call time, so no
+  // self-reference (clientRef) hack is needed.
   const modelStore: ModelStore & SyncStore = {
-    archive: (modelName, id, archiveOpts) => {
-      const client = getClientRef();
-      return client.archive(modelName, id, archiveOpts);
-    },
-    create: (modelName, data) => {
-      const client = getClientRef();
-      return client.create(modelName, data);
-    },
-    delete: (modelName, id, deleteOpts) => {
-      const client = getClientRef();
-      return client.delete(modelName, id, deleteOpts);
-    },
+    archive: (modelName, id, archiveOpts) =>
+      mutations.archive(modelName, id, archiveOpts),
+    create: (modelName, data) => mutations.create(modelName, data),
+    delete: (modelName, id, deleteOpts) =>
+      mutations.delete(modelName, id, deleteOpts),
     get: <T extends Record<string, unknown>>(
       modelName: string,
       id: string
@@ -501,14 +459,10 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     loadByIndex: loadByIndexInternal,
     setPartialIndex: (modelName, indexName, key) =>
       options.storage.setPartialIndex(modelName, indexName, key),
-    unarchive: (modelName, id, unarchiveOpts) => {
-      const client = getClientRef();
-      return client.unarchive(modelName, id, unarchiveOpts);
-    },
-    update: (modelName, id, changes, updateOpts) => {
-      const client = getClientRef();
-      return client.update(modelName, id, changes, updateOpts);
-    },
+    unarchive: (modelName, id, unarchiveOpts) =>
+      mutations.unarchive(modelName, id, unarchiveOpts),
+    update: (modelName, id, changes, updateOpts) =>
+      mutations.update(modelName, id, changes, updateOpts),
   };
 
   const resolvedModelFactory =
@@ -521,51 +475,33 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   );
   identityMaps.setModelFactory(resolvedModelFactory);
 
+  const mutations = new MutationCoordinator({
+    buildHistoryEntry: (action, modelName, modelId, payload, original) =>
+      history.buildEntry(action, modelName, modelId, payload, original),
+    emitModelChange,
+    getRegistry: () => orchestrator.getRegistry(),
+    identityMaps,
+    isOptimistic: () => resolvedOptions.optimistic !== false,
+    markPresent: (modelName, id) => {
+      missingModels.delete(getModelKey(modelName, id));
+    },
+    materialize: (modelName, id, data, materializeOptions) =>
+      materializeModelResult(modelName, id, data, materializeOptions),
+    recordHistoryEntry,
+    rollbackOptimisticMutation,
+    runWithMutationOutbox,
+    serializeMutationRecord,
+  });
+
   const client: SyncClient = {
-    async archive(
+    archive(
       modelName: string,
       id: string,
       mutationOptions?: ArchiveTransactionOptions & {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithMutationOutbox(async (activeOutboxManager) => {
-        const map = identityMaps.getMap(modelName);
-        const existing = map.get(id);
-
-        if (!existing) {
-          throw new Error(`Model ${modelName} with id ${id} not found`);
-        }
-
-        const existingData = getModelData(existing);
-        const archived = createArchivePayload(mutationOptions?.archivedAt);
-        const original =
-          mutationOptions?.original ?? captureArchiveState(existingData);
-
-        if (resolvedOptions.optimistic !== false) {
-          map.update(id, archived);
-          emitModelChange(modelName, id, "archive");
-        }
-
-        let queuedTx: Transaction;
-        try {
-          queuedTx = await activeOutboxManager.archive(modelName, id, {
-            archivedAt: archived.archivedAt ?? undefined,
-            original,
-          });
-        } catch (error) {
-          if (resolvedOptions.optimistic !== false) {
-            rollbackOptimisticMutation("A", modelName, id, original);
-          }
-          throw error;
-        }
-        mutationOptions?.onTransactionCreated?.(queuedTx);
-
-        recordHistoryEntry(
-          history.buildEntry("A", modelName, id, archived, original),
-          queuedTx
-        );
-      });
+      return mutations.archive(modelName, id, mutationOptions);
     },
 
     canRedo(): boolean {
@@ -626,50 +562,10 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       data: T,
       mutationOptions?: { onTransactionCreated?: (tx: Transaction) => void }
     ): Promise<T> {
-      return runWithMutationOutbox(async (activeOutboxManager) => {
-        const primaryKey = orchestrator.getRegistry().getPrimaryKey(modelName);
-
-        // Generate ID if not provided
-        const id = (data[primaryKey] as string) || generateUUID();
-        const fullData = { ...data, [primaryKey]: id };
-        const serializedFullData = serializeMutationRecord(modelName, fullData);
-
-        if (resolvedOptions.optimistic !== false) {
-          const map = identityMaps.getMap<T>(modelName);
-          map.set(id, fullData, { serialized: false });
-          missingModels.delete(getModelKey(modelName, id));
-          emitModelChange(modelName, id, "insert");
-        }
-
-        let queuedTx: Transaction;
-        try {
-          queuedTx = await activeOutboxManager.insert(
-            modelName,
-            id,
-            serializedFullData
-          );
-        } catch (error) {
-          if (resolvedOptions.optimistic !== false) {
-            rollbackOptimisticMutation("I", modelName, id);
-          }
-          throw error;
-        }
-        mutationOptions?.onTransactionCreated?.(queuedTx);
-
-        recordHistoryEntry(
-          history.buildEntry("I", modelName, id, fullData),
-          queuedTx
-        );
-
-        return materializeModelResult(
-          modelName,
-          id,
-          fullData as T & Record<string, unknown>
-        );
-      });
+      return mutations.create(modelName, data, mutationOptions);
     },
 
-    async delete(
+    delete(
       modelName: string,
       id: string,
       mutationOptions?: {
@@ -677,41 +573,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithMutationOutbox(async (activeOutboxManager) => {
-        const map = identityMaps.getMap(modelName);
-        const existing = map.get(id);
-
-        if (!existing) {
-          throw new Error(`Model ${modelName} with id ${id} not found`);
-        }
-
-        if (resolvedOptions.optimistic !== false) {
-          map.delete(id);
-          emitModelChange(modelName, id, "delete");
-        }
-
-        const original = mutationOptions?.original ?? getModelData(existing);
-        const serializedOriginal = serializeMutationRecord(modelName, original);
-        let queuedTx: Transaction;
-        try {
-          queuedTx = await activeOutboxManager.delete(
-            modelName,
-            id,
-            serializedOriginal
-          );
-        } catch (error) {
-          if (resolvedOptions.optimistic !== false) {
-            rollbackOptimisticMutation("D", modelName, id, original);
-          }
-          throw error;
-        }
-        mutationOptions?.onTransactionCreated?.(queuedTx);
-
-        recordHistoryEntry(
-          history.buildEntry("D", modelName, id, {}, original),
-          queuedTx
-        );
-      });
+      return mutations.delete(modelName, id, mutationOptions);
     },
 
     ensureModel<T>(modelName: string, id: string): Promise<T | null> {
@@ -913,55 +775,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       await orchestrator.syncNow();
     },
 
-    async unarchive(
+    unarchive(
       modelName: string,
       id: string,
       mutationOptions?: UnarchiveTransactionOptions & {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<void> {
-      await runWithMutationOutbox(async (activeOutboxManager) => {
-        const map = identityMaps.getMap(modelName);
-        const existing = map.get(id);
-
-        if (!existing) {
-          throw new Error(`Model ${modelName} with id ${id} not found`);
-        }
-
-        const existingData = getModelData(existing);
-        const original =
-          mutationOptions?.original ?? captureArchiveState(existingData);
-        const unarchivePatch = createUnarchivePatch();
-
-        if (resolvedOptions.optimistic !== false) {
-          map.update(id, unarchivePatch);
-          emitModelChange(modelName, id, "unarchive");
-        }
-
-        let queuedTx: Transaction;
-        try {
-          queuedTx = await activeOutboxManager.unarchive(modelName, id, {
-            original,
-          });
-        } catch (error) {
-          if (resolvedOptions.optimistic !== false) {
-            rollbackOptimisticMutation("V", modelName, id, original);
-          }
-          throw error;
-        }
-        mutationOptions?.onTransactionCreated?.(queuedTx);
-
-        recordHistoryEntry(
-          history.buildEntry(
-            "V",
-            modelName,
-            id,
-            createUnarchivePayload(),
-            original
-          ),
-          queuedTx
-        );
-      });
+      return mutations.unarchive(modelName, id, mutationOptions);
     },
 
     async undo(): Promise<void> {
@@ -977,77 +798,11 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         onTransactionCreated?: (tx: Transaction) => void;
       }
     ): Promise<T> {
-      return runWithMutationOutbox(async (activeOutboxManager) => {
-        const map = identityMaps.getMap<T>(modelName);
-        const existing = map.get(id);
-
-        if (!existing) {
-          throw new Error(`Model ${modelName} with id ${id} not found`);
-        }
-
-        const existingData = getModelData(existing) as T;
-        const { effectiveChanges, effectiveChangeRecord } =
-          buildEffectiveUpdate(existingData, changes);
-
-        if (Object.keys(effectiveChangeRecord).length === 0) {
-          return existing as T;
-        }
-
-        const originalSource = mutationOptions?.original ?? existingData;
-        const original = pickOriginal(originalSource, effectiveChangeRecord);
-        const serializedChanges = serializeMutationRecord(
-          modelName,
-          effectiveChangeRecord
-        );
-        const serializedOriginal = serializeMutationRecord(modelName, original);
-        const updated = { ...existingData, ...effectiveChanges } as T;
-
-        if (resolvedOptions.optimistic !== false) {
-          map.update(id, effectiveChanges, { serialized: false });
-          missingModels.delete(getModelKey(modelName, id));
-          emitModelChange(modelName, id, "update");
-        }
-
-        let queuedTx: Transaction;
-        try {
-          queuedTx = await activeOutboxManager.update(
-            modelName,
-            id,
-            serializedChanges,
-            serializedOriginal
-          );
-        } catch (error) {
-          if (resolvedOptions.optimistic !== false) {
-            rollbackOptimisticMutation("U", modelName, id, original);
-          }
-          throw error;
-        }
-        mutationOptions?.onTransactionCreated?.(queuedTx);
-
-        recordHistoryEntry(
-          history.buildEntry(
-            "U",
-            modelName,
-            id,
-            effectiveChangeRecord,
-            original
-          ),
-          queuedTx
-        );
-        return materializeModelResult(
-          modelName,
-          id,
-          updated as T & Record<string, unknown>,
-          {
-            preferCached: resolvedOptions.optimistic !== false,
-          }
-        );
-      });
+      return mutations.update(modelName, id, changes, mutationOptions);
     },
 
     yjs: yjsManagers,
   };
 
-  clientRef = client;
   return client;
 };
