@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 
+import { authorizeToken } from "../auth/authorize.js";
 import type { SyncAuthConfig, SyncLogger, WebSocketHooks } from "../config.js";
 import { noopLogger } from "../config.js";
 import {
@@ -492,38 +493,29 @@ export const registerSyncWebsocket = (
           await hooks.onSubscribe(ws, getConnectionContext(), previousContext);
         }
 
-        let payload;
-        try {
-          payload = await auth.verifyToken(msg.token);
-        } catch {
-          sendSocketError("Invalid token");
-          return;
-        }
-        if (!payload) {
+        const authResult = await authorizeToken(
+          auth,
+          syncDao,
+          msg.token,
+          logger
+        );
+
+        // WS does not distinguish expired tokens from invalid ones.
+        if (authResult.status === "invalid_token") {
           sendSocketError("Invalid token");
           return;
         }
 
-        let resolvedGroups: string[];
-        let dbGroups: string[];
-        try {
-          [resolvedGroups, dbGroups] = await Promise.all([
-            auth.resolveGroups(payload.userId),
-            syncDao.getUserGroups(payload.userId),
-          ]);
-        } catch (error) {
-          logger.error({ error }, "WebSocket group resolution failed");
+        if (authResult.status === "group_failure") {
           sendSocketError("Failed to resolve sync groups");
           if (socket.readyState === socket.OPEN) {
             socket.close(1011, "Failed to resolve sync groups");
           }
           return;
         }
-        const authorizedGroups = dedupeSyncGroups([
-          ...resolvedGroups,
-          ...dbGroups,
-          payload.userId,
-        ]);
+
+        const { user } = authResult;
+        const authorizedGroups = user.groups;
         const { groups, rejectedGroups } = resolveSubscribeGroups(
           authorizedGroups,
           msg.groups
@@ -534,18 +526,13 @@ export const registerSyncWebsocket = (
             {
               authorizedGroups,
               requestedGroups: rejectedGroups,
-              userId: payload.userId,
+              userId: user.userId,
             },
             "Rejected unauthorized WebSocket sync groups"
           );
         }
 
-        setSubscribedState(
-          state,
-          payload.userId,
-          groups,
-          msg.afterSyncId ?? "0"
-        );
+        setSubscribedState(state, user.userId, groups, msg.afterSyncId ?? "0");
 
         const earliestSyncId = await getEarliestSyncId();
         if (

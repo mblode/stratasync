@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ZodType } from "zod";
 
+import { authorizeToken } from "../auth/authorize.js";
 import type { SyncAuthConfig, SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
 import type { SyncDao } from "../dao/sync-dao.js";
@@ -54,50 +55,25 @@ export const createSyncAuthMiddleware = (
       return;
     }
 
-    let authPayload;
-    try {
-      authPayload = await auth.verifyToken(token);
-    } catch (error) {
-      logger.warn({ error }, "Sync auth failed");
+    const result = await authorizeToken(auth, syncDao, token, logger);
 
-      if (error instanceof Error && error.message.includes("expired")) {
-        reply.code(401).send({ error: "Token expired" });
-        return;
-      }
-
-      reply.code(401).send({ error: "Invalid token" });
+    if (result.status === "invalid_token") {
+      reply
+        .code(401)
+        .send({ error: result.expired ? "Token expired" : "Invalid token" });
       return;
     }
 
-    if (!authPayload) {
-      reply.code(401).send({ error: "Invalid token" });
-      return;
-    }
-
-    try {
-      const { userId } = authPayload;
-      const [groupsFromAuth, groupsFromDb] = await Promise.all([
-        auth.resolveGroups(userId),
-        syncDao.getUserGroups(userId),
-      ]);
-      const groups = [...new Set([...groupsFromAuth, ...groupsFromDb, userId])];
-
-      const syncUser: SyncUserContext = {
-        email: authPayload.email,
-        groups,
-        name: authPayload.name,
-        userId,
-      };
-
-      (request as SyncAuthenticatedRequest).syncUser = syncUser;
-      logger.debug(
-        { userId: syncUser.userId },
-        "Sync auth middleware complete"
-      );
-    } catch (error) {
-      logger.error({ error }, "Sync group resolution failed");
+    if (result.status === "group_failure") {
       reply.code(500).send({ error: "Failed to resolve sync groups" });
+      return;
     }
+
+    (request as SyncAuthenticatedRequest).syncUser = result.user;
+    logger.debug(
+      { userId: result.user.userId },
+      "Sync auth middleware complete"
+    );
   };
 
 export const getSyncUser = (request: FastifyRequest): SyncUserContext => {
