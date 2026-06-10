@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
+import type { RawSyncActionRow } from "../core/sync-action.js";
 import type { SyncDb } from "../db.js";
 import { getColumn } from "../utils/sync-utils.js";
 
@@ -17,18 +18,6 @@ export interface SyncActionInsert {
   groupId: string | null;
   clientTxId: string | null;
   clientId: string | null;
-}
-
-interface SyncActionRow {
-  id: bigint;
-  model: string;
-  modelId: string;
-  action: string;
-  data: unknown;
-  groupId: string | null;
-  clientTxId: string | null;
-  clientId: string | null;
-  createdAt: Date;
 }
 
 const ensureBigint = (value: bigint | string): bigint => {
@@ -123,7 +112,7 @@ export class SyncDao {
     afterId: bigint,
     groups: string[],
     limit: number
-  ): Promise<SyncActionRow[]> {
+  ): Promise<RawSyncActionRow[]> {
     const idCol = getColumn(this.tables.syncActions, "id");
     const rows = await this.db
       .select()
@@ -132,7 +121,7 @@ export class SyncDao {
       .orderBy(asc(idCol))
       .limit(limit);
 
-    return rows as unknown as SyncActionRow[];
+    return rows as unknown as RawSyncActionRow[];
   }
 
   async getTouchedModelIdsAfter(
@@ -192,7 +181,7 @@ export class SyncDao {
   /**
    * Creates a sync action.
    */
-  async createSyncAction(data: SyncActionInsert): Promise<SyncActionRow> {
+  async createSyncAction(data: SyncActionInsert): Promise<RawSyncActionRow> {
     const rows = await this.db
       .insert(this.tables.syncActions)
       .values({
@@ -211,7 +200,7 @@ export class SyncDao {
       throw new Error("Failed to create sync action");
     }
 
-    return created as unknown as SyncActionRow;
+    return created as unknown as RawSyncActionRow;
   }
 
   /**

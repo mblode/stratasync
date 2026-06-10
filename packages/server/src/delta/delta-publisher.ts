@@ -8,11 +8,15 @@ import type {
 
 import type { SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
-import type { SerializedSyncActionOutput, SyncActionOutput } from "../types.js";
+import { isStringArray } from "../core/guards.js";
+import { safeJsonStringify } from "../core/json.js";
 import {
   parseSyncActionOutput,
   serializeSyncActionOutput,
-} from "../utils/sync-utils.js";
+} from "../core/sync-action.js";
+import type { SerializedSyncActionOutput, SyncActionOutput } from "../types.js";
+
+export { safeJsonStringify };
 
 type RedisClient = RedisClientType<RedisModules, RedisFunctions, RedisScripts>;
 
@@ -23,9 +27,6 @@ interface DeltaMessage {
   groups: string[];
   sourceId?: string;
 }
-
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
 
 const parseDeltaMessage = (
   raw: unknown
@@ -54,16 +55,6 @@ const parseDeltaMessage = (
 
   return parsed;
 };
-
-const jsonReplacer = (_: string, value: unknown) => {
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-  return value;
-};
-
-export const safeJsonStringify = (value: unknown): string =>
-  JSON.stringify(value, jsonReplacer);
 
 export interface DeltaPublisherLike {
   publish(action: SyncActionOutput, groups: string[]): Promise<void>;

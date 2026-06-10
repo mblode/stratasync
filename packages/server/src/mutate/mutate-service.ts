@@ -2,6 +2,9 @@ import { eq, getTableColumns } from "drizzle-orm";
 
 import type { SyncLogger, SyncModelConfig } from "../config.js";
 import { noopLogger } from "../config.js";
+import type { RawSyncActionRow } from "../core/sync-action.js";
+import { toSyncActionOutput } from "../core/sync-action.js";
+import { serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { SyncDb } from "../db.js";
 import type {
@@ -14,7 +17,6 @@ import type {
   TransactionResult,
 } from "../types.js";
 import { mapGraphQLAction } from "../types.js";
-import { serializeSyncId, toSyncActionOutput } from "../utils/sync-utils.js";
 import {
   createModelHandler,
   createStandardDelegate,
@@ -26,18 +28,6 @@ const MODEL_ID_GROUP_KEY = "__modelId__";
 
 const SYNC_ACTION_DEDUP_CONSTRAINT =
   "sync_actions_client_id_client_tx_id_unique";
-
-interface SyncActionRow {
-  id: bigint;
-  model: string;
-  modelId: string;
-  action: string;
-  data: unknown;
-  groupId: string | null;
-  clientTxId: string | null;
-  clientId: string | null;
-  createdAt: Date;
-}
 
 const isSyncDedupUniqueConstraintError = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) {
@@ -75,7 +65,7 @@ type ProcessedTransactionResult =
 
 interface TransactionWorkResult {
   data: Record<string, unknown>;
-  syncAction: SyncActionRow;
+  syncAction: RawSyncActionRow;
 }
 
 type ProcessAction = ReturnType<typeof mapGraphQLAction>;
@@ -384,7 +374,7 @@ export class MutateService {
   }
 
   private static publishSyncAction(
-    syncAction: SyncActionRow,
+    syncAction: RawSyncActionRow,
     onAction?: (action: SyncActionOutput) => void
   ): void {
     if (!onAction) {
@@ -448,8 +438,8 @@ export class MutateService {
     canonicalModelId: string,
     data: Record<string, unknown>,
     groupId: string | null
-  ): Promise<SyncActionRow> {
-    return (await dao.createSyncAction({
+  ): Promise<RawSyncActionRow> {
+    return await dao.createSyncAction({
       action,
       clientId: tx.clientId,
       clientTxId: tx.clientTxId,
@@ -457,7 +447,7 @@ export class MutateService {
       groupId,
       model: tx.modelName,
       modelId: canonicalModelId,
-    })) as unknown as SyncActionRow;
+    });
   }
 
   private async processTransaction(

@@ -5,20 +5,22 @@ import type { WebSocket } from "ws";
 
 import type { SyncAuthConfig, SyncLogger, WebSocketHooks } from "../config.js";
 import { noopLogger } from "../config.js";
+import {
+  BOOTSTRAP_REQUIRED,
+  BOOTSTRAP_REQUIRED_WS_MESSAGE,
+} from "../core/errors.js";
+import { isRecord } from "../core/guards.js";
+import { safeJsonStringify } from "../core/json.js";
+import { toSyncActionOutput } from "../core/sync-action.js";
+import { parseSyncIdString, serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
-import { safeJsonStringify } from "../delta/delta-publisher.js";
 import type { SyncActionOutput } from "../types.js";
 import { AsyncMutex } from "../utils/async-mutex.js";
 import {
   dedupeSyncGroups,
   resolveRequestedSyncGroups,
 } from "../utils/sync-scope.js";
-import {
-  parseSyncIdString,
-  serializeSyncId,
-  toSyncActionOutput,
-} from "../utils/sync-utils.js";
 
 interface SubscribeMessage {
   type: "subscribe";
@@ -72,9 +74,6 @@ const hasGroupOverlap = (
   }
   return clientGroups.some((group) => deltaGroups.includes(group));
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 
 const isNonNegativeIntegerString = (value: string): boolean =>
   NON_NEGATIVE_INTEGER_REGEX.test(value);
@@ -278,23 +277,7 @@ const replaySyncActions = async (
     }
 
     for (const action of actions) {
-      sendDeltaAction(
-        ws,
-        state,
-        toSyncActionOutput(
-          action as {
-            id: bigint;
-            model: string;
-            modelId: string;
-            action: string;
-            data: unknown;
-            groupId: string | null;
-            clientTxId: string | null;
-            clientId: string | null;
-            createdAt: Date;
-          }
-        )
-      );
+      sendDeltaAction(ws, state, toSyncActionOutput(action));
     }
 
     const lastAction = actions.at(-1);
@@ -302,7 +285,7 @@ const replaySyncActions = async (
       break;
     }
 
-    replayCursor = serializeSyncId((lastAction as { id: bigint }).id);
+    replayCursor = serializeSyncId(lastAction.id);
   }
 };
 
@@ -573,10 +556,7 @@ export const registerSyncWebsocket = (
         ) {
           unsubscribeClient(state);
           resetClientAuthState(state);
-          sendSocketError(
-            "A fresh bootstrap is required before subscribing to deltas",
-            "BOOTSTRAP_REQUIRED"
-          );
+          sendSocketError(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED);
           return;
         }
 

@@ -3,6 +3,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { BootstrapService } from "../bootstrap/bootstrap-service.js";
 import type { SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
+import {
+  BOOTSTRAP_REQUIRED,
+  BOOTSTRAP_REQUIRED_HTTP_MESSAGE,
+} from "../core/errors.js";
+import { parseSyncIdString } from "../core/sync-id.js";
 import type { DeltaPublisherLike } from "../delta/delta-publisher.js";
 import type { DeltaService } from "../delta/delta-service.js";
 import { MutateService } from "../mutate/mutate-service.js";
@@ -11,7 +16,6 @@ import {
   resolvePublishedDeltaGroups,
   resolveRequestedSyncGroups,
 } from "../utils/sync-scope.js";
-import { parseSyncIdString } from "../utils/sync-utils.js";
 import { getSyncUser, validateBody, validateQuery } from "./middleware.js";
 import type {
   BatchLoadBody,
@@ -173,8 +177,8 @@ export const registerSyncRoutes = (
 
       if (await deltaService.isCursorStale(afterSyncId)) {
         return reply.code(409).send({
-          error: "BOOTSTRAP_REQUIRED",
-          message: "A fresh bootstrap is required before fetching deltas",
+          error: BOOTSTRAP_REQUIRED,
+          message: BOOTSTRAP_REQUIRED_HTTP_MESSAGE,
         });
       }
 

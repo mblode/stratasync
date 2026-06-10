@@ -1,8 +1,9 @@
 import type { SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
+import { toSyncActionOutput } from "../core/sync-action.js";
+import { serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaPacket, SyncUserContext } from "../types.js";
-import { serializeSyncId, toSyncActionOutput } from "../utils/sync-utils.js";
 
 /**
  * Service for fetching sync deltas.
@@ -45,24 +46,10 @@ export class DeltaService {
     const resultActions = hasMore ? actions.slice(0, limit) : actions;
 
     const lastAction = resultActions.at(-1);
-    const lastSyncId = lastAction
-      ? (lastAction as { id: bigint }).id
-      : afterSyncId;
+    const lastSyncId = lastAction ? lastAction.id : afterSyncId;
 
     const outputActions = resultActions.map((action) =>
-      toSyncActionOutput(
-        action as {
-          id: bigint;
-          model: string;
-          modelId: string;
-          action: string;
-          data: unknown;
-          groupId: string | null;
-          clientTxId: string | null;
-          clientId: string | null;
-          createdAt: Date;
-        }
-      )
+      toSyncActionOutput(action)
     );
 
     this.logger.debug(
