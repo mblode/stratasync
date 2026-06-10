@@ -11,142 +11,23 @@ import {
   BOOTSTRAP_REQUIRED_WS_MESSAGE,
 } from "../core/errors.js";
 import { isRecord } from "../core/guards.js";
-import { safeJsonStringify } from "../core/json.js";
-import { toSyncActionOutput } from "../core/sync-action.js";
-import { parseSyncIdString, serializeSyncId } from "../core/sync-id.js";
+import { SyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
-import type { SyncActionOutput } from "../types.js";
 import { AsyncMutex } from "../utils/async-mutex.js";
 import {
   dedupeSyncGroups,
   resolveRequestedSyncGroups,
 } from "../utils/sync-scope.js";
-
-interface SubscribeMessage {
-  type: "subscribe";
-  afterSyncId: string;
-  token: string;
-  groups?: string[];
-}
-
-interface DeltaMessage {
-  type: "delta";
-  packet: {
-    lastSyncId: string;
-    actions: {
-      syncId: string;
-      modelName: string;
-      modelId: string;
-      action: string;
-      data: unknown;
-      groupId?: string;
-      clientTxId?: string;
-      clientId?: string;
-      createdAt: string;
-    }[];
-  };
-}
-
-interface ClientState {
-  authenticated: boolean;
-  closed: boolean;
-  userId: string | null;
-  groups: string[];
-  afterSyncId: string;
-  unsubscribe: (() => void) | null;
-  replaying: boolean;
-  bufferedActions: {
-    action: SyncActionOutput;
-    groups: string[];
-  }[];
-}
-
-const HEARTBEAT_INTERVAL_MS = 30_000;
-const MAX_BUFFERED_ACTIONS = 10_000;
-const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
-
-const hasGroupOverlap = (
-  clientGroups: string[],
-  deltaGroups: string[]
-): boolean => {
-  if (deltaGroups.length === 0) {
-    return true;
-  }
-  return clientGroups.some((group) => deltaGroups.includes(group));
-};
-
-const isNonNegativeIntegerString = (value: string): boolean =>
-  NON_NEGATIVE_INTEGER_REGEX.test(value);
-
-const isSubscribeMessage = (msg: unknown): msg is SubscribeMessage => {
-  if (typeof msg !== "object" || msg === null) {
-    return false;
-  }
-  const record = msg as Record<string, unknown>;
-  if (record.type !== "subscribe") {
-    return false;
-  }
-  if (typeof record.token !== "string") {
-    return false;
-  }
-  const { afterSyncId } = record;
-  const { groups } = record;
-  const groupsValid =
-    groups === undefined ||
-    (Array.isArray(groups) &&
-      groups.every((group) => typeof group === "string"));
-  if (!groupsValid) {
-    return false;
-  }
-  return (
-    afterSyncId === undefined ||
-    (typeof afterSyncId === "string" && isNonNegativeIntegerString(afterSyncId))
-  );
-};
-
-const compareSyncActionOutput = (
-  left: SyncActionOutput,
-  right: SyncActionOutput
-): number => {
-  const leftId = parseSyncIdString(left.syncId);
-  const rightId = parseSyncIdString(right.syncId);
-  if (leftId === rightId) {
-    return 0;
-  }
-  return leftId < rightId ? -1 : 1;
-};
-
-const unsubscribeClient = (state: ClientState): void => {
-  if (!state.unsubscribe) {
-    return;
-  }
-  state.unsubscribe();
-  state.unsubscribe = null;
-};
-
-const resetClientAuthState = (state: ClientState): void => {
-  state.authenticated = false;
-  state.userId = null;
-  state.groups = [];
-  state.afterSyncId = "0";
-  state.replaying = false;
-  state.bufferedActions = [];
-};
-
-const setSubscribedState = (
-  state: ClientState,
-  userId: string,
-  groups: string[],
-  afterSyncId: string
-): void => {
-  state.userId = userId;
-  state.groups = groups;
-  state.authenticated = true;
-  state.afterSyncId = afterSyncId;
-  state.replaying = true;
-  state.bufferedActions = [];
-};
+import { ClientSession } from "./client-session.js";
+import { startHeartbeat } from "./heartbeat.js";
+import type { SubscribeMessage } from "./messages.js";
+import {
+  buildErrorFrame,
+  buildSubscribedFrame,
+  isSubscribeMessage,
+} from "./messages.js";
+import { replaySyncActions } from "./replay.js";
 
 const resolveSubscribeGroups = (
   authorizedGroups: string[],
@@ -171,156 +52,6 @@ const resolveSubscribeGroups = (
   return { groups, rejectedGroups };
 };
 
-const sendSubscribedMessage = (ws: WebSocket, state: ClientState): void => {
-  ws.send(
-    JSON.stringify({
-      afterSyncId: state.afterSyncId,
-      groups: state.groups,
-      type: "subscribed",
-    })
-  );
-};
-
-const bufferOrSendLiveDelta = (
-  ws: WebSocket,
-  state: ClientState,
-  action: SyncActionOutput,
-  groups: string[],
-  sendDeltaAction: (
-    ws: WebSocket,
-    state: ClientState,
-    action: SyncActionOutput
-  ) => void
-): void => {
-  if (state.closed) {
-    return;
-  }
-
-  if (!hasGroupOverlap(state.groups, groups)) {
-    return;
-  }
-
-  const { syncId } = action;
-  if (parseSyncIdString(syncId) <= parseSyncIdString(state.afterSyncId)) {
-    return;
-  }
-
-  if (state.replaying) {
-    if (state.bufferedActions.length >= MAX_BUFFERED_ACTIONS) {
-      state.closed = true;
-      unsubscribeClient(state);
-      resetClientAuthState(state);
-      if (ws.readyState === ws.OPEN) {
-        ws.send(
-          JSON.stringify({
-            code: "BUFFER_OVERFLOW",
-            message: "Replay buffer limit exceeded",
-            type: "error",
-          })
-        );
-        ws.close(4008, "Replay buffer limit exceeded");
-      }
-      return;
-    }
-
-    state.bufferedActions.push({ action, groups });
-    return;
-  }
-
-  sendDeltaAction(ws, state, action);
-};
-
-const installDeltaSubscription = (
-  ws: WebSocket,
-  state: ClientState,
-  deltaSubscriber: DeltaSubscriberLike | undefined,
-  sendDeltaAction: (
-    ws: WebSocket,
-    state: ClientState,
-    action: SyncActionOutput
-  ) => void
-): void => {
-  if (!deltaSubscriber) {
-    return;
-  }
-
-  state.unsubscribe = deltaSubscriber.onDelta(
-    (action: SyncActionOutput, groups: string[]) => {
-      bufferOrSendLiveDelta(ws, state, action, groups, sendDeltaAction);
-    }
-  );
-};
-
-const replaySyncActions = async (
-  syncDao: SyncDao,
-  ws: WebSocket,
-  state: ClientState,
-  sendDeltaAction: (
-    ws: WebSocket,
-    state: ClientState,
-    action: SyncActionOutput
-  ) => void
-): Promise<void> => {
-  let replayCursor = state.afterSyncId;
-
-  while (true) {
-    if (state.closed || ws.readyState !== ws.OPEN) {
-      return;
-    }
-
-    const actions = await syncDao.getSyncActions(
-      parseSyncIdString(replayCursor),
-      state.groups,
-      1000
-    );
-    if (actions.length === 0) {
-      break;
-    }
-
-    for (const action of actions) {
-      sendDeltaAction(ws, state, toSyncActionOutput(action));
-    }
-
-    const lastAction = actions.at(-1);
-    if (!lastAction || actions.length < 1000) {
-      break;
-    }
-
-    replayCursor = serializeSyncId(lastAction.id);
-  }
-};
-
-const flushBufferedActions = (
-  ws: WebSocket,
-  state: ClientState,
-  sendDeltaAction: (
-    ws: WebSocket,
-    state: ClientState,
-    action: SyncActionOutput
-  ) => void
-): void => {
-  state.replaying = false;
-  state.bufferedActions.sort((left, right) =>
-    compareSyncActionOutput(left.action, right.action)
-  );
-
-  const seenSyncIds = new Set<string>();
-  for (const entry of state.bufferedActions) {
-    if (seenSyncIds.has(entry.action.syncId)) {
-      continue;
-    }
-    seenSyncIds.add(entry.action.syncId);
-
-    if (!hasGroupOverlap(state.groups, entry.groups)) {
-      continue;
-    }
-
-    sendDeltaAction(ws, state, entry.action);
-  }
-
-  state.bufferedActions = [];
-};
-
 interface RegisterWebSocketOptions {
   auth: SyncAuthConfig;
   syncDao: SyncDao;
@@ -341,8 +72,9 @@ export const registerSyncWebsocket = (
     syncDao,
   } = options;
 
-  // Use route registration that is compatible with @fastify/websocket
-  // The `websocket: true` option and handler signature come from the plugin
+  // Use route registration that is compatible with @fastify/websocket.
+  // The `websocket: true` option and single-arg handler signature come from the
+  // plugin, so the registration cast must stay.
   (
     server as unknown as {
       get(
@@ -376,121 +108,44 @@ export const registerSyncWebsocket = (
     },
     (socket: WebSocket) => {
       const connectionId = randomUUID();
-      const clientState: ClientState = {
-        afterSyncId: "0",
-        authenticated: false,
-        bufferedActions: [],
-        closed: false,
-        groups: [],
-        replaying: false,
-        unsubscribe: null,
-        userId: null,
-      };
+      const session = new ClientSession(socket, deltaSubscriber);
       const messageMutex = new AsyncMutex();
       let cleanupPerformed = false;
-      let awaitingPong = false;
 
-      const heartbeatInterval = setInterval(() => {
-        if (clientState.closed) {
-          return;
-        }
-
-        if (socket.readyState !== socket.OPEN) {
-          return;
-        }
-
-        if (awaitingPong) {
-          logger.warn(
-            { connId: connectionId },
-            "WebSocket heartbeat timed out"
-          );
-          socket.close(1011, "Heartbeat timeout");
-          return;
-        }
-
-        awaitingPong = true;
-
-        if (socket.readyState === socket.OPEN) {
-          socket.ping();
-        }
-      }, HEARTBEAT_INTERVAL_MS);
+      const heartbeat = startHeartbeat(
+        socket,
+        connectionId,
+        logger,
+        () => session.isClosed
+      );
 
       const getConnectionContext = () => ({
         connId: connectionId,
-        groups: clientState.groups,
-        userId: clientState.userId ?? `anonymous-${connectionId}`,
+        groups: session.groups,
+        userId: session.userId ?? `anonymous-${connectionId}`,
       });
-
-      const sendDeltaAction = (
-        ws: WebSocket,
-        state: ClientState,
-        action: SyncActionOutput
-      ): void => {
-        if (state.closed) {
-          return;
-        }
-
-        const { syncId } = action;
-        if (parseSyncIdString(syncId) <= parseSyncIdString(state.afterSyncId)) {
-          return;
-        }
-
-        state.afterSyncId = syncId;
-
-        const deltaMessage: DeltaMessage = {
-          packet: {
-            actions: [
-              {
-                action: action.action,
-                clientId: action.clientId,
-                clientTxId: action.clientTxId,
-                createdAt: action.createdAt.toISOString(),
-                data: action.data,
-                groupId: action.groupId,
-                modelId: action.modelId,
-                modelName: action.modelName,
-                syncId,
-              },
-            ],
-            lastSyncId: syncId,
-          },
-          type: "delta",
-        };
-
-        if (ws.readyState === ws.OPEN) {
-          ws.send(safeJsonStringify(deltaMessage));
-        }
-      };
 
       const sendSocketError = (message: string, code?: string): void => {
         if (socket.readyState !== socket.OPEN) {
           return;
         }
-
-        socket.send(
-          JSON.stringify({
-            ...(code ? { code } : {}),
-            message,
-            type: "error",
-          })
-        );
+        socket.send(buildErrorFrame(message, code));
       };
 
-      const getEarliestSyncId = async (): Promise<bigint | null> =>
-        await syncDao.getEarliestSyncId();
-
-      const handleSubscribe = async (
-        ws: WebSocket,
-        state: ClientState,
-        msg: SubscribeMessage
-      ): Promise<void> => {
+      const handleSubscribe = async (msg: SubscribeMessage): Promise<void> => {
         const previousContext = getConnectionContext();
 
-        unsubscribeClient(state);
-        resetClientAuthState(state);
+        session.reset();
 
         if (hooks?.onSubscribe) {
-          await hooks.onSubscribe(ws, getConnectionContext(), previousContext);
+          await hooks.onSubscribe(
+            socket,
+            getConnectionContext(),
+            previousContext
+          );
+          if (session.isClosed) {
+            return;
+          }
         }
 
         const authResult = await authorizeToken(
@@ -499,6 +154,9 @@ export const registerSyncWebsocket = (
           msg.token,
           logger
         );
+        if (session.isClosed) {
+          return;
+        }
 
         // WS does not distinguish expired tokens from invalid ones.
         if (authResult.status === "invalid_token") {
@@ -532,35 +190,42 @@ export const registerSyncWebsocket = (
           );
         }
 
-        setSubscribedState(state, user.userId, groups, msg.afterSyncId ?? "0");
+        const requestedAfterSyncId = SyncId.parse(msg.afterSyncId ?? "0");
+        session.beginReplay(user.userId, groups, requestedAfterSyncId);
 
-        const earliestSyncId = await getEarliestSyncId();
+        const earliestSyncId = await syncDao.getEarliestSyncId();
+        if (session.isClosed) {
+          return;
+        }
         if (
-          earliestSyncId !== null &&
-          parseSyncIdString(state.afterSyncId) > 0n &&
+          requestedAfterSyncId > 0n &&
           earliestSyncId > 0n &&
-          parseSyncIdString(state.afterSyncId) < earliestSyncId
+          requestedAfterSyncId < earliestSyncId
         ) {
-          unsubscribeClient(state);
-          resetClientAuthState(state);
+          session.reset();
           sendSocketError(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED);
           return;
         }
 
-        installDeltaSubscription(ws, state, deltaSubscriber, sendDeltaAction);
+        session.installDeltaSubscription();
+
         try {
-          await replaySyncActions(syncDao, ws, state, sendDeltaAction);
-          if (state.closed) {
+          await replaySyncActions(syncDao, socket, session);
+          if (session.isClosed) {
             return;
           }
-          flushBufferedActions(ws, state, sendDeltaAction);
-          if (state.closed) {
+          session.flushBufferedActions();
+          if (session.isClosed) {
             return;
           }
-          sendSubscribedMessage(ws, state);
+          socket.send(
+            buildSubscribedFrame(
+              SyncId.serialize(session.afterSyncId),
+              session.groups
+            )
+          );
         } catch (replayError) {
-          unsubscribeClient(state);
-          resetClientAuthState(state);
+          session.reset();
           sendSocketError("Replay failed");
           if (socket.readyState === socket.OPEN) {
             socket.close(1011, "Replay failed");
@@ -573,7 +238,7 @@ export const registerSyncWebsocket = (
         message: Record<string, unknown>
       ): Promise<boolean> => {
         if (isSubscribeMessage(message)) {
-          await handleSubscribe(socket, clientState, message);
+          await handleSubscribe(message);
           return true;
         }
 
@@ -596,11 +261,9 @@ export const registerSyncWebsocket = (
         if (!hooks?.onMessage) {
           return false;
         }
-
-        if (!clientState.authenticated) {
+        if (session.phase !== "live" && session.phase !== "replaying") {
           return false;
         }
-
         return await hooks.onMessage(socket, message, getConnectionContext());
       };
 
@@ -639,18 +302,13 @@ export const registerSyncWebsocket = (
           return;
         }
         cleanupPerformed = true;
-        clientState.closed = true;
-        awaitingPong = false;
-        clearInterval(heartbeatInterval);
-        if (clientState.unsubscribe) {
-          clientState.unsubscribe();
-          clientState.unsubscribe = null;
-        }
+        session.close();
+        heartbeat.stop();
         safeRunOnClose();
       };
 
       socket.on("pong", () => {
-        awaitingPong = false;
+        heartbeat.onPong();
       });
       socket.on("close", cleanupWebSocket);
 
