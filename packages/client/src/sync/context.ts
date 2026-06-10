@@ -1,4 +1,5 @@
 import type {
+  ConnectionState,
   DeltaPacket,
   ModelRegistry,
   SyncClientState,
@@ -47,6 +48,9 @@ export interface SyncContext {
   /** The active subscribed sync groups (mutable). */
   getGroups(): string[];
   setGroups(groups: string[]): void;
+
+  /** The orchestrator's observed connection state (from the state machine). */
+  getConnectionState(): ConnectionState;
 
   /** Whether the orchestrator's lifecycle is currently running. */
   isRunning(): boolean;

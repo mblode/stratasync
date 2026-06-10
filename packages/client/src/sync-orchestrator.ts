@@ -1,22 +1,11 @@
 import type {
   ConnectionState,
   DeltaPacket,
-  RebaseConflict,
-  RebaseOptions,
-  SyncAction,
   SyncClientState,
   SyncId,
   Transaction,
 } from "@stratasync/core";
-import {
-  applyDeltas,
-  getOrCreateClientId,
-  isSyncIdGreaterThan,
-  ModelRegistry,
-  rebaseOriginals,
-  rebaseTransactions,
-  resolveConflictEffect,
-} from "@stratasync/core";
+import { getOrCreateClientId, ModelRegistry } from "@stratasync/core";
 
 import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
@@ -25,10 +14,10 @@ import type { OutboxManager } from "./outbox-manager.js";
 import { BootstrapRunner } from "./sync/bootstrap-runner.js";
 import type { SyncContext } from "./sync/context.js";
 import { SyncCursor } from "./sync/cursor.js";
+import { DeltaPipeline } from "./sync/delta-pipeline.js";
 import {
   applyPendingTransactionsToIdentityMaps,
   areGroupsEqual,
-  touchPendingTransactionTargets,
 } from "./sync/pending-hydration.js";
 import { SyncStateMachine } from "./sync/state.js";
 import { SyncGroupManager } from "./sync/sync-groups.js";
@@ -39,26 +28,6 @@ import type {
   SyncClientOptions,
   TransportAdapter,
 } from "./types.js";
-import { getModelKey } from "./utils.js";
-
-interface DeferredMapOp {
-  type: "merge" | "delete";
-  modelName: string;
-  id: string;
-  data?: Record<string, unknown>;
-  clientTxId?: string;
-}
-
-interface BootstrapRequiredError extends Error {
-  code: "BOOTSTRAP_REQUIRED";
-}
-
-const isBootstrapRequiredError = (
-  error: unknown
-): error is BootstrapRequiredError =>
-  error instanceof Error &&
-  "code" in error &&
-  error.code === "BOOTSTRAP_REQUIRED";
 
 /**
  * Orchestrates the sync state machine
@@ -106,6 +75,7 @@ export class SyncOrchestrator {
   private readonly context: SyncContext;
   private readonly syncGroups: SyncGroupManager;
   private readonly bootstrapRunner: BootstrapRunner;
+  private readonly deltaPipeline: DeltaPipeline;
 
   constructor(
     options: SyncClientOptions,
@@ -130,6 +100,14 @@ export class SyncOrchestrator {
       this.restartDeltaSubscription(afterSyncId)
     );
     this.bootstrapRunner = new BootstrapRunner(this.context);
+    this.deltaPipeline = new DeltaPipeline(this.context, {
+      applyPendingOutboxTransactions: () =>
+        this.applyPendingOutboxTransactions(),
+      handleSyncGroupActions: (actions, nextSyncId) =>
+        this.syncGroups.handleSyncGroupActions(actions, nextSyncId),
+      processOutboxTransactions: () => this.processOutboxTransactions(),
+      runBootstrap: (runToken) => this.bootstrapRunner.bootstrap(runToken),
+    });
 
     this.attachTransportConnectionListener();
   }
@@ -141,6 +119,7 @@ export class SyncOrchestrator {
       emitEvent: this.emitEvent,
       getClientId: () => this.clientId,
       getConflictHandler: () => this.onTransactionConflict,
+      getConnectionState: () => this.stateMachine.connectionState,
       getDeferredConflictTxs: () => this.deferredConflictTxs,
       getDeltaSubscription: () => this.deltaSubscription,
       getGroups: () => this.groups,
@@ -279,16 +258,17 @@ export class SyncOrchestrator {
 
       // Network operations run in background, don't block start()
       const subscribeAfterSyncId = this.cursor.lastSyncId;
-      this.startDeltaSubscription(subscribeAfterSyncId);
-      // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-      this.catchUpMissedDeltas(subscribeAfterSyncId, activeRunToken).catch(
-        // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-        (error) => {
-          if (this.isRunActive(activeRunToken)) {
-            this.handleSyncError(error);
-          }
-        }
+      this.deltaPipeline.startDeltaSubscription(subscribeAfterSyncId);
+      const catchUp = this.deltaPipeline.catchUpMissedDeltas(
+        subscribeAfterSyncId,
+        activeRunToken
       );
+      // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
+      catchUp.catch((error) => {
+        if (this.isRunActive(activeRunToken)) {
+          this.handleSyncError(error);
+        }
+      });
       // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
       this.processOutboxTransactions().catch((error) => {
         if (this.isRunActive(activeRunToken)) {
@@ -360,130 +340,36 @@ export class SyncOrchestrator {
     await this.emitOutboxCount();
   }
 
+  private getActiveOutboxTransactions(): Promise<Transaction[]> {
+    // Only the OutboxManager writes to the outbox, so when it is absent the
+    // outbox is empty. Delegating keeps the active-state predicate in one place.
+    return this.outboxManager?.getActiveTransactions() ?? Promise.resolve([]);
+  }
+
   /**
-   * Best-effort catch-up for deltas created between bootstrap completion and
-   * subscription readiness.
+   * Thin delegate to the shared pending-hydration helper. Retained as an
+   * instance method so white-box tests can bind it; production code calls the
+   * helper directly.
    */
-  private async catchUpMissedDeltas(
-    afterSyncId: SyncId,
-    runToken: number
-  ): Promise<void> {
-    try {
-      await this.fetchAndApplyDeltaPages(afterSyncId, {
-        maxAttempts: 2,
-        runToken,
-        suppressFetchErrors: true,
-      });
-    } catch (error) {
-      if (this.isRunActive(runToken)) {
-        if (await this.handleBootstrapRequired(error, this.deltaSubscription)) {
-          return;
-        }
-        this.handleSyncError(error);
-      }
-    }
+  private applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void {
+    applyPendingTransactionsToIdentityMaps(this.identityMaps, pending);
   }
 
-  private async fetchAndApplyDeltaPages(
-    afterSyncId: SyncId,
-    options: {
-      maxAttempts?: number;
-      runToken?: number;
-      suppressFetchErrors?: boolean;
-    } = {}
-  ): Promise<void> {
-    let nextAfterSyncId = afterSyncId;
-    let releaseBarrier: (() => void) | null = null;
-
-    try {
-      while (true) {
-        const packet = await this.fetchDeltaPage(nextAfterSyncId, options);
-        if (!packet) {
-          return;
-        }
-
-        if (
-          options.runToken !== undefined &&
-          !this.isRunActive(options.runToken)
-        ) {
-          return;
-        }
-
-        if (packet.hasMore && !releaseBarrier) {
-          releaseBarrier = this.acquireDeltaReplayBarrier();
-        }
-
-        await this.enqueueDeltaPacket(packet);
-
-        if (!packet.hasMore) {
-          return;
-        }
-
-        if (!isSyncIdGreaterThan(packet.lastSyncId, nextAfterSyncId)) {
-          return;
-        }
-
-        nextAfterSyncId = packet.lastSyncId;
-      }
-    } finally {
-      releaseBarrier?.();
+  private async emitOutboxCount(): Promise<void> {
+    if (!this.emitEvent) {
+      return;
     }
+    // oxlint-disable-next-line no-await-expression-member
+    const pendingCount = (await this.getActiveOutboxTransactions()).length;
+    this.emitEvent({ pendingCount, type: "outboxChange" });
   }
 
-  private async fetchDeltaPage(
-    afterSyncId: SyncId,
-    options: {
-      maxAttempts?: number;
-      runToken?: number;
-      suppressFetchErrors?: boolean;
-    }
-  ): Promise<DeltaPacket | null> {
-    const maxAttempts = options.maxAttempts ?? 1;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      if (
-        options.runToken !== undefined &&
-        !this.isRunActive(options.runToken)
-      ) {
-        return null;
-      }
-
-      try {
-        return await this.transport.fetchDeltas(
-          afterSyncId,
-          undefined,
-          this.groups
-        );
-      } catch (error) {
-        if (isBootstrapRequiredError(error)) {
-          throw error;
-        }
-        const isLastAttempt = attempt >= maxAttempts - 1;
-        if (
-          isLastAttempt ||
-          (options.runToken !== undefined &&
-            !this.isRunActive(options.runToken))
-        ) {
-          if (options.suppressFetchErrors) {
-            return null;
-          }
-          throw error;
-        }
-        await SyncOrchestrator.wait(300 * (attempt + 1));
-      }
-    }
-
-    if (options.suppressFetchErrors) {
-      return null;
-    }
-    return null;
+  private handleSyncError(error: unknown): void {
+    this.stateMachine.recordError(error);
   }
 
-  private static wait(ms: number): Promise<void> {
-    // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
+  private restartDeltaSubscription(afterSyncId: SyncId): Promise<void> {
+    return this.deltaPipeline.restartDeltaSubscription(afterSyncId);
   }
 
   private isRunActive(runToken: number): boolean {
@@ -534,9 +420,14 @@ export class SyncOrchestrator {
    */
   async syncNow(): Promise<void> {
     try {
-      await this.fetchAndApplyDeltaPages(this.cursor.lastSyncId);
+      await this.deltaPipeline.fetchAndApplyDeltaPages(this.cursor.lastSyncId);
     } catch (error) {
-      if (await this.handleBootstrapRequired(error, this.deltaSubscription)) {
+      if (
+        await this.deltaPipeline.handleBootstrapRequired(
+          error,
+          this.deltaSubscription
+        )
+      ) {
         return;
       }
       throw error;
@@ -571,583 +462,6 @@ export class SyncOrchestrator {
   }
 
   /**
-   * Performs initial bootstrap (delegates to BootstrapRunner).
-   */
-  private bootstrap(runToken: number): Promise<void> {
-    return this.bootstrapRunner.bootstrap(runToken);
-  }
-
-  /**
-   * Starts the delta subscription
-   */
-  private startDeltaSubscription(
-    afterSyncId: SyncId = this.cursor.lastSyncId
-  ): void {
-    const subscription = this.transport.subscribe({
-      afterSyncId,
-      groups: this.groups,
-    });
-
-    this.deltaSubscription = subscription[Symbol.asyncIterator]();
-
-    // Process deltas in background
-    // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-    this.processDeltaStream().catch(() => {
-      /* noop */
-    });
-  }
-
-  private async restartDeltaSubscription(afterSyncId: SyncId): Promise<void> {
-    const current = this.deltaSubscription;
-    this.deltaSubscription = null;
-    if (current) {
-      try {
-        await current.return?.();
-      } catch {
-        // Best-effort close of the existing iterator.
-      }
-    }
-    this.startDeltaSubscription(afterSyncId);
-  }
-
-  /**
-   * Processes the delta stream
-   */
-  private async processDeltaStream(): Promise<void> {
-    const subscription = this.deltaSubscription;
-    if (!subscription) {
-      return;
-    }
-
-    try {
-      while (this.running) {
-        if (!this.isRunActive(this.runToken)) {
-          break;
-        }
-        await this.deltaReplayGate.whenOpen();
-
-        if (this.deltaSubscription !== subscription) {
-          break;
-        }
-
-        const { value, done } = await subscription.next();
-        if (done) {
-          const shouldRestart =
-            this.running && this.stateMachine.connectionState === "connected";
-          if (this.deltaSubscription === subscription) {
-            this.deltaSubscription = null;
-          }
-          if (shouldRestart) {
-            this.startDeltaSubscription(this.cursor.lastSyncId);
-          }
-          break;
-        }
-
-        await this.deltaReplayGate.whenOpen();
-        if (this.deltaSubscription !== subscription) {
-          break;
-        }
-        await this.enqueueDeltaPacket(value);
-      }
-    } catch (error) {
-      if (this.running) {
-        if (await this.handleBootstrapRequired(error, subscription)) {
-          return;
-        }
-        this.handleSyncError(error);
-        // Try to reconnect
-        setTimeout(() => {
-          if (this.running && !this.deltaSubscription) {
-            this.startDeltaSubscription();
-          }
-        }, 5000);
-      }
-    } finally {
-      if (this.deltaSubscription === subscription) {
-        this.deltaSubscription = null;
-      }
-    }
-  }
-
-  private async handleBootstrapRequired(
-    error: unknown,
-    subscription: AsyncIterator<DeltaPacket> | null
-  ): Promise<boolean> {
-    if (!isBootstrapRequiredError(error) || !this.isRunActive(this.runToken)) {
-      return false;
-    }
-
-    if (subscription && this.deltaSubscription === subscription) {
-      this.deltaSubscription = null;
-    }
-
-    try {
-      await this.runWithStateLock(async () => {
-        const activeRunToken = this.runToken;
-        await this.bootstrap(activeRunToken);
-        if (!this.isRunActive(activeRunToken)) {
-          return;
-        }
-        await this.applyPendingOutboxTransactions();
-      });
-
-      if (!this.isRunActive(this.runToken)) {
-        return true;
-      }
-
-      await this.processOutboxTransactions();
-      if (this.running && !this.deltaSubscription) {
-        this.startDeltaSubscription(this.cursor.lastSyncId);
-      }
-      if (this.running) {
-        this.setState("syncing");
-      }
-      return true;
-    } catch (recoveryError) {
-      this.handleSyncError(recoveryError);
-      return true;
-    }
-  }
-
-  private enqueueDeltaPacket(packet: DeltaPacket): Promise<void> {
-    // packetQueue serializes packets against each other; the nested state-lock
-    // run keeps packet application serialized against mutations too.
-    return this.packetQueue.run(() => {
-      if (!this.running) {
-        return;
-      }
-      return this.runWithStateLock(() => this.applyDeltaPacket(packet));
-    });
-  }
-
-  private handleSyncError(error: unknown): void {
-    this.stateMachine.recordError(error);
-  }
-
-  /**
-   * Applies a delta packet to local state.
-   *
-   * Identity map mutations are deferred and applied in a single batch at the
-   * end so that MobX observers never see an intermediate state where server
-   * data has been written but pending local (outbox) changes have not yet been
-   * re-applied.
-   */
-  private async applyDeltaPacket(packet: DeltaPacket): Promise<void> {
-    const latestAppliedSyncId = this.cursor.lastSyncId;
-    const nextActions = packet.actions.filter((action) =>
-      isSyncIdGreaterThan(action.id, latestAppliedSyncId)
-    );
-    const filteredPacket: DeltaPacket = {
-      ...packet,
-      actions: nextActions,
-    };
-
-    if (filteredPacket.actions.length === 0) {
-      await this.handleEmptyPacket(filteredPacket);
-      return;
-    }
-
-    await this.storage.addSyncActions(filteredPacket.actions);
-
-    const activeTransactions = await this.getActiveOutboxTransactions();
-
-    // rebasePendingTransactions may detect conflicts and defer rollbacks
-    // into this.deferredConflictTxs (processed inside the batch below).
-    await this.rebasePendingTransactions(
-      activeTransactions,
-      filteredPacket.actions
-    );
-    await this.handleCoverageActions(filteredPacket.actions);
-    await this.handleSyncGroupActions(
-      filteredPacket.actions,
-      filteredPacket.lastSyncId
-    );
-
-    // Write to storage and collect identity map ops (no MobX reactions yet).
-    const deferredOps: DeferredMapOp[] = [];
-    await this.collectDeferredDeltaOps(filteredPacket.actions, deferredOps);
-
-    const syncCursorAdvanced = await this.updateSyncMetadata(
-      filteredPacket.lastSyncId
-    );
-
-    // Snapshot the instance-local clientTxIds for echo suppression BEFORE
-    // finishOutboxProcessing confirms (and therefore removes) them. Echo
-    // suppression must see the pre-removal set so that own optimistic echoes
-    // are still recognised in this same packet.
-    // Reading from shared storage (IndexedDB) would instead include cross-tab
-    // transactions, incorrectly suppressing identity map merges for them.
-    const localTxIds = new Set<string>(
-      this.outboxManager?.getLocalClientTxIds()
-    );
-
-    await this.finishOutboxProcessing(filteredPacket.actions);
-
-    const ownClientTxIds = SyncOrchestrator.buildOwnClientTxIds(
-      filteredPacket.actions,
-      localTxIds
-    );
-
-    // Apply identity map changes in a single MobX action so observers
-    // only see the final state (server data + pending local changes).
-    // Deferred conflict rollbacks are processed here too, inside the
-    // batch, so their intermediate deletes are never visible.
-    const pending = await this.getActiveOutboxTransactions();
-
-    this.identityMaps.batch(() => {
-      touchPendingTransactionTargets(this.identityMaps, pending);
-
-      // Process conflict rollbacks inside the batch.  This ensures that
-      // the rollback's map.delete() and the subsequent server merge's
-      // map.merge() are in the same runInAction, so microtask-scheduled
-      // refreshSync only fires after both have completed.
-      // Also remove rolled-back clientTxIds from ownClientTxIds so the
-      // server merge's modelChange event emits properly for the model.
-      for (const tx of this.deferredConflictTxs) {
-        this.onTransactionConflict?.(tx);
-        if (tx.clientTxId) {
-          ownClientTxIds.delete(tx.clientTxId);
-        }
-      }
-      this.deferredConflictTxs = [];
-
-      for (const op of deferredOps) {
-        const map = this.identityMaps.getMap(op.modelName);
-        const isOwnOptimisticEcho =
-          op.type === "merge" &&
-          typeof op.clientTxId === "string" &&
-          ownClientTxIds.has(op.clientTxId) &&
-          map.has(op.id);
-        if (isOwnOptimisticEcho) {
-          continue;
-        }
-        if (op.type === "merge" && op.data) {
-          map.merge(op.id, op.data, { serialized: true });
-        } else if (op.type === "delete") {
-          map.delete(op.id);
-        }
-      }
-      this.applyPendingTransactionsToIdentityMaps(pending);
-    });
-
-    this.emitModelChangeEvents(filteredPacket.actions, ownClientTxIds);
-    await this.emitOutboxCount();
-    if (syncCursorAdvanced) {
-      this.emitEvent?.({
-        lastSyncId: this.cursor.lastSyncId,
-        type: "syncComplete",
-      });
-    }
-  }
-
-  private async handleEmptyPacket(packet: DeltaPacket): Promise<void> {
-    const syncCursorAdvanced = await this.updateSyncMetadata(packet.lastSyncId);
-    if (this.outboxManager) {
-      await this.outboxManager.completeUpToSyncId(this.cursor.lastSyncId);
-    }
-    await this.emitOutboxCount();
-    if (syncCursorAdvanced) {
-      this.emitEvent?.({
-        lastSyncId: this.cursor.lastSyncId,
-        type: "syncComplete",
-      });
-    }
-  }
-
-  /**
-   * Build set of own-action keys for transactions that this local runtime
-   * already applied optimistically and then saw confirmed by the server.
-   *
-   * Uses the instance-local set of clientTxIds (in-memory, not from shared
-   * storage) so that cross-tab transactions sharing the same IndexedDB are
-   * not incorrectly treated as own optimistic echoes.
-   */
-  private static buildOwnClientTxIds(
-    actions: SyncAction[],
-    localTxIds: ReadonlySet<string>
-  ): Set<string> {
-    const clientTxIds = new Set<string>();
-    for (const action of actions) {
-      if (action.clientTxId && localTxIds.has(action.clientTxId)) {
-        clientTxIds.add(action.clientTxId);
-      }
-    }
-    return clientTxIds;
-  }
-
-  private async getActiveOutboxTransactions(): Promise<Transaction[]> {
-    // Only the OutboxManager writes to the outbox, so when it is absent the
-    // outbox is empty. Delegating keeps the active-state predicate in one place.
-    return (await this.outboxManager?.getActiveTransactions()) ?? [];
-  }
-
-  /**
-   * Thin delegate to the shared pending-hydration helper. Retained as an
-   * instance method so white-box tests can bind it; production code calls the
-   * helper directly.
-   */
-  private applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void {
-    applyPendingTransactionsToIdentityMaps(this.identityMaps, pending);
-  }
-
-  /**
-   * Creates a delta target that writes to storage immediately but collects
-   * identity map operations for deferred application in a single batch.
-   */
-  private createDeferredDeltaTarget(ops: DeferredMapOp[], action: SyncAction) {
-    return {
-      delete: async (modelName: string, id: string) => {
-        await this.storage.delete(modelName, id);
-        ops.push({
-          clientTxId: action.clientTxId,
-          id,
-          modelName,
-          type: "delete",
-        });
-      },
-      get: (modelName: string, id: string) =>
-        this.storage.get<Record<string, unknown>>(modelName, id),
-      patch: async (
-        modelName: string,
-        id: string,
-        changes: Record<string, unknown>
-      ) => {
-        const existing = await this.storage.get<Record<string, unknown>>(
-          modelName,
-          id
-        );
-        const pk = this.registry.getPrimaryKey(modelName);
-        const updated = existing
-          ? { ...existing, ...changes }
-          : { ...changes, [pk]: id };
-        await this.storage.put(modelName, updated);
-        ops.push({
-          clientTxId: action.clientTxId,
-          data: updated,
-          id,
-          modelName,
-          type: "merge",
-        });
-      },
-      put: async (
-        modelName: string,
-        id: string,
-        data: Record<string, unknown>
-      ) => {
-        const pk = this.registry.getPrimaryKey(modelName);
-        const row = { ...data, [pk]: id };
-        await this.storage.put(modelName, row);
-        ops.push({
-          clientTxId: action.clientTxId,
-          data: row,
-          id,
-          modelName,
-          type: "merge",
-        });
-      },
-    };
-  }
-
-  private async collectDeferredDeltaOps(
-    actions: SyncAction[],
-    ops: DeferredMapOp[]
-  ): Promise<void> {
-    for (const action of actions) {
-      const deferredTarget = this.createDeferredDeltaTarget(ops, action);
-      await applyDeltas(
-        { actions: [action], lastSyncId: action.id },
-        deferredTarget,
-        this.registry,
-        { mergeUpdates: true }
-      );
-    }
-  }
-
-  private async updateSyncMetadata(lastSyncId: SyncId): Promise<boolean> {
-    const advanced = await this.cursor.advance(lastSyncId);
-    if (advanced) {
-      // Bound the sync-actions store: actions at or below the bootstrap floor
-      // are superseded by the snapshot and never replayed.
-      await this.storage.pruneSyncActions(this.cursor.firstSyncId);
-    }
-    return advanced;
-  }
-
-  private async finishOutboxProcessing(
-    actions: SyncAction[]
-  ): Promise<Set<string>> {
-    const confirmedTxIds =
-      (await this.outboxManager?.confirmFromActions(actions)) ??
-      new Set<string>();
-    if (this.outboxManager) {
-      await this.outboxManager.completeUpToSyncId(this.cursor.lastSyncId);
-    }
-    return confirmedTxIds;
-  }
-
-  private static resolveModelChangeAction(
-    action: SyncAction["action"]
-  ): "insert" | "update" | "delete" | "archive" | "unarchive" | null {
-    switch (action) {
-      case "I": {
-        return "insert";
-      }
-      case "U": {
-        return "update";
-      }
-      case "D": {
-        return "delete";
-      }
-      case "A": {
-        return "archive";
-      }
-      case "V": {
-        return "unarchive";
-      }
-      default: {
-        return null;
-      }
-    }
-  }
-
-  private emitModelChangeEvents(
-    actions: SyncAction[],
-    ownClientTxIds: Set<string>
-  ): void {
-    // Deduplicate by modelName:modelId and skip local optimistic echoes only.
-    // Cross-tab updates can share clientId and must still emit modelChange.
-    const lastByKey = new Map<string, SyncAction>();
-    for (const action of actions) {
-      if (action.clientTxId && ownClientTxIds.has(action.clientTxId)) {
-        continue;
-      }
-      const key = getModelKey(action.modelName, action.modelId);
-      lastByKey.set(key, action);
-    }
-
-    for (const action of lastByKey.values()) {
-      const eventAction = SyncOrchestrator.resolveModelChangeAction(
-        action.action
-      );
-      if (!eventAction) {
-        continue;
-      }
-      this.emitEvent?.({
-        action: eventAction,
-        modelId: action.modelId,
-        modelName: action.modelName,
-        type: "modelChange",
-      });
-    }
-  }
-
-  private async emitOutboxCount(): Promise<void> {
-    if (!this.emitEvent) {
-      return;
-    }
-    // oxlint-disable-next-line no-await-expression-member
-    const pendingCount = (await this.getActiveOutboxTransactions()).length;
-    this.emitEvent({ pendingCount, type: "outboxChange" });
-  }
-
-  private async rebasePendingTransactions(
-    pending: Transaction[],
-    actions: SyncAction[]
-  ): Promise<void> {
-    if (pending.length === 0) {
-      return;
-    }
-
-    const rebaseOptions: RebaseOptions = {
-      clientId: this.clientId,
-      defaultResolution: this.options.rebaseStrategy ?? "server-wins",
-      fieldLevelConflicts: this.options.fieldLevelConflicts ?? true,
-    };
-
-    const result = rebaseTransactions(pending, actions, rebaseOptions);
-
-    for (const conflict of result.conflicts) {
-      await this.handleConflict(conflict);
-    }
-
-    await this.updatePendingOriginals(result.pending, actions);
-  }
-
-  private async handleConflict(conflict: RebaseConflict): Promise<void> {
-    const { localTransaction: tx } = conflict;
-    const resolution =
-      conflict.resolution === "manual" ? "server-wins" : conflict.resolution;
-    const effect = resolveConflictEffect(conflict);
-
-    if (effect.kind === "drop-local") {
-      await this.storage.removeFromOutbox(tx.clientTxId);
-      // Defer identity map rollback until the batch so it runs in the same
-      // runInAction as the server merge.  Firing it here would delete the
-      // item from the identity map and emit modelChange(delete) BEFORE the
-      // deferred batch re-adds it, causing a visible flash of empty state.
-      this.deferredConflictTxs.push(tx);
-    } else if (effect.kind === "patch-original") {
-      tx.original = effect.original;
-      await this.storage.updateOutboxTransaction(tx.clientTxId, {
-        original: effect.original,
-      });
-    }
-
-    this.emitEvent?.({
-      conflictType: conflict.conflictType,
-      modelId: tx.modelId,
-      modelName: tx.modelName,
-      resolution,
-      type: "rebaseConflict",
-    });
-  }
-
-  private async updatePendingOriginals(
-    pending: Transaction[],
-    actions: SyncAction[]
-  ): Promise<void> {
-    const patches = rebaseOriginals(pending, actions);
-    if (patches.length === 0) {
-      return;
-    }
-
-    const txByClientTxId = new Map(pending.map((tx) => [tx.clientTxId, tx]));
-    for (const patch of patches) {
-      const tx = txByClientTxId.get(patch.clientTxId);
-      if (tx) {
-        tx.original = patch.original;
-      }
-      await this.storage.updateOutboxTransaction(patch.clientTxId, {
-        original: patch.original,
-      });
-    }
-  }
-
-  private async handleCoverageActions(actions: SyncAction[]): Promise<void> {
-    for (const action of actions) {
-      if (action.action !== "C") {
-        continue;
-      }
-      const { indexedKey } = action.data as Record<string, unknown>;
-      const { keyValue } = action.data as Record<string, unknown>;
-      if (typeof indexedKey === "string" && typeof keyValue === "string") {
-        await this.storage.setPartialIndex(
-          action.modelName,
-          indexedKey,
-          keyValue
-        );
-      }
-    }
-  }
-
-  private handleSyncGroupActions(
-    actions: SyncAction[],
-    nextSyncId: SyncId
-  ): Promise<void> {
-    return this.syncGroups.handleSyncGroupActions(actions, nextSyncId);
-  }
-
-  /**
    * Handles connection state changes
    */
   private handleConnectionChange(
@@ -1168,7 +482,7 @@ export class SyncOrchestrator {
       try {
         await this.syncNow();
         if (this.running && !this.deltaSubscription) {
-          this.startDeltaSubscription(this.cursor.lastSyncId);
+          this.deltaPipeline.startDeltaSubscription(this.cursor.lastSyncId);
         }
         if (this.running) {
           this.setState("syncing");
@@ -1203,9 +517,5 @@ export class SyncOrchestrator {
    */
   getStorage(): StorageAdapter {
     return this.storage;
-  }
-
-  private acquireDeltaReplayBarrier(): () => void {
-    return this.deltaReplayGate.hold();
   }
 }
