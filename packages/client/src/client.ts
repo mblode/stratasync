@@ -1,9 +1,7 @@
 // oxlint-disable no-use-before-define -- closure pattern requires forward references (clientRef, emitPendingCount)
 import type {
   ArchiveTransactionOptions,
-  BatchLoadOptions,
   ConnectionState,
-  ModelRow,
   SyncClientState,
   SyncId,
   SyncStore,
@@ -24,6 +22,7 @@ import {
 import type { HistoryEntry, HistoryOperation } from "./history-manager.js";
 import { HistoryManager } from "./history-manager.js";
 import { IdentityMapRegistry } from "./identity-map.js";
+import { LazyLoader } from "./loader.js";
 import {
   createDefaultModelFactory,
   createMaterializer,
@@ -87,11 +86,6 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   );
   const eventListeners = new Set<(event: SyncClientEvent) => void>();
   const missingModels = new Set<string>();
-  const pendingLoads = new Map<string, Promise<unknown | null>>();
-  const pendingIndexLoads = new Map<
-    string,
-    Promise<Record<string, unknown>[]>
-  >();
 
   const history = new HistoryManager();
 
@@ -439,168 +433,28 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       data
     );
 
-  const createBatchLoadStream = (
-    requests: BatchLoadOptions["requests"]
-  ): ReturnType<SyncClientOptions["transport"]["batchLoad"]> =>
-    options.transport.batchLoad({
-      firstSyncId: orchestrator.getFirstSyncId(),
-      requests,
-    });
+  const loader = new LazyLoader({
+    emitModelChange,
+    identityMaps,
+    materialize: (modelName, id, data, materializeOptions) =>
+      materializeModelResult(modelName, id, data, materializeOptions),
+    missingModels,
+    orchestrator,
+    runWithStateLock,
+    storage: options.storage,
+    transport: options.transport,
+  });
 
-  const processBatchLoadRow = async (
-    row: ModelRow
-  ): Promise<string | undefined> =>
-    await runWithStateLock(async () => {
-      const rowPrimaryKey = orchestrator
-        .getRegistry()
-        .getPrimaryKey(row.modelName);
-      const rowId = row.data[rowPrimaryKey] as string;
-      if (typeof rowId !== "string") {
-        return;
-      }
-      await options.storage.put(row.modelName, row.data);
-      const rowMap = identityMaps.getMap<Record<string, unknown>>(
-        row.modelName
-      );
-      const existed = rowMap.has(rowId);
-      rowMap.merge(rowId, row.data, { serialized: true });
-      emitModelChange(row.modelName, rowId, existed ? "update" : "insert");
-      return rowId;
-    });
-
-  const ensureModelInternal = async <T>(
+  const ensureModelInternal = <T>(
     modelName: string,
     id: string
-  ): Promise<T | null> => {
-    const map = identityMaps.getMap<T & Record<string, unknown>>(modelName);
-    const cached = map.get(id);
-    if (cached) {
-      return cached as T;
-    }
+  ): Promise<T | null> => loader.ensureModel<T>(modelName, id);
 
-    const stored = await options.storage.get<T>(modelName, id);
-    if (stored) {
-      map.set(id, stored as T & Record<string, unknown>, { serialized: true });
-      const key = getModelKey(modelName, id);
-      missingModels.delete(key);
-      return materializeModelResult(
-        modelName,
-        id,
-        stored as T & Record<string, unknown>
-      );
-    }
-
-    const model = orchestrator.getRegistry().getModelMetadata(modelName);
-    if (!model) {
-      return null;
-    }
-
-    const loadStrategy = model.loadStrategy ?? "instant";
-    if (loadStrategy === "instant" || loadStrategy === "local") {
-      const key = getModelKey(modelName, id);
-      missingModels.add(key);
-      return null;
-    }
-
-    const key = getModelKey(modelName, id);
-    const pending = pendingLoads.get(key);
-    if (pending) {
-      return pending as Promise<T | null>;
-    }
-
-    const loadPromise = (async () => {
-      let found: T | null = null;
-      const primaryKey = orchestrator.getRegistry().getPrimaryKey(modelName);
-      const stream = createBatchLoadStream([
-        {
-          indexedKey: primaryKey,
-          keyValue: id,
-          modelName,
-        },
-      ]);
-
-      for await (const row of stream) {
-        const rowId = await processBatchLoadRow(row);
-        if (row.modelName === modelName && rowId === id) {
-          found = materializeModelResult(
-            modelName,
-            id,
-            row.data as T & Record<string, unknown>
-          );
-        }
-      }
-
-      if (found) {
-        missingModels.delete(key);
-      } else {
-        missingModels.add(key);
-      }
-
-      return found;
-    })();
-
-    pendingLoads.set(key, loadPromise);
-
-    try {
-      return await loadPromise;
-    } finally {
-      pendingLoads.delete(key);
-    }
-  };
-
-  const loadByIndexInternal = async <T extends Record<string, unknown>>(
+  const loadByIndexInternal = <T extends Record<string, unknown>>(
     modelName: string,
     indexedKey: string,
     keyValue: string
-  ): Promise<T[]> => {
-    const model = orchestrator.getRegistry().getModelMetadata(modelName);
-    const isPartial = model?.loadStrategy === "partial";
-
-    if (!isPartial) {
-      return options.storage.getByIndex<T>(modelName, indexedKey, keyValue);
-    }
-
-    const hasIndex = await options.storage.hasPartialIndex(
-      modelName,
-      indexedKey,
-      keyValue
-    );
-
-    if (hasIndex) {
-      return options.storage.getByIndex<T>(modelName, indexedKey, keyValue);
-    }
-
-    const loadKey = `${modelName}:${indexedKey}:${keyValue}`;
-    const pending = pendingIndexLoads.get(loadKey);
-    if (pending) {
-      return pending as Promise<T[]>;
-    }
-
-    const loadPromise = (async () => {
-      const stream = createBatchLoadStream([
-        {
-          indexedKey,
-          keyValue,
-          modelName,
-        },
-      ]);
-
-      for await (const row of stream) {
-        await processBatchLoadRow(row);
-      }
-
-      await options.storage.setPartialIndex(modelName, indexedKey, keyValue);
-      return options.storage.getByIndex<T>(modelName, indexedKey, keyValue);
-    })();
-
-    pendingIndexLoads.set(loadKey, loadPromise);
-
-    try {
-      return await loadPromise;
-    } finally {
-      pendingIndexLoads.delete(loadKey);
-    }
-  };
+  ): Promise<T[]> => loader.loadByIndex<T>(modelName, indexedKey, keyValue);
 
   // clientRef / getClientRef: The client object literal references itself
   // (via getClientRef) for history replay operations, but it hasn't been
@@ -742,8 +596,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         } finally {
           await options.storage.close();
         }
-        pendingLoads.clear();
-        pendingIndexLoads.clear();
+        loader.clear();
         missingModels.clear();
         history.clear();
         await pendingStart?.catch(() => {
