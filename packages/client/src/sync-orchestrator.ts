@@ -25,6 +25,7 @@ import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
 import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
+import type { SyncContext } from "./sync/context.js";
 import { SyncCursor } from "./sync/cursor.js";
 import {
   applyPendingTransactionsToIdentityMaps,
@@ -32,6 +33,7 @@ import {
   touchPendingTransactionTargets,
 } from "./sync/pending-hydration.js";
 import { SyncStateMachine } from "./sync/state.js";
+import { SyncGroupManager } from "./sync/sync-groups.js";
 import type {
   StorageAdapter,
   StorageMeta,
@@ -103,6 +105,9 @@ export class SyncOrchestrator {
   /** Conflict rollbacks deferred until the identity map batch. */
   private deferredConflictTxs: Transaction[] = [];
 
+  private readonly context: SyncContext;
+  private readonly syncGroups: SyncGroupManager;
+
   constructor(
     options: SyncClientOptions,
     identityMaps: IdentityMapRegistry,
@@ -121,7 +126,49 @@ export class SyncOrchestrator {
     this.stateMachine = new SyncStateMachine(emitEvent);
     this.cursor = new SyncCursor(this.storage);
 
+    this.context = this.buildContext();
+    this.syncGroups = new SyncGroupManager(this.context, (afterSyncId) =>
+      this.restartDeltaSubscription(afterSyncId)
+    );
+
     this.attachTransportConnectionListener();
+  }
+
+  private buildContext(): SyncContext {
+    return {
+      cursor: this.cursor,
+      deltaReplayGate: () => this.deltaReplayGate,
+      emitEvent: this.emitEvent,
+      getClientId: () => this.clientId,
+      getConflictHandler: () => this.onTransactionConflict,
+      getDeferredConflictTxs: () => this.deferredConflictTxs,
+      getDeltaSubscription: () => this.deltaSubscription,
+      getGroups: () => this.groups,
+      getOutboxManager: () => this.outboxManager,
+      getRunToken: () => this.runToken,
+      identityMaps: this.identityMaps,
+      isRunActive: (runToken) => this.isRunActive(runToken),
+      isRunning: () => this.running,
+      options: this.options,
+      packetQueue: () => this.packetQueue,
+      recordError: (error) => this.handleSyncError(error),
+      registry: this.registry,
+      runWithStateLock: (operation) => this.runWithStateLock(operation),
+      schemaHash: this.schemaHash,
+      setDeferredConflictTxs: (txs) => {
+        this.deferredConflictTxs = txs;
+      },
+      setDeltaSubscription: (subscription) => {
+        this.deltaSubscription = subscription;
+      },
+      setGroups: (groups) => {
+        this.groups = groups;
+      },
+      setState: (state) => this.setState(state),
+      stateQueue: () => this.stateQueue,
+      storage: this.storage,
+      transport: this.transport,
+    };
   }
 
   private attachTransportConnectionListener(): void {
@@ -1326,165 +1373,11 @@ export class SyncOrchestrator {
     }
   }
 
-  private async handleSyncGroupActions(
+  private handleSyncGroupActions(
     actions: SyncAction[],
     nextSyncId: SyncId
   ): Promise<void> {
-    const groupUpdates: string[][] = [];
-    for (const action of actions) {
-      if (action.action !== "G" && action.action !== "S") {
-        continue;
-      }
-      const data = action.data as Record<string, unknown>;
-      const groups = data.subscribedSyncGroups;
-      if (Array.isArray(groups)) {
-        const filtered = groups.filter(
-          (group): group is string => typeof group === "string"
-        );
-        groupUpdates.push(filtered);
-      }
-    }
-
-    if (groupUpdates.length === 0) {
-      return;
-    }
-
-    const nextGroups = groupUpdates.at(-1);
-    if (!nextGroups || areGroupsEqual(this.groups, nextGroups)) {
-      return;
-    }
-
-    const currentSet = new Set(this.groups);
-    const nextSet = new Set(nextGroups);
-    const addedGroups = nextGroups.filter((group) => !currentSet.has(group));
-    const removedGroups = this.groups.filter((group) => !nextSet.has(group));
-
-    if (addedGroups.length > 0) {
-      await this.bootstrapSyncGroups(addedGroups, nextSyncId, this.runToken);
-    }
-
-    if (removedGroups.length > 0) {
-      await this.removeSyncGroupData(removedGroups);
-    }
-
-    this.groups = nextGroups;
-    this.cursor.setFirstSyncId(nextSyncId);
-    await this.storage.setMeta({
-      firstSyncId: this.cursor.firstSyncId,
-      subscribedSyncGroups: this.groups,
-      updatedAt: Date.now(),
-    });
-
-    const pending = await this.getActiveOutboxTransactions();
-    this.identityMaps.batch(() => {
-      touchPendingTransactionTargets(this.identityMaps, pending);
-      this.applyPendingTransactionsToIdentityMaps(pending);
-    });
-
-    if (this.running) {
-      await this.restartDeltaSubscription(nextSyncId);
-    }
-  }
-
-  private async bootstrapSyncGroups(
-    groups: string[],
-    firstSyncId: SyncId,
-    runToken: number
-  ): Promise<void> {
-    const iterator = this.transport.bootstrap({
-      firstSyncId,
-      noSyncPackets: true,
-      schemaHash: this.schemaHash,
-      syncGroups: groups,
-      type: "partial",
-    });
-
-    const hydrated = new Set(this.registry.getEagerHydrationModelNames());
-
-    const cancelIfStale = async (): Promise<boolean> => {
-      if (this.isRunActive(runToken)) {
-        return false;
-      }
-
-      try {
-        await iterator.return?.({ subscribedSyncGroups: groups });
-      } catch {
-        // Best-effort cleanup when cancellation races with bootstrap.
-      }
-
-      return true;
-    };
-
-    while (true) {
-      if (await cancelIfStale()) {
-        return;
-      }
-
-      const { value, done } = await iterator.next();
-      if (await cancelIfStale()) {
-        return;
-      }
-
-      if (done) {
-        break;
-      }
-
-      const row = value;
-      const primaryKey = this.registry.getPrimaryKey(row.modelName);
-      const id = row.data[primaryKey] as string;
-      if (typeof id !== "string") {
-        continue;
-      }
-      await this.storage.put(row.modelName, row.data);
-      if (await cancelIfStale()) {
-        return;
-      }
-
-      if (hydrated.has(row.modelName)) {
-        const map = this.identityMaps.getMap(row.modelName);
-        map.merge(id, row.data, { serialized: true });
-      }
-    }
-  }
-
-  private async removeSyncGroupData(groups: string[]): Promise<void> {
-    if (groups.length === 0) {
-      return;
-    }
-
-    for (const model of this.registry.getAllModels()) {
-      const modelName = model.name ?? "";
-      const { groupKey } = model;
-      if (!(modelName && groupKey)) {
-        continue;
-      }
-
-      const primaryKey = model.primaryKey ?? "id";
-      const map = this.identityMaps.getMap<Record<string, unknown>>(modelName);
-
-      for (const group of groups) {
-        const rows = await this.storage.getByIndex<Record<string, unknown>>(
-          modelName,
-          groupKey,
-          group
-        );
-
-        for (const row of rows) {
-          const id = row[primaryKey] as string;
-          if (typeof id !== "string") {
-            continue;
-          }
-          await this.storage.delete(modelName, id);
-          map.delete(id);
-          this.emitEvent?.({
-            action: "delete",
-            modelId: id,
-            modelName,
-            type: "modelChange",
-          });
-        }
-      }
-    }
+    return this.syncGroups.handleSyncGroupActions(actions, nextSyncId);
   }
 
   /**
