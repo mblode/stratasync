@@ -4,18 +4,13 @@ import type { Context } from "react";
 import type { SyncContextValue, SyncStatusContextValue } from "./types.js";
 
 /**
- * React context for the sync client
- */
-export const SyncContext = createContext<SyncContextValue | null>(null);
-
-/**
- * Display name for React DevTools
- */
-SyncContext.displayName = "SyncContext";
-
-/**
  * React context for the sync client instance only.
  * This stays stable across backlog/status updates.
+ *
+ * The sync surface is split into three independent contexts (client / status /
+ * backlog) so a consumer that only needs the client doesn't re-render on
+ * backlog churn. `useSync` composes them; there is intentionally no combined
+ * context.
  */
 export const SyncClientContext: Context<SyncContextValue["client"] | null> =
   createContext<SyncContextValue["client"] | null>(null);

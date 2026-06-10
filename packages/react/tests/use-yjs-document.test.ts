@@ -6,7 +6,6 @@ import React from "react";
 import {
   SyncBacklogContext,
   SyncClientContext,
-  SyncContext,
   SyncStatusContext,
   useYjsDocument,
 } from "../src";
@@ -140,11 +139,7 @@ const createWrapper = (mockData: ReturnType<typeof createMockClient>) =>
         React.createElement(
           SyncBacklogContext.Provider,
           { value: contextValue.backlog },
-          React.createElement(
-            SyncContext.Provider,
-            { value: contextValue },
-            children
-          )
+          children
         )
       )
     );

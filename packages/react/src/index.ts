@@ -1,7 +1,6 @@
 export {
   SyncBacklogContext,
   SyncClientContext,
-  SyncContext,
   SyncStatusContext,
 } from "./context.js";
 export {

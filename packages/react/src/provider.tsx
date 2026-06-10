@@ -9,14 +9,9 @@ import type { ReactNode } from "react";
 import {
   SyncBacklogContext,
   SyncClientContext,
-  SyncContext,
   SyncStatusContext,
 } from "./context.js";
-import type {
-  SyncContextValue,
-  SyncProviderProps,
-  SyncStatusContextValue,
-} from "./types.js";
+import type { SyncProviderProps, SyncStatusContextValue } from "./types.js";
 
 /**
  * Provider component for the sync client
@@ -223,20 +218,11 @@ export const SyncProvider = ({
     ]
   );
 
-  const value = useMemo<SyncContextValue>(
-    () => ({
-      backlog: effectiveBacklog,
-      client,
-      ...statusValue,
-    }),
-    [client, effectiveBacklog, statusValue]
-  );
-
   return (
     <SyncClientContext.Provider value={client}>
       <SyncStatusContext.Provider value={statusValue}>
         <SyncBacklogContext.Provider value={effectiveBacklog}>
-          <SyncContext.Provider value={value}>{children}</SyncContext.Provider>
+          {children}
         </SyncBacklogContext.Provider>
       </SyncStatusContext.Provider>
     </SyncClientContext.Provider>
