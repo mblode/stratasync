@@ -28,6 +28,7 @@ import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
 import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
+import { SyncCursor } from "./sync/cursor.js";
 import { SyncStateMachine } from "./sync/state.js";
 import type {
   StorageAdapter,
@@ -72,8 +73,7 @@ export class SyncOrchestrator {
 
   private readonly schemaHash: string;
   private clientId = "";
-  private lastSyncId: SyncId = ZERO_SYNC_ID;
-  private firstSyncId: SyncId = ZERO_SYNC_ID;
+  private readonly cursor: SyncCursor;
   private groups: string[] = [];
   private transportConnectionCleanup: (() => void) | null = null;
 
@@ -117,6 +117,7 @@ export class SyncOrchestrator {
     this.groups = options.groups ?? [];
     this.emitEvent = emitEvent;
     this.stateMachine = new SyncStateMachine(emitEvent);
+    this.cursor = new SyncCursor(this.storage);
 
     this.attachTransportConnectionListener();
   }
@@ -168,14 +169,14 @@ export class SyncOrchestrator {
    * Gets the last sync ID
    */
   getLastSyncId(): SyncId {
-    return this.lastSyncId;
+    return this.cursor.lastSyncId;
   }
 
   /**
    * Gets the first sync ID from the last full bootstrap
    */
   getFirstSyncId(): SyncId {
-    return this.firstSyncId;
+    return this.cursor.firstSyncId;
   }
 
   /**
@@ -228,7 +229,7 @@ export class SyncOrchestrator {
       this.setState("syncing");
 
       // Network operations run in background, don't block start()
-      const subscribeAfterSyncId = this.lastSyncId;
+      const subscribeAfterSyncId = this.cursor.lastSyncId;
       this.startDeltaSubscription(subscribeAfterSyncId);
       // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
       this.catchUpMissedDeltas(subscribeAfterSyncId, activeRunToken).catch(
@@ -268,8 +269,7 @@ export class SyncOrchestrator {
     this.clientId =
       meta.clientId ??
       getOrCreateClientId(`${this.options.dbName ?? "sync-db"}_client_id`);
-    this.lastSyncId = meta.lastSyncId ?? ZERO_SYNC_ID;
-    this.firstSyncId = meta.firstSyncId ?? this.lastSyncId;
+    this.cursor.hydrate(meta);
     return meta;
   }
 
@@ -282,9 +282,9 @@ export class SyncOrchestrator {
       return;
     }
 
-    this.firstSyncId = this.lastSyncId;
+    this.cursor.resetFirstToLast();
     await this.storage.setMeta({
-      firstSyncId: this.firstSyncId,
+      firstSyncId: this.cursor.firstSyncId,
       subscribedSyncGroups: this.groups,
       updatedAt: Date.now(),
     });
@@ -320,7 +320,7 @@ export class SyncOrchestrator {
     return (
       meta.bootstrapComplete === false ||
       hasSchemaMismatch ||
-      this.lastSyncId === ZERO_SYNC_ID ||
+      this.cursor.lastSyncId === ZERO_SYNC_ID ||
       !arePersisted
     );
   }
@@ -354,7 +354,7 @@ export class SyncOrchestrator {
     if (!this.outboxManager) {
       return;
     }
-    await this.outboxManager.completeUpToSyncId(this.lastSyncId);
+    await this.outboxManager.completeUpToSyncId(this.cursor.lastSyncId);
     await this.outboxManager.processPendingTransactions();
     await this.emitOutboxCount();
   }
@@ -524,8 +524,7 @@ export class SyncOrchestrator {
     this.deltaReplayGate = new Gate();
     this.deferredConflictTxs = [];
     this.clientId = "";
-    this.lastSyncId = ZERO_SYNC_ID;
-    this.firstSyncId = ZERO_SYNC_ID;
+    this.cursor.reset();
     this.groups = this.options.groups ?? [];
     this.stateMachine.clearError();
 
@@ -538,7 +537,7 @@ export class SyncOrchestrator {
    */
   async syncNow(): Promise<void> {
     try {
-      await this.fetchAndApplyDeltaPages(this.lastSyncId);
+      await this.fetchAndApplyDeltaPages(this.cursor.lastSyncId);
     } catch (error) {
       if (await this.handleBootstrapRequired(error, this.deltaSubscription)) {
         return;
@@ -608,14 +607,17 @@ export class SyncOrchestrator {
     await this.storage.setMeta({
       bootstrapComplete: true,
       databaseVersion,
-      firstSyncId: this.firstSyncId,
+      firstSyncId: this.cursor.firstSyncId,
       lastSyncAt: Date.now(),
-      lastSyncId: this.lastSyncId,
+      lastSyncId: this.cursor.lastSyncId,
       schemaHash: this.schemaHash,
       subscribedSyncGroups: this.groups,
       updatedAt: Date.now(),
     });
-    this.emitEvent?.({ lastSyncId: this.lastSyncId, type: "syncComplete" });
+    this.emitEvent?.({
+      lastSyncId: this.cursor.lastSyncId,
+      type: "syncComplete",
+    });
   }
 
   private async readBootstrapStream(
@@ -677,8 +679,7 @@ export class SyncOrchestrator {
       throw new Error("Bootstrap metadata is missing lastSyncId");
     }
 
-    this.lastSyncId = metadata.lastSyncId;
-    this.firstSyncId = metadata.lastSyncId;
+    this.cursor.setFromBootstrap(metadata.lastSyncId);
     this.groups =
       (metadata.subscribedSyncGroups?.length ?? 0) > 0
         ? metadata.subscribedSyncGroups
@@ -779,7 +780,9 @@ export class SyncOrchestrator {
   /**
    * Starts the delta subscription
    */
-  private startDeltaSubscription(afterSyncId: SyncId = this.lastSyncId): void {
+  private startDeltaSubscription(
+    afterSyncId: SyncId = this.cursor.lastSyncId
+  ): void {
     const subscription = this.transport.subscribe({
       afterSyncId,
       groups: this.groups,
@@ -835,7 +838,7 @@ export class SyncOrchestrator {
             this.deltaSubscription = null;
           }
           if (shouldRestart) {
-            this.startDeltaSubscription(this.lastSyncId);
+            this.startDeltaSubscription(this.cursor.lastSyncId);
           }
           break;
         }
@@ -894,7 +897,7 @@ export class SyncOrchestrator {
 
       await this.processOutboxTransactions();
       if (this.running && !this.deltaSubscription) {
-        this.startDeltaSubscription(this.lastSyncId);
+        this.startDeltaSubscription(this.cursor.lastSyncId);
       }
       if (this.running) {
         this.setState("syncing");
@@ -930,7 +933,7 @@ export class SyncOrchestrator {
    * re-applied.
    */
   private async applyDeltaPacket(packet: DeltaPacket): Promise<void> {
-    const latestAppliedSyncId = this.lastSyncId;
+    const latestAppliedSyncId = this.cursor.lastSyncId;
     const nextActions = packet.actions.filter((action) =>
       isSyncIdGreaterThan(action.id, latestAppliedSyncId)
     );
@@ -1030,18 +1033,24 @@ export class SyncOrchestrator {
     this.emitModelChangeEvents(filteredPacket.actions, ownClientTxIds);
     await this.emitOutboxCount();
     if (syncCursorAdvanced) {
-      this.emitEvent?.({ lastSyncId: this.lastSyncId, type: "syncComplete" });
+      this.emitEvent?.({
+        lastSyncId: this.cursor.lastSyncId,
+        type: "syncComplete",
+      });
     }
   }
 
   private async handleEmptyPacket(packet: DeltaPacket): Promise<void> {
     const syncCursorAdvanced = await this.updateSyncMetadata(packet.lastSyncId);
     if (this.outboxManager) {
-      await this.outboxManager.completeUpToSyncId(this.lastSyncId);
+      await this.outboxManager.completeUpToSyncId(this.cursor.lastSyncId);
     }
     await this.emitOutboxCount();
     if (syncCursorAdvanced) {
-      this.emitEvent?.({ lastSyncId: this.lastSyncId, type: "syncComplete" });
+      this.emitEvent?.({
+        lastSyncId: this.cursor.lastSyncId,
+        type: "syncComplete",
+      });
     }
   }
 
@@ -1154,17 +1163,8 @@ export class SyncOrchestrator {
     }
   }
 
-  private async updateSyncMetadata(lastSyncId: SyncId): Promise<boolean> {
-    if (!isSyncIdGreaterThan(lastSyncId, this.lastSyncId)) {
-      return false;
-    }
-    this.lastSyncId = lastSyncId;
-    await this.storage.setMeta({
-      lastSyncAt: Date.now(),
-      lastSyncId: this.lastSyncId,
-      updatedAt: Date.now(),
-    });
-    return true;
+  private updateSyncMetadata(lastSyncId: SyncId): Promise<boolean> {
+    return this.cursor.advance(lastSyncId);
   }
 
   private async finishOutboxProcessing(
@@ -1174,7 +1174,7 @@ export class SyncOrchestrator {
       (await this.outboxManager?.confirmFromActions(actions)) ??
       new Set<string>();
     if (this.outboxManager) {
-      await this.outboxManager.completeUpToSyncId(this.lastSyncId);
+      await this.outboxManager.completeUpToSyncId(this.cursor.lastSyncId);
     }
     return confirmedTxIds;
   }
@@ -1443,9 +1443,9 @@ export class SyncOrchestrator {
     }
 
     this.groups = nextGroups;
-    this.firstSyncId = nextSyncId;
+    this.cursor.setFirstSyncId(nextSyncId);
     await this.storage.setMeta({
-      firstSyncId: this.firstSyncId,
+      firstSyncId: this.cursor.firstSyncId,
       subscribedSyncGroups: this.groups,
       updatedAt: Date.now(),
     });
@@ -1583,7 +1583,7 @@ export class SyncOrchestrator {
       try {
         await this.syncNow();
         if (this.running && !this.deltaSubscription) {
-          this.startDeltaSubscription(this.lastSyncId);
+          this.startDeltaSubscription(this.cursor.lastSyncId);
         }
         if (this.running) {
           this.setState("syncing");
