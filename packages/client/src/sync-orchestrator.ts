@@ -12,12 +12,9 @@ import type {
 } from "@stratasync/core";
 import {
   applyDeltas,
-  createArchivePayload,
-  createUnarchivePatch,
   getOrCreateClientId,
   isSyncIdGreaterThan,
   ModelRegistry,
-  readArchivedAt,
   rebaseOriginals,
   rebaseTransactions,
   resolveConflictEffect,
@@ -29,6 +26,11 @@ import { AsyncQueue } from "./internal/async-queue.js";
 import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
 import { SyncCursor } from "./sync/cursor.js";
+import {
+  applyPendingTransactionsToIdentityMaps,
+  areGroupsEqual,
+  touchPendingTransactionTargets,
+} from "./sync/pending-hydration.js";
 import { SyncStateMachine } from "./sync/state.js";
 import type {
   StorageAdapter,
@@ -278,7 +280,7 @@ export class SyncOrchestrator {
     const configuredGroups = this.options.groups ?? storedGroups;
     this.groups = configuredGroups.length > 0 ? configuredGroups : storedGroups;
 
-    if (SyncOrchestrator.areGroupsEqual(storedGroups, this.groups)) {
+    if (areGroupsEqual(storedGroups, this.groups)) {
       return;
     }
 
@@ -347,7 +349,7 @@ export class SyncOrchestrator {
 
   private async applyPendingOutboxTransactions(): Promise<void> {
     const pending = await this.getActiveOutboxTransactions();
-    await this.applyPendingTransactionsToIdentityMaps(pending);
+    this.applyPendingTransactionsToIdentityMaps(pending);
   }
 
   private async processOutboxTransactions(): Promise<void> {
@@ -761,22 +763,6 @@ export class SyncOrchestrator {
     return true;
   }
 
-  private static areGroupsEqual(a: string[], b: string[]): boolean {
-    if (a.length !== b.length) {
-      return false;
-    }
-    const setA = new Set(a);
-    if (setA.size !== b.length) {
-      return false;
-    }
-    for (const value of b) {
-      if (!setA.has(value)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /**
    * Starts the delta subscription
    */
@@ -995,7 +981,7 @@ export class SyncOrchestrator {
     const pending = await this.getActiveOutboxTransactions();
 
     this.identityMaps.batch(() => {
-      this.touchPendingTransactionTargets(pending);
+      touchPendingTransactionTargets(this.identityMaps, pending);
 
       // Process conflict rollbacks inside the batch.  This ensures that
       // the rollback's map.delete() and the subsequent server merge's
@@ -1081,13 +1067,13 @@ export class SyncOrchestrator {
     return (await this.outboxManager?.getActiveTransactions()) ?? [];
   }
 
-  private touchPendingTransactionTargets(pending: Transaction[]): void {
-    for (const tx of pending) {
-      const map = this.identityMaps.getMap<Record<string, unknown>>(
-        tx.modelName
-      );
-      map.get(tx.modelId);
-    }
+  /**
+   * Thin delegate to the shared pending-hydration helper. Retained as an
+   * instance method so white-box tests can bind it; production code calls the
+   * helper directly.
+   */
+  private applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void {
+    applyPendingTransactionsToIdentityMaps(this.identityMaps, pending);
   }
 
   /**
@@ -1323,70 +1309,6 @@ export class SyncOrchestrator {
     }
   }
 
-  /**
-   * Re-applies pending outbox transactions to identity maps after a server sync.
-   * This intentionally differs from rollbackTransaction (which inverts) and
-   * applyDeltas (which writes to storage). It re-applies forward to restore
-   * optimistic state on top of newly-synced server data.
-   */
-  private applyPendingTransactionsToIdentityMaps(pending: Transaction[]): void {
-    if (pending.length === 0) {
-      return;
-    }
-
-    for (const tx of pending) {
-      const map = this.identityMaps.getMap<Record<string, unknown>>(
-        tx.modelName
-      );
-
-      switch (tx.action) {
-        case "I": {
-          // Only re-create if the model was removed (e.g. conflict rollback).
-          // If it already exists, the optimistic insert is still valid and
-          // re-merging the full create payload would overwrite field changes
-          // from optimistic updates whose outbox writes are still in-flight.
-          if (!map.has(tx.modelId)) {
-            map.merge(tx.modelId, tx.payload);
-          }
-          break;
-        }
-        case "U": {
-          if (map.has(tx.modelId)) {
-            map.merge(tx.modelId, tx.payload);
-          }
-          break;
-        }
-        case "D": {
-          map.delete(tx.modelId);
-          break;
-        }
-        case "A": {
-          if (map.has(tx.modelId)) {
-            map.merge(
-              tx.modelId,
-              createArchivePayload(readArchivedAt(tx.payload))
-            );
-          }
-          break;
-        }
-        case "V": {
-          const existing = map.get(tx.modelId);
-          if (existing) {
-            const updated = {
-              ...existing,
-              ...createUnarchivePatch(),
-            };
-            map.set(tx.modelId, updated);
-          }
-          break;
-        }
-        default: {
-          break;
-        }
-      }
-    }
-  }
-
   private async handleCoverageActions(actions: SyncAction[]): Promise<void> {
     for (const action of actions) {
       if (action.action !== "C") {
@@ -1428,10 +1350,7 @@ export class SyncOrchestrator {
     }
 
     const nextGroups = groupUpdates.at(-1);
-    if (
-      !nextGroups ||
-      SyncOrchestrator.areGroupsEqual(this.groups, nextGroups)
-    ) {
+    if (!nextGroups || areGroupsEqual(this.groups, nextGroups)) {
       return;
     }
 
@@ -1458,7 +1377,7 @@ export class SyncOrchestrator {
 
     const pending = await this.getActiveOutboxTransactions();
     this.identityMaps.batch(() => {
-      this.touchPendingTransactionTargets(pending);
+      touchPendingTransactionTargets(this.identityMaps, pending);
       this.applyPendingTransactionsToIdentityMaps(pending);
     });
 
