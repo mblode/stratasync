@@ -18,7 +18,9 @@ import {
   isSyncIdGreaterThan,
   ModelRegistry,
   readArchivedAt,
+  rebaseOriginals,
   rebaseTransactions,
+  resolveConflictEffect,
   ZERO_SYNC_ID,
 } from "@stratasync/core";
 
@@ -1307,25 +1309,19 @@ export class SyncOrchestrator {
     const { localTransaction: tx } = conflict;
     const resolution =
       conflict.resolution === "manual" ? "server-wins" : conflict.resolution;
+    const effect = resolveConflictEffect(conflict);
 
-    if (resolution === "server-wins") {
+    if (effect.kind === "drop-local") {
       await this.storage.removeFromOutbox(tx.clientTxId);
       // Defer identity map rollback until the batch so it runs in the same
       // runInAction as the server merge.  Firing it here would delete the
       // item from the identity map and emit modelChange(delete) BEFORE the
       // deferred batch re-adds it, causing a visible flash of empty state.
       this.deferredConflictTxs.push(tx);
-    } else if (
-      (resolution === "client-wins" || resolution === "merge") &&
-      (tx.action === "U" || tx.action === "A" || tx.action === "V")
-    ) {
-      const updatedOriginal = {
-        ...tx.original,
-        ...conflict.serverAction.data,
-      };
-      tx.original = updatedOriginal;
+    } else if (effect.kind === "patch-original") {
+      tx.original = effect.original;
       await this.storage.updateOutboxTransaction(tx.clientTxId, {
-        original: updatedOriginal,
+        original: effect.original,
       });
     }
 
@@ -1342,65 +1338,21 @@ export class SyncOrchestrator {
     pending: Transaction[],
     actions: SyncAction[]
   ): Promise<void> {
-    const actionsByKey = SyncOrchestrator.buildActionsByKey(actions);
+    const patches = rebaseOriginals(pending, actions);
+    if (patches.length === 0) {
+      return;
+    }
 
-    for (const tx of pending) {
-      if (tx.action !== "U" && tx.action !== "A" && tx.action !== "V") {
-        continue;
+    const txByClientTxId = new Map(pending.map((tx) => [tx.clientTxId, tx]));
+    for (const patch of patches) {
+      const tx = txByClientTxId.get(patch.clientTxId);
+      if (tx) {
+        tx.original = patch.original;
       }
-      const key = getModelKey(tx.modelName, tx.modelId);
-      const related = actionsByKey.get(key);
-      if (!related) {
-        continue;
-      }
-      const updatedOriginal = SyncOrchestrator.getUpdatedOriginal(tx, related);
-      if (!updatedOriginal) {
-        continue;
-      }
-      tx.original = updatedOriginal;
-      await this.storage.updateOutboxTransaction(tx.clientTxId, {
-        original: updatedOriginal,
+      await this.storage.updateOutboxTransaction(patch.clientTxId, {
+        original: patch.original,
       });
     }
-  }
-
-  private static buildActionsByKey(
-    actions: SyncAction[]
-  ): Map<string, SyncAction[]> {
-    const actionsByKey = new Map<string, SyncAction[]>();
-    for (const action of actions) {
-      const key = getModelKey(action.modelName, action.modelId);
-      const existing = actionsByKey.get(key) ?? [];
-      existing.push(action);
-      actionsByKey.set(key, existing);
-    }
-    return actionsByKey;
-  }
-
-  private static shouldRebaseAction(action: SyncAction["action"]): boolean {
-    return action === "U" || action === "I" || action === "V" || action === "C";
-  }
-
-  private static getUpdatedOriginal(
-    tx: Transaction,
-    related: SyncAction[]
-  ): Record<string, unknown> | null {
-    const original = { ...tx.original };
-    let updated = false;
-
-    for (const action of related) {
-      if (!SyncOrchestrator.shouldRebaseAction(action.action)) {
-        continue;
-      }
-      for (const field of Object.keys(tx.payload)) {
-        if (field in action.data) {
-          original[field] = action.data[field];
-          updated = true;
-        }
-      }
-    }
-
-    return updated ? original : null;
   }
 
   /**
