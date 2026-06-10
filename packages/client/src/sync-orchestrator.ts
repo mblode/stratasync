@@ -1,8 +1,6 @@
 import type {
-  BootstrapMetadata,
   ConnectionState,
   DeltaPacket,
-  ModelRow,
   RebaseConflict,
   RebaseOptions,
   SyncAction,
@@ -18,13 +16,13 @@ import {
   rebaseOriginals,
   rebaseTransactions,
   resolveConflictEffect,
-  ZERO_SYNC_ID,
 } from "@stratasync/core";
 
 import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
 import { Gate } from "./internal/gate.js";
 import type { OutboxManager } from "./outbox-manager.js";
+import { BootstrapRunner } from "./sync/bootstrap-runner.js";
 import type { SyncContext } from "./sync/context.js";
 import { SyncCursor } from "./sync/cursor.js";
 import {
@@ -107,6 +105,7 @@ export class SyncOrchestrator {
 
   private readonly context: SyncContext;
   private readonly syncGroups: SyncGroupManager;
+  private readonly bootstrapRunner: BootstrapRunner;
 
   constructor(
     options: SyncClientOptions,
@@ -130,6 +129,7 @@ export class SyncOrchestrator {
     this.syncGroups = new SyncGroupManager(this.context, (afterSyncId) =>
       this.restartDeltaSubscription(afterSyncId)
     );
+    this.bootstrapRunner = new BootstrapRunner(this.context);
 
     this.attachTransportConnectionListener();
   }
@@ -339,59 +339,11 @@ export class SyncOrchestrator {
     });
   }
 
-  private async bootstrapIfNeeded(
+  private bootstrapIfNeeded(
     meta: StorageMeta,
     runToken: number
   ): Promise<void> {
-    if ((this.options.bootstrapMode ?? "auto") === "full") {
-      await this.bootstrap(runToken);
-      return;
-    }
-
-    const needsBootstrap = await this.shouldBootstrap(meta);
-    if (!needsBootstrap) {
-      await this.hydrateIdentityMaps(runToken);
-      return;
-    }
-
-    await this.runBootstrapStrategy(runToken);
-  }
-
-  private async shouldBootstrap(meta: StorageMeta): Promise<boolean> {
-    const bootstrapModels = this.registry.getBootstrapModelNames();
-    const arePersisted = await this.areModelsPersisted(bootstrapModels);
-    const storedHash = meta.schemaHash ?? "";
-    // Treat an empty/missing hash as a mismatch. A valid bootstrap always
-    // writes the hash, so an empty value means prior state is corrupt.
-    const hasSchemaMismatch =
-      storedHash.length === 0 || storedHash !== this.schemaHash;
-
-    return (
-      meta.bootstrapComplete === false ||
-      hasSchemaMismatch ||
-      this.cursor.lastSyncId === ZERO_SYNC_ID ||
-      !arePersisted
-    );
-  }
-
-  private async runBootstrapStrategy(runToken: number): Promise<void> {
-    const bootstrapMode = this.options.bootstrapMode ?? "auto";
-    if (bootstrapMode === "local") {
-      await this.localBootstrap(runToken);
-      return;
-    }
-
-    try {
-      await this.bootstrap(runToken);
-    } catch (error) {
-      const canFallback =
-        bootstrapMode === "auto" && (await this.hasLocalData());
-      if (canFallback) {
-        await this.localBootstrap(runToken);
-        return;
-      }
-      throw error;
-    }
+    return this.bootstrapRunner.bootstrapIfNeeded(meta, runToken);
   }
 
   private async applyPendingOutboxTransactions(): Promise<void> {
@@ -538,10 +490,6 @@ export class SyncOrchestrator {
     return this.running && this.runToken === runToken;
   }
 
-  private shouldAbortBootstrap(runToken: number): boolean {
-    return !this.isRunActive(runToken);
-  }
-
   /**
    * Stops the sync orchestrator
    */
@@ -623,191 +571,10 @@ export class SyncOrchestrator {
   }
 
   /**
-   * Performs initial bootstrap
+   * Performs initial bootstrap (delegates to BootstrapRunner).
    */
-  private async bootstrap(runToken: number): Promise<void> {
-    this.setState("bootstrapping");
-
-    // Stream bootstrap data
-    const iterator = this.transport.bootstrap({
-      onlyModels: this.registry.getBootstrapModelNames(),
-      schemaHash: this.schemaHash,
-      syncGroups: this.groups,
-      type: "full",
-    });
-
-    const snapshot = await this.readBootstrapStream(iterator, runToken);
-    if (!snapshot) {
-      return;
-    }
-    if (this.shouldAbortBootstrap(runToken)) {
-      return;
-    }
-
-    await this.commitBootstrapRows(snapshot.rows);
-
-    const databaseVersion = this.applyBootstrapMetadata(snapshot.metadata);
-
-    const persisted = await this.markBootstrapModelsPersisted(runToken);
-    if (!persisted) {
-      return;
-    }
-
-    await this.storage.setMeta({
-      bootstrapComplete: true,
-      databaseVersion,
-      firstSyncId: this.cursor.firstSyncId,
-      lastSyncAt: Date.now(),
-      lastSyncId: this.cursor.lastSyncId,
-      schemaHash: this.schemaHash,
-      subscribedSyncGroups: this.groups,
-      updatedAt: Date.now(),
-    });
-    this.emitEvent?.({
-      lastSyncId: this.cursor.lastSyncId,
-      type: "syncComplete",
-    });
-  }
-
-  private async readBootstrapStream(
-    iterator: AsyncGenerator<ModelRow, BootstrapMetadata, unknown>,
-    runToken: number
-  ): Promise<{
-    metadata: BootstrapMetadata;
-    rows: ModelRow[];
-  } | null> {
-    const rows: ModelRow[] = [];
-    while (true) {
-      const { value, done } = await iterator.next();
-      if (this.shouldAbortBootstrap(runToken)) {
-        return null;
-      }
-
-      if (done) {
-        if (!value) {
-          throw new Error("Bootstrap completed without metadata");
-        }
-        return { metadata: value, rows };
-      }
-
-      rows.push(value);
-    }
-  }
-
-  private async commitBootstrapRows(rows: ModelRow[]): Promise<void> {
-    const ops = rows.map((row) => ({
-      data: row.data,
-      modelName: row.modelName,
-      type: "put" as const,
-    }));
-
-    await this.storage.clear({ preserveOutbox: true });
-    if (ops.length > 0) {
-      await this.storage.writeBatch(ops);
-    }
-
-    this.identityMaps.batch(() => {
-      this.identityMaps.clearAll();
-      for (const row of rows) {
-        const primaryKey = this.registry.getPrimaryKey(row.modelName);
-        const id = row.data[primaryKey] as string;
-        if (typeof id !== "string") {
-          continue;
-        }
-
-        const map = this.identityMaps.getMap(row.modelName);
-        map.set(id, row.data, { serialized: true });
-      }
-    });
-  }
-
-  private applyBootstrapMetadata(
-    metadata: BootstrapMetadata
-  ): number | undefined {
-    if (metadata.lastSyncId === undefined) {
-      throw new Error("Bootstrap metadata is missing lastSyncId");
-    }
-
-    this.cursor.setFromBootstrap(metadata.lastSyncId);
-    this.groups =
-      (metadata.subscribedSyncGroups?.length ?? 0) > 0
-        ? metadata.subscribedSyncGroups
-        : this.groups;
-
-    return metadata.databaseVersion;
-  }
-
-  private async markBootstrapModelsPersisted(
-    runToken: number
-  ): Promise<boolean> {
-    for (const modelName of this.registry.getBootstrapModelNames()) {
-      await this.storage.setModelPersistence(modelName, true);
-      if (this.shouldAbortBootstrap(runToken)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Performs a local-only bootstrap using existing storage data.
-   */
-  private async localBootstrap(runToken: number): Promise<void> {
-    this.setState("bootstrapping");
-    await this.hydrateIdentityMaps(runToken);
-  }
-
-  /**
-   * Checks whether any hydrated models exist in storage.
-   */
-  private async hasLocalData(): Promise<boolean> {
-    for (const modelName of this.registry.getBootstrapModelNames()) {
-      const count = await this.storage.count(modelName);
-      if (count > 0) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Loads existing data from storage into identity maps
-   */
-  private async hydrateIdentityMaps(runToken: number): Promise<void> {
-    for (const modelName of this.registry.getEagerHydrationModelNames()) {
-      if (!this.isRunActive(runToken)) {
-        return;
-      }
-      const rows =
-        await this.storage.getAll<Record<string, unknown>>(modelName);
-      if (!this.isRunActive(runToken)) {
-        return;
-      }
-      const map = this.identityMaps.getMap(modelName);
-      const primaryKey = this.registry.getPrimaryKey(modelName);
-
-      for (const row of rows) {
-        if (!this.isRunActive(runToken)) {
-          return;
-        }
-        const id = row[primaryKey] as string;
-        if (typeof id !== "string") {
-          continue;
-        }
-        map.set(id, row, { serialized: true });
-      }
-    }
-  }
-
-  private async areModelsPersisted(modelNames: string[]): Promise<boolean> {
-    for (const modelName of modelNames) {
-      const persistence = await this.storage.getModelPersistence(modelName);
-      if (!persistence.persisted) {
-        return false;
-      }
-    }
-    return true;
+  private bootstrap(runToken: number): Promise<void> {
+    return this.bootstrapRunner.bootstrap(runToken);
   }
 
   /**
