@@ -1,6 +1,7 @@
 import type {
   ArchiveTransactionOptions,
   MutateResult,
+  SyncAction,
   SyncId,
   Transaction,
   UnarchiveTransactionOptions,
@@ -55,6 +56,14 @@ export interface OutboxManagerOptions {
   /** Callback when transaction is rejected by server */
   onTransactionRejected?: (tx: Transaction) => void;
 }
+
+/**
+ * Returns true for transaction states that are still "in flight" — queued to
+ * send, sent and awaiting a server ack, or awaiting the sync cursor to catch
+ * up. Completed/failed transactions are excluded.
+ */
+const isActiveTransaction = (tx: Transaction): boolean =>
+  tx.state === "queued" || tx.state === "sent" || tx.state === "awaitingSync";
 
 /**
  * Manages the outbox queue of pending transactions
@@ -527,16 +536,19 @@ export class OutboxManager {
   }
 
   /**
+   * Returns the outbox transactions that are still in flight.
+   */
+  async getActiveTransactions(): Promise<Transaction[]> {
+    const outbox = await this.storage.getOutbox();
+    return outbox.filter(isActiveTransaction);
+  }
+
+  /**
    * Gets the count of pending transactions
    */
   async getPendingCount(): Promise<number> {
     const outbox = await this.storage.getOutbox();
-    return outbox.filter(
-      (tx) =>
-        tx.state === "queued" ||
-        tx.state === "sent" ||
-        tx.state === "awaitingSync"
-    ).length;
+    return outbox.filter(isActiveTransaction).length;
   }
 
   /**
@@ -544,6 +556,99 @@ export class OutboxManager {
    */
   getLocalClientTxIds(): ReadonlySet<string> {
     return this.localClientTxIds;
+  }
+
+  /**
+   * Confirms transactions against a batch of server actions, removing them
+   * from the outbox and from the in-memory localClientTxIds set.
+   *
+   * Absorbs two previously-orchestrator-owned passes:
+   *  1. Direct confirmation: any outbox transaction whose clientTxId appears
+   *     in the actions is removed.
+   *  2. Redundant create removal: when a model's create (I) is observed, any
+   *     outbox create for that model is removed — covering both the matching
+   *     clientTxId and legacy (clientTxId-less) creates for the same model.
+   *
+   * Returns the union of removed clientTxIds.
+   */
+  async confirmFromActions(actions: SyncAction[]): Promise<Set<string>> {
+    const confirmed = new Set<string>();
+    const confirmedClientTxIds = OutboxManager.collectClientTxIds(actions);
+    const createsByModelId = OutboxManager.collectCreatesByModelId(actions);
+
+    if (confirmedClientTxIds.size === 0 && createsByModelId.size === 0) {
+      return confirmed;
+    }
+
+    const outbox = await this.storage.getOutbox();
+    for (const tx of outbox) {
+      if (confirmedClientTxIds.has(tx.clientTxId)) {
+        await this.removeConfirmedTransaction(tx.clientTxId, confirmed);
+        continue;
+      }
+
+      if (tx.action !== "I") {
+        continue;
+      }
+      const entry = createsByModelId.get(tx.modelId);
+      if (!entry) {
+        continue;
+      }
+      if (!entry.hasLegacyCreate && !entry.clientTxIds.has(tx.clientTxId)) {
+        continue;
+      }
+      await this.removeConfirmedTransaction(tx.clientTxId, confirmed);
+    }
+
+    return confirmed;
+  }
+
+  private async removeConfirmedTransaction(
+    clientTxId: string,
+    confirmed: Set<string>
+  ): Promise<void> {
+    await this.storage.removeFromOutbox(clientTxId);
+    // Fixes the leak: confirmed ids must also leave the in-memory set so it
+    // does not grow unbounded across the session.
+    this.localClientTxIds.delete(clientTxId);
+    confirmed.add(clientTxId);
+  }
+
+  private static collectClientTxIds(actions: SyncAction[]): Set<string> {
+    const ids = new Set<string>();
+    for (const action of actions) {
+      if (typeof action.clientTxId === "string") {
+        ids.add(action.clientTxId);
+      }
+    }
+    return ids;
+  }
+
+  private static collectCreatesByModelId(
+    actions: SyncAction[]
+  ): Map<string, { clientTxIds: Set<string>; hasLegacyCreate: boolean }> {
+    const createsByModelId = new Map<
+      string,
+      { clientTxIds: Set<string>; hasLegacyCreate: boolean }
+    >();
+
+    for (const action of actions) {
+      if (action.action !== "I") {
+        continue;
+      }
+      const entry = createsByModelId.get(action.modelId) ?? {
+        clientTxIds: new Set<string>(),
+        hasLegacyCreate: false,
+      };
+      if (typeof action.clientTxId === "string") {
+        entry.clientTxIds.add(action.clientTxId);
+      } else {
+        entry.hasLegacyCreate = true;
+      }
+      createsByModelId.set(action.modelId, entry);
+    }
+
+    return createsByModelId;
   }
 
   /**

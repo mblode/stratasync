@@ -1004,13 +1004,18 @@ export class SyncOrchestrator {
       filteredPacket.lastSyncId
     );
 
+    // Snapshot the instance-local clientTxIds for echo suppression BEFORE
+    // finishOutboxProcessing confirms (and therefore removes) them. Echo
+    // suppression must see the pre-removal set so that own optimistic echoes
+    // are still recognised in this same packet.
+    // Reading from shared storage (IndexedDB) would instead include cross-tab
+    // transactions, incorrectly suppressing identity map merges for them.
+    const localTxIds = new Set<string>(
+      this.outboxManager?.getLocalClientTxIds()
+    );
+
     await this.finishOutboxProcessing(filteredPacket.actions);
 
-    // Use the instance-local set of clientTxIds for echo suppression.
-    // Reading from shared storage (IndexedDB) would include cross-tab
-    // transactions, incorrectly suppressing identity map merges for them.
-    const localTxIds =
-      this.outboxManager?.getLocalClientTxIds() ?? new Set<string>();
     const ownClientTxIds = SyncOrchestrator.buildOwnClientTxIds(
       filteredPacket.actions,
       localTxIds
@@ -1098,13 +1103,9 @@ export class SyncOrchestrator {
   }
 
   private async getActiveOutboxTransactions(): Promise<Transaction[]> {
-    const outbox = await this.storage.getOutbox();
-    return outbox.filter(
-      (tx) =>
-        tx.state === "queued" ||
-        tx.state === "sent" ||
-        tx.state === "awaitingSync"
-    );
+    // Only the OutboxManager writes to the outbox, so when it is absent the
+    // outbox is empty. Delegating keeps the active-state predicate in one place.
+    return (await this.outboxManager?.getActiveTransactions()) ?? [];
   }
 
   private touchPendingTransactionTargets(pending: Transaction[]): void {
@@ -1205,14 +1206,11 @@ export class SyncOrchestrator {
   private async finishOutboxProcessing(
     actions: SyncAction[]
   ): Promise<Set<string>> {
-    const confirmedTxIds = await this.removeConfirmedTransactions(actions);
-    const redundantTxIds =
-      await this.removeRedundantCreateTransactions(actions);
+    const confirmedTxIds =
+      (await this.outboxManager?.confirmFromActions(actions)) ??
+      new Set<string>();
     if (this.outboxManager) {
       await this.outboxManager.completeUpToSyncId(this.lastSyncId);
-    }
-    for (const id of redundantTxIds) {
-      confirmedTxIds.add(id);
     }
     return confirmedTxIds;
   }
@@ -1417,82 +1415,6 @@ export class SyncOrchestrator {
         }
       }
     }
-  }
-
-  private async removeConfirmedTransactions(
-    actions: SyncAction[]
-  ): Promise<Set<string>> {
-    const confirmed = new Set<string>();
-    const clientTxIds = actions
-      .map((action) => action.clientTxId)
-      .filter((value): value is string => typeof value === "string");
-
-    if (clientTxIds.length === 0) {
-      return confirmed;
-    }
-
-    const outbox = await this.storage.getOutbox();
-    const known = new Set(outbox.map((tx) => tx.clientTxId));
-    for (const clientTxId of clientTxIds) {
-      if (known.has(clientTxId)) {
-        await this.storage.removeFromOutbox(clientTxId);
-        confirmed.add(clientTxId);
-      }
-    }
-    return confirmed;
-  }
-
-  private async removeRedundantCreateTransactions(
-    actions: SyncAction[]
-  ): Promise<Set<string>> {
-    const redundant = new Set<string>();
-    const createsByModelId = new Map<
-      string,
-      {
-        clientTxIds: Set<string>;
-        hasLegacyCreate: boolean;
-      }
-    >();
-
-    for (const action of actions) {
-      if (action.action !== "I") {
-        continue;
-      }
-
-      const entry = createsByModelId.get(action.modelId) ?? {
-        clientTxIds: new Set<string>(),
-        hasLegacyCreate: false,
-      };
-      if (typeof action.clientTxId === "string") {
-        entry.clientTxIds.add(action.clientTxId);
-      } else {
-        entry.hasLegacyCreate = true;
-      }
-      createsByModelId.set(action.modelId, entry);
-    }
-
-    if (createsByModelId.size === 0) {
-      return redundant;
-    }
-    const outbox = await this.storage.getOutbox();
-
-    for (const tx of outbox) {
-      if (tx.action !== "I") {
-        continue;
-      }
-
-      const entry = createsByModelId.get(tx.modelId);
-      if (!entry) {
-        continue;
-      }
-      if (!entry.hasLegacyCreate && !entry.clientTxIds.has(tx.clientTxId)) {
-        continue;
-      }
-
-      await this.storage.removeFromOutbox(tx.clientTxId);
-      redundant.add(tx.clientTxId);
-    }
-    return redundant;
   }
 
   private async handleCoverageActions(actions: SyncAction[]): Promise<void> {
