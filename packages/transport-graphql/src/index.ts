@@ -1,5 +1,3 @@
-// biome-ignore-all lint/performance/noBarrelFile: package entry point
-
 export { createGraphQLTransport, GraphQLTransportAdapter } from "./adapter.js";
 export { createBatchLoadStream, createBootstrapStream } from "./bootstrap.js";
 export { fetchAllDeltas, fetchDeltas } from "./deltas.js";

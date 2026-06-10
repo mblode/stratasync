@@ -3,8 +3,6 @@
  * @stratasync/y-doc - Yjs collaborative editing integration.
  */
 
-// biome-ignore-all lint/performance/noBarrelFile: This is the package's main entry point
-
 export { YjsDocumentManager } from "./document-manager.js";
 export {
   clearPersistedYjsDocuments,

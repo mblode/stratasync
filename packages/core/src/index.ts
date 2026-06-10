@@ -1,5 +1,3 @@
-// biome-ignore-all lint/performance/noBarrelFile: This is the package's main entry point
-
 export { Model } from "./model/base-model.js";
 export {
   makeObservableProperty,

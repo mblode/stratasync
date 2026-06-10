@@ -1,6 +1,5 @@
 /* oxlint-disable no-import-node-test -- uses Node test runner */
 import assert from "node:assert/strict";
-import test from "node:test";
 
 import {
   applyDeltas,

@@ -1,4 +1,3 @@
-// biome-ignore lint/performance/noNamespaceImport: yjs conventionally uses namespace access (Y.Doc, etc.)
 import * as Y from "yjs";
 
 import { YjsDocumentManager } from "../src/document-manager";

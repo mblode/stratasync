@@ -1,7 +1,6 @@
 /* oxlint-disable no-import-node-test -- uses Node test runner */
 /* oxlint-disable max-classes-per-file */
 import assert from "node:assert/strict";
-import test from "node:test";
 
 import {
   BackReference,

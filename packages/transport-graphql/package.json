@@ -22,18 +22,15 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "dev": "tsc --watch -p tsconfig.build.json",
     "check-types": "tsc --noEmit",
-    "test": "vitest --globals"
+    "test": "vitest run"
   },
   "dependencies": {
     "@stratasync/client": "*",
     "@stratasync/core": "*",
     "@stratasync/y-doc": "*"
   },
-  "devDependencies": {
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
-  }
+  "devDependencies": {}
 }

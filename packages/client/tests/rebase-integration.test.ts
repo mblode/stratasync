@@ -280,7 +280,6 @@ class TestTransport implements TransportAdapter {
   ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown> {
     const rows = this.fullRows;
     const metadata = this.fullMetadata;
-    // biome-ignore lint/suspicious/useAwait: async generator required for return type
     return (async function* generate() {
       for (const row of rows) {
         yield row;

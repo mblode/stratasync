@@ -270,7 +270,6 @@ export class DemoTransport implements TransportAdapter {
     })();
   }
 
-  // biome-ignore lint: required by TransportAdapter interface
   async *batchLoad(
     _options: BatchLoadOptions
   ): AsyncGenerator<ModelRow, void, unknown> {

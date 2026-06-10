@@ -45,7 +45,6 @@ export class CachedPromise<T> implements PromiseLike<T> {
     return this.promise;
   }
 
-  // biome-ignore lint/suspicious/noThenProperty: CachedPromise is intentionally thenable.
   // oxlint-disable-next-line no-thenable
   then<TResult1 = T, TResult2 = never>(
     onfulfilled?:

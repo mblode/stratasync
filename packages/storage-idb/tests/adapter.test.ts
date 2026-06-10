@@ -1,7 +1,6 @@
 /* oxlint-disable no-import-node-test -- uses Node test runner */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { test } from "node:test";
 
 import { ModelRegistry } from "@stratasync/core";
 import type { SchemaDefinition } from "@stratasync/core";

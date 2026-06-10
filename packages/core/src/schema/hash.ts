@@ -13,7 +13,6 @@ const FNV_PRIME_64 = 0x1_00_00_00_01_b3n;
 const stableHash64 = (str: string): bigint => {
   let hash = FNV_OFFSET_BASIS_64;
   for (const char of str) {
-    // biome-ignore lint/suspicious/noBitwiseOperators: FNV-1a requires XOR mixing.
     // oxlint-disable-next-line no-bitwise
     const mixed = hash ^ BigInt(char.codePointAt(0) ?? 0);
     hash = BigInt.asUintN(64, mixed * FNV_PRIME_64);

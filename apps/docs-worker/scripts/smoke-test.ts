@@ -22,7 +22,6 @@ globalThis.fetch = (input, init) => {
 
 const assertHost = (request: Request, expectedHost: string) => {
   const { hostname } = new URL(request.url);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
   assert.equal(hostname, expectedHost);
 };
 
@@ -30,10 +29,8 @@ const run = async () => {
   try {
     requests.length = 0;
     await worker.fetch(new Request("https://stratasync.dev/docs"), env);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.DOCS_URL);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
 
     requests.length = 0;
@@ -45,15 +42,12 @@ const run = async () => {
       }),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.DOCS_URL);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
 
     requests.length = 0;
     await worker.fetch(new Request("https://stratasync.dev/"), env);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.LANDING_URL);
 
@@ -62,7 +56,6 @@ const run = async () => {
       new Request("https://stratasync.dev/.well-known/test"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], "stratasync.dev");
 
@@ -72,7 +65,6 @@ const run = async () => {
       new Request("https://stratasync.dev/.well-known/api-catalog"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.LANDING_URL);
 
@@ -81,7 +73,6 @@ const run = async () => {
       new Request("https://stratasync.dev/.well-known/agent-skills/index.json"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.LANDING_URL);
 
@@ -91,9 +82,7 @@ const run = async () => {
       new Request("https://docs.stratasync.dev/quick-start?ref=test"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(docsSubdomainRes.status, 301);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(
       docsSubdomainRes.headers.get("Location"),
       "https://stratasync.dev/docs/quick-start?ref=test"
@@ -105,9 +94,7 @@ const run = async () => {
       new Request("https://docs.stratasync.dev/"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(docsRootRes.status, 301);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(
       docsRootRes.headers.get("Location"),
       "https://stratasync.dev/docs"
@@ -119,14 +106,11 @@ const run = async () => {
       new Request("https://stratasync.dev/manifesto?ref=test"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(leakedDocsPathRes.status, 308);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(
       leakedDocsPathRes.headers.get("Location"),
       "https://stratasync.dev/docs/manifesto?ref=test"
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 0);
 
     // Root requests from inside docs normalize to the docs home instead of landing page
@@ -139,14 +123,11 @@ const run = async () => {
       }),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(docsHomeRes.status, 308);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(
       docsHomeRes.headers.get("Location"),
       "https://stratasync.dev/docs"
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(requests.length, 0);
 
     // Upstream redirects that leak the root path are rewritten back under /docs
@@ -161,9 +142,7 @@ const run = async () => {
       new Request("https://stratasync.dev/docs/manifesto"),
       env
     );
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(docsRedirectRes.status, 307);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.equal(
       docsRedirectRes.headers.get("Location"),
       "https://stratasync.dev/docs/values"
@@ -184,15 +163,10 @@ const run = async () => {
       env
     );
     const html = await docsHtmlRes.text();
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.match(html, /href="\/docs"/);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.match(html, /href="\/docs\/manifesto"/);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.match(html, /"href":"\/docs\/values"/);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.match(html, /"contentUrl":"\/docs\/manifesto\.mdx"/);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This is a smoke test script, not a test framework
     assert.match(
       html,
       /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/manifesto">/

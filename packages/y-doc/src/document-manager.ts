@@ -10,7 +10,6 @@
  * - Generate derived content from Y.Doc
  */
 
-// biome-ignore lint/performance/noNamespaceImport: yjs conventionally uses namespace access (Y.Doc, Y.Text, etc.)
 import * as Y from "yjs";
 
 import {

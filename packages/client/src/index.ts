@@ -1,4 +1,3 @@
-// biome-ignore-all lint/performance/noBarrelFile: public API
 export { createSyncClient } from "./client.js";
 export type {
   BatchOperation,
