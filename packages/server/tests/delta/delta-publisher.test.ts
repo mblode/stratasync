@@ -1,12 +1,9 @@
 import {
-  createCompositeDeltaPublisher,
-  createDeltaSubscriber,
-  createInMemoryDeltaBus,
-  createInMemoryDeltaPublisher,
-  createInMemoryDeltaSubscriber,
+  createDeltaBus,
+  createDeltaPublisher,
+  createRedisDeltaTransport,
   safeJsonStringify,
 } from "../../src/delta/delta-publisher.js";
-import type { DeltaPublisherLike } from "../../src/delta/delta-publisher.js";
 import type { SyncActionOutput } from "../../src/types.js";
 
 const makeSyncAction = (
@@ -21,6 +18,13 @@ const makeSyncAction = (
   ...overrides,
 });
 
+const makeLogger = () => ({
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+});
+
 // ---------------------------------------------------------------------------
 // safeJsonStringify
 // ---------------------------------------------------------------------------
@@ -31,18 +35,17 @@ describe(safeJsonStringify, () => {
   });
 
   it("converts bigints to strings", () => {
-    const result = safeJsonStringify({ id: 42n });
-    expect(result).toBe('{"id":"42"}');
+    expect(safeJsonStringify({ id: 42n })).toBe('{"id":"42"}');
   });
 
   it("handles nested bigints", () => {
-    const result = safeJsonStringify({ outer: { inner: 100n } });
-    expect(result).toBe('{"outer":{"inner":"100"}}');
+    expect(safeJsonStringify({ outer: { inner: 100n } })).toBe(
+      '{"outer":{"inner":"100"}}'
+    );
   });
 
   it("handles arrays with bigints", () => {
-    const result = safeJsonStringify([1n, 2n]);
-    expect(result).toBe('["1","2"]');
+    expect(safeJsonStringify([1n, 2n])).toBe('["1","2"]');
   });
 
   it("handles null and undefined", () => {
@@ -52,237 +55,325 @@ describe(safeJsonStringify, () => {
 });
 
 // ---------------------------------------------------------------------------
-// InMemoryDeltaBus + Publisher + Subscriber
+// DeltaBus
 // ---------------------------------------------------------------------------
 
-describe("InMemoryDeltaBus", () => {
-  let bus: ReturnType<typeof createInMemoryDeltaBus>;
-  let publisher: ReturnType<typeof createInMemoryDeltaPublisher>;
-  let subscriber: ReturnType<typeof createInMemoryDeltaSubscriber>;
-
-  beforeEach(() => {
-    bus = createInMemoryDeltaBus();
-    publisher = createInMemoryDeltaPublisher(bus);
-    subscriber = createInMemoryDeltaSubscriber(bus);
-  });
-
+describe("DeltaBus", () => {
   it("delivers published actions to subscribers", () => {
+    const bus = createDeltaBus();
     const received: { action: SyncActionOutput; groups: string[] }[] = [];
-    subscriber.onDelta((action, groups) => {
+    bus.onDelta((action, groups) => {
       received.push({ action, groups });
     });
 
     const action = makeSyncAction();
-    publisher.publish(action, ["g1", "g2"]);
+    bus.publish(action, ["g1", "g2"]);
 
     expect(received).toHaveLength(1);
-    const [first] = received;
-    expect(first).toBeDefined();
-    expect(first?.action).toBe(action);
-    expect(first?.groups).toEqual(["g1", "g2"]);
+    expect(received[0]?.action).toBe(action);
+    expect(received[0]?.groups).toEqual(["g1", "g2"]);
   });
 
   it("delivers to multiple subscribers", () => {
+    const bus = createDeltaBus();
     const received1: SyncActionOutput[] = [];
     const received2: SyncActionOutput[] = [];
 
-    subscriber.onDelta((action) => received1.push(action));
-    subscriber.onDelta((action) => received2.push(action));
+    bus.onDelta((action) => received1.push(action));
+    bus.onDelta((action) => received2.push(action));
 
-    const action = makeSyncAction();
-    publisher.publish(action, ["g1"]);
+    bus.publish(makeSyncAction(), ["g1"]);
 
     expect(received1).toHaveLength(1);
     expect(received2).toHaveLength(1);
   });
 
   it("unsubscribe stops delivery", () => {
+    const bus = createDeltaBus();
     const received: SyncActionOutput[] = [];
-    const unsub = subscriber.onDelta((action) => received.push(action));
+    const unsub = bus.onDelta((action) => received.push(action));
 
-    publisher.publish(makeSyncAction(), ["g1"]);
+    bus.publish(makeSyncAction(), ["g1"]);
     expect(received).toHaveLength(1);
 
     unsub();
-
-    publisher.publish(makeSyncAction({ syncId: "2" }), ["g1"]);
+    bus.publish(makeSyncAction({ syncId: "2" }), ["g1"]);
     expect(received).toHaveLength(1);
   });
 
-  it("continues delivery when a callback throws", () => {
+  it("continues delivery and warns when a callback throws", () => {
+    const logger = makeLogger();
+    const bus = createDeltaBus(logger);
     const received: SyncActionOutput[] = [];
 
-    subscriber.onDelta(() => {
+    bus.onDelta(() => {
       throw new Error("callback error");
     });
-    subscriber.onDelta((action) => received.push(action));
+    bus.onDelta((action) => received.push(action));
 
-    publisher.publish(makeSyncAction(), ["g1"]);
+    bus.publish(makeSyncAction(), ["g1"]);
     expect(received).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledOnce();
   });
 
-  it("publishMany publishes all actions", async () => {
-    const received: SyncActionOutput[] = [];
-    subscriber.onDelta((action) => received.push(action));
-
-    const actions = [
-      makeSyncAction({ syncId: "1" }),
-      makeSyncAction({ syncId: "2" }),
-      makeSyncAction({ syncId: "3" }),
-    ];
-
-    await publisher.publishMany(actions, ["g1"]);
-    expect(received).toHaveLength(3);
-    expect(received.map((r) => r.syncId)).toEqual(["1", "2", "3"]);
-  });
-
-  it("subscriber start/stop are noops for in-memory", async () => {
-    // Should not throw
-    await subscriber.start();
-    await subscriber.stop();
+  it("start/stop are noops", async () => {
+    const bus = createDeltaBus();
+    await bus.start();
+    await bus.stop();
   });
 });
 
 // ---------------------------------------------------------------------------
-// CompositeDeltaPublisher
+// createDeltaPublisher (local-first composition)
 // ---------------------------------------------------------------------------
 
-describe("CompositeDeltaPublisher", () => {
-  let mockLogger: {
-    debug: ReturnType<typeof vi.fn>;
-    error: ReturnType<typeof vi.fn>;
-    info: ReturnType<typeof vi.fn>;
-    warn: ReturnType<typeof vi.fn>;
-  };
+describe(createDeltaPublisher, () => {
+  it("delivers to the local bus when no redis is configured", async () => {
+    const bus = createDeltaBus();
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
 
-  beforeEach(() => {
-    mockLogger = {
-      debug: vi.fn(),
-      error: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-    };
+    const publisher = createDeltaPublisher(bus);
+    await publisher.publish(makeSyncAction(), ["g1"]);
+
+    expect(received).toHaveLength(1);
   });
 
-  const createMockPublisher = (
-    shouldFail = false
-  ): DeltaPublisherLike & {
-    calls: { action: SyncActionOutput; groups: string[] }[];
-  } => {
-    const calls: { action: SyncActionOutput; groups: string[] }[] = [];
-    return {
-      calls,
-      publish(action: SyncActionOutput, groups: string[]) {
-        if (shouldFail) {
-          throw new Error("publish failed");
-        }
-        calls.push({ action, groups });
-        return Promise.resolve();
-      },
-      async publishMany(actions: SyncActionOutput[], groups: string[]) {
-        for (const action of actions) {
-          await this.publish(action, groups);
-        }
-      },
-    };
-  };
+  it("publishMany publishes all actions to the bus", async () => {
+    const bus = createDeltaBus();
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
 
-  it("publishes to all backends", async () => {
-    const pub1 = createMockPublisher();
-    const pub2 = createMockPublisher();
-    const composite = createCompositeDeltaPublisher([pub1, pub2], mockLogger);
-
-    const action = makeSyncAction();
-    await composite.publish(action, ["g1"]);
-
-    expect(pub1.calls).toHaveLength(1);
-    expect(pub2.calls).toHaveLength(1);
-  });
-
-  it("continues publishing when one backend fails", async () => {
-    const failing = createMockPublisher(true);
-    const working = createMockPublisher();
-    const composite = createCompositeDeltaPublisher(
-      [failing, working],
-      mockLogger
+    const publisher = createDeltaPublisher(bus);
+    await publisher.publishMany(
+      [
+        makeSyncAction({ syncId: "1" }),
+        makeSyncAction({ syncId: "2" }),
+        makeSyncAction({ syncId: "3" }),
+      ],
+      ["g1"]
     );
 
-    const action = makeSyncAction();
-    await composite.publish(action, ["g1"]);
-
-    expect(working.calls).toHaveLength(1);
+    expect(received.map((r) => r.syncId)).toEqual(["1", "2", "3"]);
   });
 
-  it("logs a warning when one backend fails", async () => {
-    const failing = createMockPublisher(true);
-    const working = createMockPublisher();
-    const composite = createCompositeDeltaPublisher(
-      [failing, working],
-      mockLogger
-    );
+  it("publishes to both the bus and redis", async () => {
+    const redisPublish = vi.fn().mockResolvedValue();
+    const redis = { publish: redisPublish } as never;
+    const bus = createDeltaBus();
+    const transport = createRedisDeltaTransport(redis, bus, "source-1");
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
 
-    await composite.publish(makeSyncAction(), ["g1"]);
+    const publisher = createDeltaPublisher(bus, transport);
+    await publisher.publish(makeSyncAction(), ["g1"]);
 
-    expect(mockLogger.warn).toHaveBeenCalledOnce();
-    expect(mockLogger.warn.mock.calls).toHaveLength(1);
-    const [warnCall] = mockLogger.warn.mock.calls;
-    expect(warnCall).toBeDefined();
-    expect(warnCall?.[0]).toMatchObject({
+    expect(received).toHaveLength(1);
+    expect(redisPublish).toHaveBeenCalledOnce();
+  });
+
+  it("still delivers locally and only warns when redis publish fails", async () => {
+    const logger = makeLogger();
+    const redis = {
+      publish: vi.fn().mockRejectedValue(new Error("redis down")),
+    } as never;
+    const bus = createDeltaBus();
+    const transport = createRedisDeltaTransport(redis, bus, "source-1", logger);
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
+
+    const publisher = createDeltaPublisher(bus, transport, logger);
+    await publisher.publish(makeSyncAction(), ["g1"]);
+
+    expect(received).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledOnce();
+    expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({
       event: "sync.delta.publish_partial_failure",
       failureCount: 1,
     });
   });
 
-  it("throws when ALL backends fail", async () => {
-    const failing1 = createMockPublisher(true);
-    const failing2 = createMockPublisher(true);
-    const composite = createCompositeDeltaPublisher(
-      [failing1, failing2],
-      mockLogger
+  it("throws when every backend fails", async () => {
+    const logger = makeLogger();
+    const redis = {
+      publish: vi.fn().mockRejectedValue(new Error("redis down")),
+    } as never;
+    // A bus whose single subscriber throws makes the local publish "fail" too.
+    const bus = createDeltaBus(logger);
+    const transport = createRedisDeltaTransport(redis, bus, "source-1", logger);
+    const publisher = createDeltaPublisher(bus, transport, logger);
+
+    // Local bus.publish swallows callback errors, so to force an all-fail we
+    // drop the bus and only use redis via a publisher with a throwing bus stub.
+    const throwingBus = {
+      publish: vi.fn(() => {
+        throw new Error("bus down");
+      }),
+    } as never;
+    const allFailPublisher = createDeltaPublisher(
+      throwingBus,
+      transport,
+      logger
     );
 
-    await expect(composite.publish(makeSyncAction(), ["g1"])).rejects.toThrow(
-      "publish failed"
-    );
-  });
+    await expect(
+      allFailPublisher.publish(makeSyncAction(), ["g1"])
+    ).rejects.toThrow();
 
-  it("publishMany calls publish for each action", async () => {
-    const pub = createMockPublisher();
-    const composite = createCompositeDeltaPublisher([pub], mockLogger);
-
-    const actions = [
-      makeSyncAction({ syncId: "1" }),
-      makeSyncAction({ syncId: "2" }),
-    ];
-
-    await composite.publishMany(actions, ["g1"]);
-    expect(pub.calls).toHaveLength(2);
+    // Sanity: the normal publisher with a real bus does not throw.
+    await publisher.publish(makeSyncAction(), ["g1"]);
   });
 });
 
-describe("DeltaSubscriber", () => {
-  it("does not duplicate Redis subscriptions when started twice", async () => {
-    const subscriberRedis = {
-      connect: vi.fn().mockResolvedValue(),
-      on: vi.fn(),
-      quit: vi.fn().mockResolvedValue(),
-      subscribe: vi.fn().mockResolvedValue(),
-      unsubscribe: vi.fn().mockResolvedValue(),
-    };
-    const redis = {
-      duplicate: vi.fn(() => subscriberRedis),
-    };
+// ---------------------------------------------------------------------------
+// RedisDeltaTransport
+// ---------------------------------------------------------------------------
 
-    const subscriber = createDeltaSubscriber(redis as never);
+const setupRedisTransport = () => {
+  let channelHandler: ((message: string) => void) | null = null;
+  const subscriberRedis = {
+    connect: vi.fn().mockResolvedValue(),
+    on: vi.fn(),
+    quit: vi.fn().mockResolvedValue(),
+    subscribe: vi.fn((_channel: string, handler: (m: string) => void) => {
+      channelHandler = handler;
+      return Promise.resolve();
+    }),
+    unsubscribe: vi.fn().mockResolvedValue(),
+  };
+  const redis = {
+    duplicate: vi.fn(() => subscriberRedis),
+    publish: vi.fn().mockResolvedValue(),
+  };
+  return {
+    emit: (message: string) => channelHandler?.(message),
+    redis,
+    subscriberRedis,
+  };
+};
 
-    await subscriber.start();
-    await subscriber.start();
-    await subscriber.stop();
+const makeRedisMessage = (sourceId?: string, syncId = "5") =>
+  JSON.stringify({
+    action: {
+      action: "I",
+      createdAt: "2024-06-15T12:00:00.000Z",
+      data: { title: "Hi" },
+      modelId: "task-1",
+      modelName: "Task",
+      syncId,
+    },
+    groups: ["g1"],
+    ...(sourceId ? { sourceId } : {}),
+  });
+
+describe("RedisDeltaTransport", () => {
+  const setup = setupRedisTransport;
+
+  it("does not duplicate subscriptions when started twice", async () => {
+    const { redis, subscriberRedis } = setup();
+    const bus = createDeltaBus();
+    const transport = createRedisDeltaTransport(
+      redis as never,
+      bus,
+      "source-1"
+    );
+
+    await transport.start();
+    await transport.start();
+    await transport.stop();
 
     expect(redis.duplicate).toHaveBeenCalledOnce();
     expect(subscriberRedis.connect).toHaveBeenCalledOnce();
     expect(subscriberRedis.subscribe).toHaveBeenCalledOnce();
     expect(subscriberRedis.unsubscribe).toHaveBeenCalledOnce();
     expect(subscriberRedis.quit).toHaveBeenCalledOnce();
+  });
+
+  it("relays inbound deltas into the local bus", async () => {
+    const { redis, emit } = setup();
+    const bus = createDeltaBus();
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
+    const transport = createRedisDeltaTransport(
+      redis as never,
+      bus,
+      "source-1"
+    );
+
+    await transport.start();
+    emit(makeRedisMessage("other-source", "9"));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.syncId).toBe("9");
+  });
+
+  it("suppresses its own loopback messages", async () => {
+    const { redis, emit } = setup();
+    const bus = createDeltaBus();
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
+    const transport = createRedisDeltaTransport(
+      redis as never,
+      bus,
+      "source-1"
+    );
+
+    await transport.start();
+    emit(makeRedisMessage("source-1"));
+
+    expect(received).toHaveLength(0);
+  });
+
+  it("warns and drops malformed redis messages", async () => {
+    const logger = makeLogger();
+    const { redis, emit } = setup();
+    const bus = createDeltaBus();
+    const received: SyncActionOutput[] = [];
+    bus.onDelta((action) => received.push(action));
+    const transport = createRedisDeltaTransport(
+      redis as never,
+      bus,
+      "source-1",
+      logger
+    );
+
+    await transport.start();
+    emit("not json {");
+
+    expect(received).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("retries the bus relay once then errors when it keeps failing", async () => {
+    const logger = makeLogger();
+    const { redis, emit } = setup();
+    const throwingBus = {
+      onDelta: vi.fn(() => () => {
+        /* noop */
+      }),
+      publish: vi.fn(() => {
+        throw new Error("bus down");
+      }),
+      start: vi.fn().mockResolvedValue(),
+      stop: vi.fn().mockResolvedValue(),
+    } as never;
+    const transport = createRedisDeltaTransport(
+      redis as never,
+      throwingBus,
+      "source-1",
+      logger
+    );
+
+    await transport.start();
+    emit(makeRedisMessage("other-source"));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 1 }),
+      "Retrying relayed delta after publish failure"
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 2 }),
+      "Failed to relay delta"
+    );
   });
 });

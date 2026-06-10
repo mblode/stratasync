@@ -83,12 +83,11 @@ export type {
   DeltaSubscriberLike,
 } from "./delta/delta-publisher.js";
 export {
-  createCompositeDeltaPublisher,
+  createDeltaBus,
   createDeltaPublisher,
-  createDeltaSubscriber,
-  createInMemoryDeltaBus,
-  createInMemoryDeltaPublisher,
-  createInMemoryDeltaSubscriber,
+  createRedisDeltaTransport,
+  DeltaBus,
+  RedisDeltaTransport,
   safeJsonStringify,
 } from "./delta/delta-publisher.js";
 

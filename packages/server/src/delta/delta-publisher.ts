@@ -56,10 +56,27 @@ const parseDeltaMessage = (
   return parsed;
 };
 
+const normalizeError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+const formatError = (error: unknown) => {
+  const err = normalizeError(error);
+  return {
+    message: err.message,
+    name: err.name,
+    stack: err.stack,
+  };
+};
+
 export interface DeltaPublisherLike {
   publish(action: SyncActionOutput, groups: string[]): Promise<void>;
   publishMany(actions: SyncActionOutput[], groups: string[]): Promise<void>;
 }
+
+export type DeltaSubscriberCallback = (
+  action: SyncActionOutput,
+  groups: string[]
+) => void;
 
 export interface DeltaSubscriberLike {
   start(): Promise<void>;
@@ -68,15 +85,76 @@ export interface DeltaSubscriberLike {
 }
 
 /**
- * Publisher for broadcasting sync deltas via Redis pub/sub
+ * In-process fan-out of sync deltas. The bus is both the local publisher
+ * (publish) and the local subscriber (start/stop/onDelta), so a single instance
+ * couples the mutate path to all live WebSocket sessions in this process.
  */
-export class DeltaPublisher implements DeltaPublisherLike {
-  private readonly redis: RedisClient;
-  private readonly sourceId?: string;
+export class DeltaBus implements DeltaSubscriberLike {
+  private readonly callbacks = new Set<DeltaSubscriberCallback>();
+  private readonly logger: SyncLogger;
 
-  constructor(redis: RedisClient, sourceId?: string) {
+  constructor(logger: SyncLogger = noopLogger) {
+    this.logger = logger;
+  }
+
+  publish(action: SyncActionOutput, groups: string[]): void {
+    for (const callback of this.callbacks) {
+      try {
+        // oxlint-disable-next-line prefer-await-to-callbacks -- subscriber fan-out
+        callback(action, groups);
+      } catch (error) {
+        this.logger.warn(
+          { error: formatError(error) },
+          "Delta subscriber callback threw"
+        );
+      }
+    }
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- DeltaSubscriberLike interface
+  start(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- DeltaSubscriberLike interface
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  // oxlint-disable-next-line prefer-await-to-callbacks -- subscription registration
+  onDelta(callback: DeltaSubscriberCallback): () => void {
+    this.callbacks.add(callback);
+    return () => {
+      this.callbacks.delete(callback);
+    };
+  }
+}
+
+/**
+ * Redis pub/sub transport. Owns the publisher, the duplicated subscriber
+ * connection (with reconnect/resubscribe), sourceId loopback suppression, and
+ * the relay-with-retry that fans redis-received deltas back into the local bus.
+ */
+export class RedisDeltaTransport implements DeltaPublisherLike {
+  private readonly redis: RedisClient;
+  private readonly bus: DeltaBus;
+  private readonly logger: SyncLogger;
+  private readonly sourceId: string;
+
+  private subscriberRedis: RedisClient | null = null;
+  private subscribePromise: Promise<void> | null = null;
+  private subscribed = false;
+
+  constructor(
+    redis: RedisClient,
+    bus: DeltaBus,
+    sourceId: string,
+    logger: SyncLogger = noopLogger
+  ) {
     this.redis = redis;
+    this.bus = bus;
     this.sourceId = sourceId;
+    this.logger = logger;
   }
 
   async publish(action: SyncActionOutput, groups: string[]): Promise<void> {
@@ -96,33 +174,48 @@ export class DeltaPublisher implements DeltaPublisherLike {
       await this.publish(action, groups);
     }
   }
-}
 
-export type DeltaSubscriberCallback = (
-  action: SyncActionOutput,
-  groups: string[]
-) => void;
+  private handleRedisMessage(message: string): void {
+    let delta: ReturnType<typeof parseDeltaMessage>;
+    try {
+      delta = parseDeltaMessage(JSON.parse(message));
+    } catch (error) {
+      this.logger.warn(
+        { error: formatError(error) },
+        "Dropped malformed redis delta message"
+      );
+      return;
+    }
 
-/**
- * Subscriber for receiving sync deltas via Redis pub/sub
- */
-export class DeltaSubscriber implements DeltaSubscriberLike {
-  private readonly callbacks = new Set<DeltaSubscriberCallback>();
-  private readonly logger: SyncLogger;
-  private readonly redis: RedisClient;
-  private subscribePromise: Promise<void> | null = null;
-  private subscribed = false;
-  private subscriberRedis: RedisClient | null = null;
-  private readonly sourceId?: string;
+    // sourceId loopback suppression: drop messages this process published.
+    if (delta.sourceId === this.sourceId) {
+      return;
+    }
 
-  constructor(
-    redis: RedisClient,
-    sourceId?: string,
-    logger: SyncLogger = noopLogger
-  ) {
-    this.redis = redis;
-    this.sourceId = sourceId;
-    this.logger = logger;
+    this.relayWithRetry(delta.action, delta.groups);
+  }
+
+  private relayWithRetry(action: SyncActionOutput, groups: string[]): void {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        this.bus.publish(action, groups);
+        return;
+      } catch (error) {
+        const logContext = {
+          attempt,
+          err: formatError(error),
+          syncId: action.syncId,
+        };
+        if (attempt === 1) {
+          this.logger.warn(
+            logContext,
+            "Retrying relayed delta after publish failure"
+          );
+        } else {
+          this.logger.error(logContext, "Failed to relay delta");
+        }
+      }
+    }
   }
 
   private async subscribeToChannel(): Promise<void> {
@@ -138,15 +231,7 @@ export class DeltaSubscriber implements DeltaSubscriberLike {
     this.subscribePromise = (async () => {
       try {
         await this.subscriberRedis?.subscribe(SYNC_DELTA_CHANNEL, (message) => {
-          try {
-            const delta = parseDeltaMessage(JSON.parse(message));
-            if (this.sourceId && delta.sourceId === this.sourceId) {
-              return;
-            }
-            this.notifyCallbacks(delta.action, delta.groups);
-          } catch {
-            // Invalid message, ignore
-          }
+          this.handleRedisMessage(message);
         });
         this.subscribed = true;
       } finally {
@@ -177,7 +262,7 @@ export class DeltaSubscriber implements DeltaSubscriberLike {
             await this.subscribeToChannel();
           } catch (error) {
             this.logger.error(
-              { error },
+              { error: formatError(error) },
               "Failed to resubscribe to delta channel"
             );
           }
@@ -201,117 +286,21 @@ export class DeltaSubscriber implements DeltaSubscriberLike {
       this.subscriberRedis = null;
     }
   }
-
-  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-  onDelta(callback: DeltaSubscriberCallback): () => void {
-    this.callbacks.add(callback);
-    return () => {
-      this.callbacks.delete(callback);
-    };
-  }
-
-  private notifyCallbacks(action: SyncActionOutput, groups: string[]): void {
-    for (const callback of this.callbacks) {
-      try {
-        // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-        callback(action, groups);
-      } catch {
-        // Callback error, continue
-      }
-    }
-  }
 }
 
-class InMemoryDeltaBus {
-  private readonly callbacks = new Set<DeltaSubscriberCallback>();
-
-  publish(action: SyncActionOutput, groups: string[]): void {
-    for (const callback of this.callbacks) {
-      try {
-        // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-        callback(action, groups);
-      } catch {
-        // Callback error, continue
-      }
-    }
-  }
-
-  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-  onDelta(callback: DeltaSubscriberCallback): () => void {
-    this.callbacks.add(callback);
-    return () => {
-      this.callbacks.delete(callback);
-    };
-  }
-}
-
-class InMemoryDeltaPublisher implements DeltaPublisherLike {
-  private readonly bus: InMemoryDeltaBus;
-
-  constructor(bus: InMemoryDeltaBus) {
-    this.bus = bus;
-  }
-
-  publish(action: SyncActionOutput, groups: string[]): Promise<void> {
-    this.bus.publish(action, groups);
-    return Promise.resolve();
-  }
-
-  async publishMany(
-    actions: SyncActionOutput[],
-    groups: string[]
-  ): Promise<void> {
-    for (const action of actions) {
-      await this.publish(action, groups);
-    }
-  }
-}
-
-class InMemoryDeltaSubscriber implements DeltaSubscriberLike {
-  private readonly bus: InMemoryDeltaBus;
-
-  constructor(bus: InMemoryDeltaBus) {
-    this.bus = bus;
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- required by DeltaSubscriberLike interface
-  start(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- required by DeltaSubscriberLike interface
-  stop(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-  onDelta(callback: DeltaSubscriberCallback): () => void {
-    return this.bus.onDelta(callback);
-  }
-}
-
-const normalizeError = (error: unknown): Error => {
-  if (error instanceof Error) {
-    return error;
-  }
-  return new Error(String(error));
-};
-
-const formatError = (error: unknown) => {
-  const err = normalizeError(error);
-  return {
-    message: err.message,
-    name: err.name,
-    stack: err.stack,
-  };
-};
-
-class CompositeDeltaPublisher implements DeltaPublisherLike {
-  private readonly publishers: DeltaPublisherLike[];
+/**
+ * Composes local-first delta delivery. The in-process bus is always published
+ * to (so live sessions in this process see the delta immediately); redis (if
+ * present) is best-effort. A publish throws only when every backend fails.
+ */
+class DeltaPublisher implements DeltaPublisherLike {
+  private readonly bus: DeltaBus;
+  private readonly redis?: RedisDeltaTransport;
   private readonly logger: SyncLogger;
 
-  constructor(publishers: DeltaPublisherLike[], logger: SyncLogger) {
-    this.publishers = publishers;
+  constructor(bus: DeltaBus, logger: SyncLogger, redis?: RedisDeltaTransport) {
+    this.bus = bus;
+    this.redis = redis;
     this.logger = logger;
   }
 
@@ -319,9 +308,17 @@ class CompositeDeltaPublisher implements DeltaPublisherLike {
     let successCount = 0;
     const errors: unknown[] = [];
 
-    for (const publisher of this.publishers) {
+    // Local-first: always deliver to the in-process bus.
+    try {
+      this.bus.publish(action, groups);
+      successCount += 1;
+    } catch (error) {
+      errors.push(error);
+    }
+
+    if (this.redis) {
       try {
-        await publisher.publish(action, groups);
+        await this.redis.publish(action, groups);
         successCount += 1;
       } catch (error) {
         errors.push(error);
@@ -335,7 +332,7 @@ class CompositeDeltaPublisher implements DeltaPublisherLike {
           event: "sync.delta.publish_partial_failure",
           failureCount: errors.length,
         },
-        "Delta publish failed for one or more publishers"
+        "Delta publish failed for one or more backends"
       );
     }
 
@@ -354,29 +351,23 @@ class CompositeDeltaPublisher implements DeltaPublisherLike {
   }
 }
 
+/**
+ * Builds the composed delta publisher. When `redis` is provided, deltas fan out
+ * both to the local bus and to redis pub/sub; the caller is responsible for
+ * `redis.start()`-ing the transport so it relays inbound deltas into the bus.
+ */
 export const createDeltaPublisher = (
-  redis: RedisClient,
-  sourceId?: string
-): DeltaPublisher => new DeltaPublisher(redis, sourceId);
-
-export const createDeltaSubscriber = (
-  redis: RedisClient,
-  sourceId?: string,
+  bus: DeltaBus,
+  redis?: RedisDeltaTransport,
   logger: SyncLogger = noopLogger
-): DeltaSubscriber => new DeltaSubscriber(redis, sourceId, logger);
+): DeltaPublisherLike => new DeltaPublisher(bus, logger, redis);
 
-export const createInMemoryDeltaBus = (): InMemoryDeltaBus =>
-  new InMemoryDeltaBus();
+export const createDeltaBus = (logger: SyncLogger = noopLogger): DeltaBus =>
+  new DeltaBus(logger);
 
-export const createInMemoryDeltaPublisher = (
-  bus: InMemoryDeltaBus
-): DeltaPublisherLike => new InMemoryDeltaPublisher(bus);
-
-export const createInMemoryDeltaSubscriber = (
-  bus: InMemoryDeltaBus
-): DeltaSubscriberLike => new InMemoryDeltaSubscriber(bus);
-
-export const createCompositeDeltaPublisher = (
-  publishers: DeltaPublisherLike[],
+export const createRedisDeltaTransport = (
+  redis: RedisClient,
+  bus: DeltaBus,
+  sourceId: string,
   logger: SyncLogger = noopLogger
-): DeltaPublisherLike => new CompositeDeltaPublisher(publishers, logger);
+): RedisDeltaTransport => new RedisDeltaTransport(redis, bus, sourceId, logger);

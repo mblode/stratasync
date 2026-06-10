@@ -13,60 +13,18 @@ import { noopLogger } from "./config.js";
 import { SyncDao } from "./dao/sync-dao.js";
 import type {
   DeltaPublisherLike,
-  DeltaSubscriberLike,
+  RedisDeltaTransport,
 } from "./delta/delta-publisher.js";
 import {
-  createCompositeDeltaPublisher,
+  createDeltaBus,
   createDeltaPublisher,
-  createDeltaSubscriber,
-  createInMemoryDeltaBus,
-  createInMemoryDeltaPublisher,
-  createInMemoryDeltaSubscriber,
+  createRedisDeltaTransport,
 } from "./delta/delta-publisher.js";
 import { DeltaService } from "./delta/delta-service.js";
 import { createSyncAuthMiddleware } from "./fastify/middleware.js";
 import { registerSyncRoutes } from "./fastify/routes.js";
 import { MutateService } from "./mutate/mutate-service.js";
 import { registerSyncWebsocket } from "./websocket/sync-websocket.js";
-
-interface SyncModuleState {
-  deltaPublisher: DeltaPublisherLike | null;
-  deltaSubscriber: DeltaSubscriberLike | null;
-  redisSubscriber: DeltaSubscriberLike | null;
-}
-
-const relayDeltaWithRetry = async (
-  localPublisher: DeltaPublisherLike,
-  action: Parameters<DeltaPublisherLike["publish"]>[0],
-  groups: string[],
-  logger: SyncLogger
-): Promise<void> => {
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      await localPublisher.publish(action, groups);
-      return;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      const logContext = {
-        attempt,
-        err: lastError,
-        syncId: action.syncId,
-      };
-
-      if (attempt === 1) {
-        logger.warn(logContext, "Retrying relayed delta after publish failure");
-      } else {
-        logger.error(logContext, "Failed to relay delta");
-      }
-    }
-  }
-
-  if (lastError) {
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
-  }
-};
 
 export const createSyncServer = async (
   config: SyncServerConfig & { websocketHooks?: WebSocketHooks }
@@ -76,52 +34,31 @@ export const createSyncServer = async (
   // Create DAO
   const syncDao = new SyncDao(config.db, config.tables);
 
-  // Set up delta publisher chain
-  const localBus = createInMemoryDeltaBus();
-  const localPublisher = createInMemoryDeltaPublisher(localBus);
-  const localSubscriber = createInMemoryDeltaSubscriber(localBus);
+  // The in-process bus is the local subscriber the WebSocket listens on and the
+  // local-first publish target. Redis (if present) fans deltas across processes
+  // and relays inbound deltas back into the same bus.
+  const bus = createDeltaBus(logger);
 
-  const state: SyncModuleState = {
-    deltaPublisher: null,
-    deltaSubscriber: localSubscriber,
-    redisSubscriber: null,
-  };
-
-  const publishers: DeltaPublisherLike[] = [localPublisher];
-
+  let redisTransport: RedisDeltaTransport | undefined;
   if (config.redis) {
     const serverId = `sync-${randomUUID().slice(0, 8)}`;
-    const redisPublisher = createDeltaPublisher(config.redis, serverId);
-    const redisSubscriber = createDeltaSubscriber(
+    redisTransport = createRedisDeltaTransport(
       config.redis,
+      bus,
       serverId,
       logger
     );
-
-    await redisSubscriber.start();
-    state.redisSubscriber = redisSubscriber;
-
-    redisSubscriber.onDelta(async (action, groups) => {
-      try {
-        await relayDeltaWithRetry(localPublisher, action, groups, logger);
-      } catch (error) {
-        const formattedError =
-          error instanceof Error ? error : new Error(String(error));
-        logger.error(
-          { err: formattedError, syncId: action.syncId },
-          "Failed to relay delta"
-        );
-      }
-    });
-
-    publishers.push(redisPublisher);
+    await redisTransport.start();
     logger.debug({ serverId }, "Sync delta subscriber started");
   } else {
     logger.debug({}, "Sync delta bus running in-memory (no Redis)");
   }
 
-  const deltaPublisher = createCompositeDeltaPublisher(publishers, logger);
-  state.deltaPublisher = deltaPublisher;
+  const deltaPublisher: DeltaPublisherLike = createDeltaPublisher(
+    bus,
+    redisTransport,
+    logger
+  );
 
   // Create services
   const bootstrapService = new BootstrapService(
@@ -161,7 +98,7 @@ export const createSyncServer = async (
 
     registerSyncWebsocket(fastifyServer, {
       auth: config.auth,
-      deltaSubscriber: localSubscriber,
+      deltaSubscriber: bus,
       hooks: config.websocketHooks,
       logger,
       syncDao,
@@ -175,22 +112,18 @@ export const createSyncServer = async (
 
   // Shutdown
   const shutdown = async (): Promise<void> => {
-    if (state.redisSubscriber) {
-      await state.redisSubscriber.stop();
-      state.redisSubscriber = null;
+    if (redisTransport) {
+      await redisTransport.stop();
+      redisTransport = undefined;
     }
-    if (state.deltaSubscriber) {
-      await state.deltaSubscriber.stop();
-      state.deltaSubscriber = null;
-    }
-    state.deltaPublisher = null;
+    await bus.stop();
   };
 
   return {
     bootstrapService,
     deltaPublisher,
     deltaService,
-    deltaSubscriber: localSubscriber,
+    deltaSubscriber: bus,
     mutateService,
     registerRoutes,
     shutdown,
