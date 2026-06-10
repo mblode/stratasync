@@ -113,6 +113,15 @@ const createReplayAction = (id: bigint) => ({
   modelId: "task-1",
 });
 
+const createLiveAction = (syncId: string) => ({
+  action: "I",
+  createdAt: new Date("2024-06-15T12:00:00.000Z"),
+  data: {},
+  modelId: `task-${syncId}`,
+  modelName: "Task",
+  syncId,
+});
+
 const setup = (overrides?: {
   deltaSubscriber?: MockDeltaSubscriber;
   getSyncActions?: () => Promise<unknown[]>;
@@ -453,5 +462,144 @@ describe(registerSyncWebsocket, () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("stops the heartbeat timer on close (no timer leak)", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const harness = setup();
+      harness.socket.close();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      // No pings should fire after the socket is closed.
+      expect(harness.socket.pingCalls).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not leak the bus subscription when the socket closes mid-replay", async () => {
+    const deferred = createDeferred<unknown[]>();
+    const deltaSubscriber = new MockDeltaSubscriber();
+    const harness = setup({
+      deltaSubscriber,
+      getSyncActions: vi.fn().mockImplementation(() => deferred.promise),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          afterSyncId: "0",
+          token: "tok",
+          type: "subscribe",
+        })
+      )
+    );
+
+    // The subscription is installed before replay begins.
+    await waitForAssertion(() => {
+      expect(deltaSubscriber.callback).toBeTruthy();
+    });
+
+    // Socket disconnects while replay is still awaiting the DB.
+    harness.socket.close();
+    deferred.resolve([]);
+    await flush();
+
+    // close() must have torn the bus subscription down.
+    expect(deltaSubscriber.callback).toBeNull();
+    expect(
+      harness.socket.sent.some(
+        (message) => parseMessage(message).type === "subscribed"
+      )
+    ).toBeFalsy();
+  });
+
+  it("flushes buffered live deltas in ascending syncId order, deduped", async () => {
+    const deferred = createDeferred<unknown[]>();
+    const deltaSubscriber = new MockDeltaSubscriber();
+    const harness = setup({
+      deltaSubscriber,
+      getSyncActions: vi.fn().mockImplementation(() => deferred.promise),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          afterSyncId: "0",
+          token: "tok",
+          type: "subscribe",
+        })
+      )
+    );
+
+    await waitForAssertion(() => {
+      expect(deltaSubscriber.callback).toBeTruthy();
+    });
+
+    // Arrive out of order, with a duplicate syncId (first-wins).
+    deltaSubscriber.emit(createLiveAction("3"), []);
+    deltaSubscriber.emit(createLiveAction("1"), []);
+    deltaSubscriber.emit(createLiveAction("2"), []);
+    deltaSubscriber.emit(createLiveAction("2"), []);
+
+    deferred.resolve([]);
+
+    await waitForAssertion(() => {
+      expect(
+        harness.socket.sent.some(
+          (message) => parseMessage(message).type === "subscribed"
+        )
+      ).toBeTruthy();
+    });
+
+    const deltaSyncIds = harness.socket.sent
+      .map((message) => parseMessage(message))
+      .filter((message) => message.type === "delta")
+      .map((message) => (message.packet as { lastSyncId: string }).lastSyncId);
+
+    expect(deltaSyncIds).toEqual(["1", "2", "3"]);
+  });
+
+  it("pages replay in 1000-row batches", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_unused, index) =>
+      createReplayAction(BigInt(index + 1))
+    );
+    const getSyncActions = vi
+      .fn()
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([createReplayAction(1001n)]);
+
+    const harness = setup({ getSyncActions });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          afterSyncId: "0",
+          token: "tok",
+          type: "subscribe",
+        })
+      )
+    );
+
+    await waitForAssertion(() => {
+      expect(
+        harness.socket.sent.some(
+          (message) => parseMessage(message).type === "subscribed"
+        )
+      ).toBeTruthy();
+    });
+
+    // A full page (1000) triggers a second fetch; a short page stops paging.
+    expect(getSyncActions).toHaveBeenCalledTimes(2);
+    const deltaCount = harness.socket.sent.filter(
+      (message) => parseMessage(message).type === "delta"
+    ).length;
+    expect(deltaCount).toBe(1001);
   });
 });

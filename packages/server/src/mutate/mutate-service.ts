@@ -1,5 +1,3 @@
-import { eq, getTableColumns } from "drizzle-orm";
-
 import type { SyncLogger, SyncModelConfig } from "../config.js";
 import { noopLogger } from "../config.js";
 import type { RawSyncActionRow } from "../core/sync-action.js";
@@ -17,12 +15,8 @@ import type {
   TransactionResult,
 } from "../types.js";
 import { mapGraphQLAction } from "../types.js";
-import {
-  createModelHandler,
-  createStandardDelegate,
-  createCompositeDelegate,
-} from "./model-handlers.js";
-import type { ModelDef, MutationDelegate } from "./model-handlers.js";
+import { buildModelRegistry } from "./model-registry.js";
+import type { ModelHandler, ModelLookup } from "./model-registry.js";
 
 const MODEL_ID_GROUP_KEY = "__modelId__";
 
@@ -77,15 +71,6 @@ interface PreparedTransaction {
 }
 
 // ---------------------------------------------------------------------------
-// Model lookup (for resolving groupId from DB)
-// ---------------------------------------------------------------------------
-
-type ModelLookup = (
-  db: unknown,
-  id: string
-) => Promise<Record<string, unknown> | null>;
-
-// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -93,16 +78,7 @@ export class MutateService {
   private readonly dao: SyncDao;
   private readonly db: SyncDb;
   private readonly logger: SyncLogger;
-  private readonly modelHandlers: Map<
-    string,
-    (
-      db: unknown,
-      modelId: string,
-      payload: Record<string, unknown>,
-      action: ModelAction,
-      context?: SyncUserContext
-    ) => Promise<Record<string, unknown>>
-  >;
+  private readonly modelHandlers: Map<string, ModelHandler>;
   private readonly modelGroupKeys: Record<string, string>;
   private readonly modelDelegates: Record<string, ModelLookup>;
   private readonly modelConfigs: Record<string, SyncModelConfig>;
@@ -116,71 +92,12 @@ export class MutateService {
     this.db = db as SyncDb;
     this.dao = dao;
     this.logger = logger;
-    this.modelConfigs = models;
 
-    // Build handlers, group keys, and delegates from config
-    this.modelHandlers = new Map();
-    this.modelGroupKeys = {};
-    this.modelDelegates = {};
-
-    for (const [name, model] of Object.entries(models)) {
-      // Group key
-      if (model.groupKey !== null) {
-        this.modelGroupKeys[name] = model.groupKey;
-      }
-
-      // Delegate for lookups
-      if (model.mutate.kind === "standard") {
-        const idField = model.mutate.idField ?? "id";
-        let idColumn: unknown;
-        try {
-          const cols = getTableColumns(model.table) as Record<string, unknown>;
-          idColumn = cols[idField];
-        } catch {
-          // Table columns unavailable, skip delegate registration
-        }
-
-        if (idColumn) {
-          this.modelDelegates[name] = async (lookupDb, id) => {
-            const typedDb = lookupDb as SyncDb;
-            const rows = await typedDb
-              .select()
-              .from(model.table)
-              .where(eq(idColumn as never, id))
-              .limit(1);
-            return (rows[0] as Record<string, unknown> | undefined) ?? null;
-          };
-        }
-      }
-
-      // Model handler
-      const mutateConfig = model.mutate;
-      const delegate: MutationDelegate =
-        mutateConfig.kind === "standard"
-          ? createStandardDelegate(model.table, mutateConfig.idField ?? "id")
-          : createCompositeDelegate(model.table, mutateConfig.buildDeleteWhere);
-
-      const def: ModelDef =
-        mutateConfig.kind === "standard"
-          ? {
-              actions: mutateConfig.actions,
-              delegate,
-              insertFields: mutateConfig.insertFields,
-              kind: "standard",
-              onBeforeDelete: mutateConfig.onBeforeDelete,
-              onBeforeInsert: mutateConfig.onBeforeInsert,
-              onBeforeUpdate: mutateConfig.onBeforeUpdate,
-              updateFields: mutateConfig.updateFields,
-            }
-          : {
-              actions: mutateConfig.actions,
-              delegate,
-              insertFields: mutateConfig.insertFields,
-              kind: "composite",
-            };
-
-      this.modelHandlers.set(name, createModelHandler(def));
-    }
+    const registry = buildModelRegistry(models);
+    this.modelHandlers = registry.handlers;
+    this.modelGroupKeys = registry.groupKeys;
+    this.modelDelegates = registry.delegates;
+    this.modelConfigs = registry.configs;
   }
 
   /**
