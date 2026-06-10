@@ -1,4 +1,9 @@
 export { createSyncClient } from "./client.js";
+export {
+  isQuotaExceededError,
+  StorageQuotaError,
+  wrapQuotaErrors,
+} from "./errors.js";
 export type {
   BatchOperation,
   ModelPersistenceMeta,

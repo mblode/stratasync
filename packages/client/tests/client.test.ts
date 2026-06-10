@@ -243,6 +243,11 @@ class DelayedOpenStorage implements StorageAdapter {
     return Promise.resolve();
   }
 
+  pruneSyncActions(_beforeSyncId: string): Promise<void> {
+    this.ensureOpen();
+    return Promise.resolve();
+  }
+
   clear(_options?: ClearStorageOptions): Promise<void> {
     this.ensureOpen();
     return Promise.resolve();
@@ -456,6 +461,10 @@ class MemoryStorage implements StorageAdapter {
   }
 
   clearSyncActions(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  pruneSyncActions(_beforeSyncId: string): Promise<void> {
     return Promise.resolve();
   }
 

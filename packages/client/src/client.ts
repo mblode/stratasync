@@ -15,10 +15,12 @@ import {
   createArchivePayload,
   createUnarchivePatch,
   createUnarchivePayload,
+  deserializeModelRecord,
   generateUUID,
   getOrCreateClientId,
   ModelRegistry,
   readArchivedAt,
+  serializeModelRecord,
 } from "@stratasync/core";
 import { YjsDocumentManager, YjsPresenceManager } from "@stratasync/y-doc";
 
@@ -94,24 +96,7 @@ const buildEffectiveUpdate = <T extends Record<string, unknown>>(
 const MUTATION_START_REQUIRED_ERROR =
   "Sync client must be started before mutations";
 
-const isAlreadySerializedValue = (
-  serializer: {
-    deserialize: (value: unknown) => unknown;
-    serialize: (value: unknown) => unknown;
-  },
-  value: unknown
-): boolean => {
-  try {
-    return Object.is(
-      serializer.serialize(serializer.deserialize(value)),
-      value
-    );
-  } catch {
-    return false;
-  }
-};
-
-const deserializeModelRecord = (
+const hydrateModelRecord = (
   registry: ModelRegistry,
   modelName: string,
   data: Record<string, unknown>,
@@ -121,23 +106,7 @@ const deserializeModelRecord = (
     return data;
   }
 
-  const properties = registry.getModelProperties(modelName);
-  if (properties.size === 0) {
-    return data;
-  }
-
-  const deserialized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (key === "id" || value === undefined) {
-      deserialized[key] = value;
-      continue;
-    }
-
-    const serializer = properties.get(key)?.serializer;
-    deserialized[key] = serializer ? serializer.deserialize(value) : value;
-  }
-
-  return deserialized;
+  return deserializeModelRecord(registry.getModelProperties(modelName), data);
 };
 
 /**
@@ -151,12 +120,7 @@ const createDefaultModelFactory =
     data: Record<string, unknown>,
     options: ModelFactoryOptions = {}
   ) => {
-    const hydratedData = deserializeModelRecord(
-      registry,
-      modelName,
-      data,
-      options
-    );
+    const hydratedData = hydrateModelRecord(registry, modelName, data, options);
     const ctor = ModelRegistry.getModelConstructor(modelName);
     if (!ctor) {
       return hydratedData;
@@ -554,29 +518,11 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const serializeMutationRecord = (
     modelName: string,
     data: Record<string, unknown>
-  ): Record<string, unknown> => {
-    const properties = orchestrator.getRegistry().getModelProperties(modelName);
-    const serialized: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(data)) {
-      if (key === "id" || value === undefined) {
-        serialized[key] = value;
-        continue;
-      }
-
-      const serializer = properties.get(key)?.serializer;
-      if (!serializer) {
-        serialized[key] = value;
-        continue;
-      }
-
-      serialized[key] = isAlreadySerializedValue(serializer, value)
-        ? value
-        : serializer.serialize(value);
-    }
-
-    return serialized;
-  };
+  ): Record<string, unknown> =>
+    serializeModelRecord(
+      orchestrator.getRegistry().getModelProperties(modelName),
+      data
+    );
 
   const createBatchLoadStream = (
     requests: BatchLoadOptions["requests"]

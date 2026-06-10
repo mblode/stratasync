@@ -168,6 +168,10 @@ class MemoryStorage implements StorageAdapter {
     return Promise.reject(new Error("Not implemented"));
   }
 
+  pruneSyncActions(_beforeSyncId: string): Promise<void> {
+    return Promise.reject(new Error("Not implemented"));
+  }
+
   clear(options?: { preserveOutbox?: boolean }): Promise<void> {
     this.cleared = true;
     this.clearOptions = options ?? null;

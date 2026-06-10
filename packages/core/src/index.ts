@@ -31,6 +31,11 @@ export {
   parseSyncAction,
   readNdjsonLines,
 } from "./protocol/index.js";
+export {
+  deserializeModelRecord,
+  isAlreadySerializedValue,
+  serializeModelRecord,
+} from "./schema/codec.js";
 export { computeSchemaHash } from "./schema/hash.js";
 export { ModelRegistry } from "./schema/registry.js";
 export type {
@@ -41,8 +46,17 @@ export type {
 } from "./schema/types.js";
 export type { SerializedModelData, SyncStore } from "./store/types.js";
 export { applyDeltas } from "./sync/delta-applier.js";
-export type { RebaseConflict, RebaseOptions } from "./sync/rebase.js";
-export { rebaseTransactions } from "./sync/rebase.js";
+export type {
+  ConflictEffect,
+  RebaseConflict,
+  RebaseOptions,
+  RebaseOriginalPatch,
+} from "./sync/rebase.js";
+export {
+  rebaseOriginals,
+  rebaseTransactions,
+  resolveConflictEffect,
+} from "./sync/rebase.js";
 export type { SyncId } from "./sync/sync-id.js";
 export {
   compareSyncId,

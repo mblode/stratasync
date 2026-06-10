@@ -251,3 +251,138 @@ export const rebaseTransactions = (
 
   return result;
 };
+
+/**
+ * A patch describing the rebased `original` snapshot for a pending transaction.
+ */
+export interface RebaseOriginalPatch {
+  /** The pending transaction whose original should be updated */
+  clientTxId: string;
+  /** The new original snapshot */
+  original: Record<string, unknown>;
+}
+
+/**
+ * Returns true for the action types whose data should be folded into a pending
+ * transaction's `original` snapshot during rebase.
+ */
+const shouldRebaseAction = (action: SyncAction["action"]): boolean =>
+  action === "U" || action === "I" || action === "V" || action === "C";
+
+const buildActionsByKey = (
+  actions: SyncAction[]
+): Map<string, SyncAction[]> => {
+  const actionsByKey = new Map<string, SyncAction[]>();
+  for (const action of actions) {
+    const key = `${action.modelName}:${action.modelId}`;
+    const existing = actionsByKey.get(key) ?? [];
+    existing.push(action);
+    actionsByKey.set(key, existing);
+  }
+  return actionsByKey;
+};
+
+const getUpdatedOriginal = (
+  tx: Transaction,
+  related: SyncAction[]
+): Record<string, unknown> | null => {
+  const original = { ...tx.original };
+  let updated = false;
+
+  for (const action of related) {
+    if (!shouldRebaseAction(action.action)) {
+      continue;
+    }
+    for (const field of Object.keys(tx.payload)) {
+      if (field in action.data) {
+        original[field] = action.data[field];
+        updated = true;
+      }
+    }
+  }
+
+  return updated ? original : null;
+};
+
+/**
+ * Computes the rebased `original` snapshots for pending update-like
+ * transactions against a batch of server actions.
+ *
+ * Pure: returns the patches to apply rather than mutating/persisting. Only
+ * U/A/V transactions whose tracked fields were touched by the server produce a
+ * patch.
+ */
+export const rebaseOriginals = (
+  pending: Transaction[],
+  actions: SyncAction[]
+): RebaseOriginalPatch[] => {
+  const actionsByKey = buildActionsByKey(actions);
+  const patches: RebaseOriginalPatch[] = [];
+
+  for (const tx of pending) {
+    if (tx.action !== "U" && tx.action !== "A" && tx.action !== "V") {
+      continue;
+    }
+    const key = `${tx.modelName}:${tx.modelId}`;
+    const related = actionsByKey.get(key);
+    if (!related) {
+      continue;
+    }
+    const updatedOriginal = getUpdatedOriginal(tx, related);
+    if (!updatedOriginal) {
+      continue;
+    }
+    patches.push({ clientTxId: tx.clientTxId, original: updatedOriginal });
+  }
+
+  return patches;
+};
+
+/**
+ * The effect of resolving a single rebase conflict, as a discriminated union.
+ *
+ * - `drop-local`: the local optimistic transaction loses; remove it (server-wins).
+ * - `patch-original`: the local transaction wins/merges; replace its `original`
+ *   snapshot with the merged value.
+ * - `none`: no state change is required for this conflict.
+ *
+ * "manual" resolution is coerced to "server-wins" (drop-local) — manual
+ * intervention is not supported at this layer.
+ */
+export type ConflictEffect =
+  | { kind: "drop-local" }
+  | { kind: "patch-original"; original: Record<string, unknown> }
+  | { kind: "none" };
+
+/**
+ * Pure resolution of a rebase conflict into the effect the caller must apply.
+ *
+ * Mirrors the orchestrator's previous `handleConflict` branching without any
+ * storage or identity-map side effects.
+ */
+export const resolveConflictEffect = (
+  conflict: RebaseConflict
+): ConflictEffect => {
+  const { localTransaction: tx } = conflict;
+  const resolution =
+    conflict.resolution === "manual" ? "server-wins" : conflict.resolution;
+
+  if (resolution === "server-wins") {
+    return { kind: "drop-local" };
+  }
+
+  if (
+    (resolution === "client-wins" || resolution === "merge") &&
+    (tx.action === "U" || tx.action === "A" || tx.action === "V")
+  ) {
+    return {
+      kind: "patch-original",
+      original: {
+        ...tx.original,
+        ...conflict.serverAction.data,
+      },
+    };
+  }
+
+  return { kind: "none" };
+};

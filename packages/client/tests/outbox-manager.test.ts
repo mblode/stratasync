@@ -206,6 +206,13 @@ class InMemoryStorage implements StorageAdapter {
     return Promise.resolve();
   }
 
+  pruneSyncActions(beforeSyncId: string): Promise<void> {
+    const kept = this.syncActions.filter((action) => action.id > beforeSyncId);
+    this.syncActions.length = 0;
+    this.syncActions.push(...kept);
+    return Promise.resolve();
+  }
+
   clear(options?: ClearStorageOptions): Promise<void> {
     this.data.clear();
     this.modelPersistence.clear();
@@ -317,6 +324,17 @@ class TestTransport implements TransportAdapter {
     return Promise.resolve();
   }
 }
+
+const noopMutate = (batch: TransactionBatch): Promise<MutateResult> =>
+  Promise.resolve({
+    lastSyncId: "0",
+    results: batch.transactions.map((tx) => ({
+      clientTxId: tx.clientTxId,
+      success: true,
+      syncId: "0",
+    })),
+    success: true,
+  });
 
 describe(OutboxManager, () => {
   it("requeues transport failures for reconnect recovery", async () => {
@@ -527,5 +545,97 @@ describe(OutboxManager, () => {
     expect(outbox[0]?.clientTxId).toBe(validTx.clientTxId);
     expect(outbox[0]?.state).toBe("awaitingSync");
     expect(outbox[0]?.syncIdNeededForCompletion).toBe("9");
+  });
+
+  it("confirmFromActions removes confirmed txs from storage and local set", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(noopMutate),
+    });
+
+    const tx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Seed",
+    });
+    expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeTruthy();
+
+    const confirmed = await manager.confirmFromActions([
+      {
+        action: "I",
+        clientTxId: tx.clientTxId,
+        data: { id: "task-1", title: "Seed" },
+        id: "1",
+        modelId: "task-1",
+        modelName: "Task",
+      },
+    ]);
+
+    expect([...confirmed]).toEqual([tx.clientTxId]);
+    expect(await storage.getOutbox()).toHaveLength(0);
+    // Leak fix: confirmed ids leave the in-memory set.
+    expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeFalsy();
+  });
+
+  it("confirmFromActions removes redundant creates including legacy ones", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(noopMutate),
+    });
+
+    const tx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Local create",
+    });
+
+    // A server create for the same model with no clientTxId (legacy) should
+    // still confirm the local create.
+    const confirmed = await manager.confirmFromActions([
+      {
+        action: "I",
+        data: { id: "task-1", title: "Server create" },
+        id: "2",
+        modelId: "task-1",
+        modelName: "Task",
+      },
+    ]);
+
+    expect([...confirmed]).toEqual([tx.clientTxId]);
+    expect(await storage.getOutbox()).toHaveLength(0);
+    expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeFalsy();
+  });
+
+  it("getActiveTransactions returns only in-flight transactions", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(noopMutate),
+    });
+
+    const queuedTx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "Queued",
+    });
+    await storage.addToOutbox({
+      action: "U",
+      clientId: "client-1",
+      clientTxId: "completed-tx",
+      createdAt: Date.now(),
+      modelId: "task-2",
+      modelName: "Task",
+      payload: { title: "Done" },
+      retryCount: 0,
+      state: "completed",
+    });
+
+    const active = await manager.getActiveTransactions();
+    expect(active.map((tx) => tx.clientTxId)).toEqual([queuedTx.clientTxId]);
   });
 });
