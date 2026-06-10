@@ -209,6 +209,13 @@ export class InMemoryStorage implements StorageAdapter {
     return Promise.resolve();
   }
 
+  pruneSyncActions(beforeSyncId: string): Promise<void> {
+    const kept = this.syncActions.filter((action) => action.id > beforeSyncId);
+    this.syncActions.length = 0;
+    this.syncActions.push(...kept);
+    return Promise.resolve();
+  }
+
   clear(options?: { preserveOutbox?: boolean }): Promise<void> {
     this.data.clear();
     this.modelPersistence.clear();
