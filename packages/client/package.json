@@ -28,8 +28,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@stratasync/core": "*",
-    "@stratasync/y-doc": "*"
+    "@stratasync/core": "*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@stratasync/y-doc": "*"
+  }
 }

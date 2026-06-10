@@ -22,7 +22,6 @@ import {
   readArchivedAt,
   serializeModelRecord,
 } from "@stratasync/core";
-import { YjsDocumentManager, YjsPresenceManager } from "@stratasync/y-doc";
 
 import type { HistoryEntry, HistoryOperation } from "./history-manager.js";
 import { HistoryManager } from "./history-manager.js";
@@ -365,26 +364,16 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   });
 
   let yjsManagers: SyncClient["yjs"] | undefined;
-  if (resolvedOptions.yjsTransport) {
-    const clientId = getOrCreateClientId(
-      `${resolvedOptions.dbName ?? "sync-db"}_client_id`
-    );
-    const connId = generateUUID();
-    const documentManager = new YjsDocumentManager({
-      clientId,
-      connId,
-    });
-    const presenceManager = new YjsPresenceManager({
-      clientId,
-      connId,
-    });
-
-    // Presence must replay before document sync handshake on reconnect so
-    // the server sees the connection as viewing before yjs_sync_step1.
-    presenceManager.setTransport(resolvedOptions.yjsTransport);
-    documentManager.setTransport(resolvedOptions.yjsTransport);
-
-    yjsManagers = { documentManager, presenceManager };
+  if (resolvedOptions.yjs) {
+    yjsManagers =
+      typeof resolvedOptions.yjs === "function"
+        ? resolvedOptions.yjs({
+            clientId: getOrCreateClientId(
+              `${resolvedOptions.dbName ?? "sync-db"}_client_id`
+            ),
+            connId: generateUUID(),
+          })
+        : resolvedOptions.yjs;
   }
 
   let outboxManager: OutboxManager | null = null;

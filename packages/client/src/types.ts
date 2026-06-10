@@ -19,11 +19,27 @@ import type {
   TransactionBatch,
   UnarchiveTransactionOptions,
 } from "@stratasync/core";
-import type {
-  YjsDocumentManager,
-  YjsPresenceManager,
-  YjsTransport,
-} from "@stratasync/y-doc";
+import type { YjsDocumentManager, YjsPresenceManager } from "@stratasync/y-doc";
+
+/**
+ * Pre-built Yjs managers supplied to the client. The client no longer imports
+ * `@stratasync/y-doc` at runtime; callers construct these (wiring their own
+ * transport) and hand them in, or pass a factory that builds them from the
+ * resolved client/connection ids.
+ */
+export interface SyncYjsManagers {
+  documentManager: YjsDocumentManager;
+  presenceManager: YjsPresenceManager;
+}
+
+/**
+ * Factory that builds Yjs managers once the client has resolved its stable
+ * client id (per dbName) and a fresh per-session connection id.
+ */
+export type SyncYjsManagerFactory = (args: {
+  clientId: string;
+  connId: string;
+}) => SyncYjsManagers;
 
 /**
  * Storage adapter options
@@ -272,8 +288,13 @@ export interface SyncClientOptions {
   batchDelay?: number;
   /** Bootstrap mode selection */
   bootstrapMode?: "auto" | "full" | "local";
-  /** Optional Yjs transport for live editing */
-  yjsTransport?: YjsTransport;
+  /**
+   * Optional pre-built Yjs managers (or a factory) for live editing. Supplying
+   * these enables `client.yjs`; omitting them degrades gracefully (no live
+   * editing). The client does not import `@stratasync/y-doc` at runtime, so the
+   * caller owns manager construction and transport wiring.
+   */
+  yjs?: SyncYjsManagers | SyncYjsManagerFactory;
   /** Default conflict resolution strategy for transaction rebasing (default: "server-wins") */
   rebaseStrategy?: "server-wins" | "client-wins" | "merge";
   /** Enable field-level conflict detection for rebasing (default: true) */
@@ -356,10 +377,7 @@ export interface SyncClient {
   clientId: string;
 
   /** Yjs managers for live editing (if configured) */
-  yjs?: {
-    documentManager: YjsDocumentManager;
-    presenceManager: YjsPresenceManager;
-  };
+  yjs?: SyncYjsManagers;
 
   /** Start the sync client */
   start(): Promise<void>;
