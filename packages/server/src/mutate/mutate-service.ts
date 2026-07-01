@@ -147,7 +147,16 @@ export class MutateService {
 
     const record = await this.lookupModelRecord(db, modelName, modelId);
     if (record) {
-      return (record[groupKey] as string | null | undefined) ?? null;
+      const recordValue = record[groupKey];
+      if (typeof recordValue === "string" && recordValue.length > 0) {
+        return recordValue;
+      }
+
+      this.logger.warn(
+        { groupKey, modelId, modelName },
+        "Missing group key on existing record"
+      );
+      throw new Error("Invalid mutation: missing required group identifier");
     }
 
     const payloadValue = payload[groupKey];

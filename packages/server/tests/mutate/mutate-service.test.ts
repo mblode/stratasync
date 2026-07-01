@@ -70,6 +70,9 @@ const createMutationDb = (options?: { failSyncActionInsert?: boolean }) => {
       delete() {
         throw new Error("delete is not used in these tests");
       },
+      execute() {
+        return Promise.resolve([]);
+      },
       insert(table) {
         const tableName = getTableName(table);
         return {
@@ -187,6 +190,9 @@ const createUpdateMutationDb = (
   const makeDb = (writes: RecordedWrite[]): SyncDb => ({
     delete() {
       throw new Error("delete is not used in these tests");
+    },
+    execute() {
+      return Promise.resolve([]);
     },
     insert(table) {
       const tableName = getTableName(table);
@@ -324,6 +330,9 @@ const createCompositeDeleteMutationDb = (options?: {
           });
         },
       };
+    },
+    execute() {
+      return Promise.resolve([]);
     },
     insert(table) {
       const tableName = getTableName(table);
@@ -653,6 +662,93 @@ describe("MutateService.mutate", () => {
       clientTxId: "tx-1",
       error: "Access denied",
       success: false,
+    });
+  });
+
+  it("rejects updates on a group-keyed record whose group column is null", async () => {
+    const { committedWrites, db, transactionCalls } = createUpdateMutationDb([
+      {
+        id: "task-1",
+        title: "Original",
+        workspaceId: null,
+      },
+    ]);
+    const dao = new SyncDao(db, { syncActions, syncGroupMemberships });
+    const service = new MutateService(db, dao, {
+      Task: createUpdatableTaskModelConfig("workspaceId"),
+    });
+
+    const result = await service.mutate(
+      { groups: ["workspace-1"], userId: "user-1" },
+      {
+        batchId: "batch-1",
+        transactions: [
+          {
+            action: "UPDATE",
+            clientId: "client-1",
+            clientTxId: "tx-1",
+            modelId: "task-1",
+            modelName: "Task",
+            payload: {
+              title: "Updated",
+            },
+          },
+        ],
+      }
+    );
+
+    expect(transactionCalls()).toBe(1);
+    expect(committedWrites).toEqual([]);
+    expect(result.success).toBeFalsy();
+    expect(result.results[0]).toMatchObject({
+      clientTxId: "tx-1",
+      error: "Invalid mutation: missing required group identifier",
+      success: false,
+    });
+  });
+
+  it("updates a record on a model without a group key", async () => {
+    const { committedWrites, db, transactionCalls } = createUpdateMutationDb([
+      {
+        id: "task-1",
+        title: "Original",
+        workspaceId: null,
+      },
+    ]);
+    const dao = new SyncDao(db, { syncActions, syncGroupMemberships });
+    const service = new MutateService(db, dao, {
+      Task: createUpdatableTaskModelConfig(null),
+    });
+
+    const result = await service.mutate(
+      { groups: [], userId: "user-1" },
+      {
+        batchId: "batch-1",
+        transactions: [
+          {
+            action: "UPDATE",
+            clientId: "client-1",
+            clientTxId: "tx-1",
+            modelId: "task-1",
+            modelName: "Task",
+            payload: {
+              title: "Updated",
+            },
+          },
+        ],
+      }
+    );
+
+    expect(transactionCalls()).toBe(1);
+    expect(committedWrites.map((write) => write.table)).toEqual([
+      "tasks",
+      "sync_actions",
+    ]);
+    expect(result.success).toBeTruthy();
+    expect(result.results[0]).toMatchObject({
+      clientTxId: "tx-1",
+      success: true,
+      syncId: "7",
     });
   });
 
