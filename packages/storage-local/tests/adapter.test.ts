@@ -373,8 +373,62 @@ describe(LocalStorageAdapter, () => {
     });
   });
 
+  describe("corrupted JSON recovery", () => {
+    // Every routed read must degrade to its fallback rather than throwing, so
+    // one bad localStorage value cannot permanently brick the adapter.
+    const corrupt = (suffix: string) => {
+      storage.setItem(`test:testdb:${suffix}`, "{not valid json");
+    };
+
+    it("getMeta falls back to defaults on corrupt meta", async () => {
+      corrupt("meta");
+      const meta = await adapter.getMeta();
+      expect(meta.lastSyncId).toBe("0");
+    });
+
+    it("setMeta ignores corrupt existing meta when merging", async () => {
+      corrupt("meta");
+      await adapter.setMeta({ lastSyncId: "7" });
+      const meta = await adapter.getMeta();
+      expect(meta.lastSyncId).toBe("7");
+    });
+
+    it("getModelPersistence falls back on corrupt value", async () => {
+      corrupt("persistence:Todo");
+      const result = await adapter.getModelPersistence("Todo");
+      expect(result.persisted).toBeFalsy();
+      expect(result.modelName).toBe("Todo");
+    });
+
+    it("readModelStore falls back to empty on corrupt value", async () => {
+      corrupt("model:Todo");
+      const result = await adapter.get("Todo", "1");
+      expect(result).toBeNull();
+      const count = await adapter.count("Todo");
+      expect(count).toBe(0);
+    });
+
+    it("getOutbox falls back to empty on corrupt value", async () => {
+      corrupt("outbox");
+      const outbox = await adapter.getOutbox();
+      expect(outbox).toHaveLength(0);
+    });
+
+    it("hasPartialIndex falls back to empty set on corrupt value", async () => {
+      corrupt("partial");
+      const has = await adapter.hasPartialIndex("Todo", "status", "done");
+      expect(has).toBeFalsy();
+    });
+
+    it("getSyncActions falls back to empty on corrupt value", async () => {
+      corrupt("sync-actions");
+      const result = await adapter.getSyncActions("0");
+      expect(result).toHaveLength(0);
+    });
+  });
+
   describe("quota handling", () => {
-    it("rethrows quota-exceeded writes as StorageQuotaError", async () => {
+    const makeQuotaAdapter = async (): Promise<LocalStorageAdapter> => {
       const quotaStorage = new MemoryStorage();
       quotaStorage.setItem = () => {
         throw Object.assign(new Error("full"), {
@@ -386,11 +440,43 @@ describe(LocalStorageAdapter, () => {
         storage: quotaStorage,
       });
       await quotaAdapter.open({ name: "quotadb" });
+      return quotaAdapter;
+    };
+
+    it("rethrows quota-exceeded writes as StorageQuotaError", async () => {
+      const quotaAdapter = await makeQuotaAdapter();
 
       // put() surfaces the typed error; wrap so a sync throw is observed too.
       await expect(
         (async () => {
           await quotaAdapter.put("Todo", { id: "1", title: "A" });
+        })()
+      ).rejects.toBeInstanceOf(StorageQuotaError);
+    });
+
+    it("setMeta throws StorageQuotaError when full", async () => {
+      const quotaAdapter = await makeQuotaAdapter();
+      await expect(
+        (async () => {
+          await quotaAdapter.setMeta({ lastSyncId: "5" });
+        })()
+      ).rejects.toBeInstanceOf(StorageQuotaError);
+    });
+
+    it("setModelPersistence throws StorageQuotaError when full", async () => {
+      const quotaAdapter = await makeQuotaAdapter();
+      await expect(
+        (async () => {
+          await quotaAdapter.setModelPersistence("Todo", true);
+        })()
+      ).rejects.toBeInstanceOf(StorageQuotaError);
+    });
+
+    it("setPartialIndex throws StorageQuotaError when full", async () => {
+      const quotaAdapter = await makeQuotaAdapter();
+      await expect(
+        (async () => {
+          await quotaAdapter.setPartialIndex("Todo", "status", "done");
         })()
       ).rejects.toBeInstanceOf(StorageQuotaError);
     });

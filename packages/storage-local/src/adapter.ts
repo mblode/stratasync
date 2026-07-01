@@ -104,19 +104,13 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   getMeta(): Promise<StorageMeta> {
-    const raw = this.backend.getItem(this.key("meta"));
-    if (!raw) {
-      return Promise.resolve({ lastSyncId: "0" });
-    }
-    const meta = JSON.parse(raw) as StorageMeta;
-    return Promise.resolve(meta);
+    return Promise.resolve(
+      this.readJson<StorageMeta>("meta", { lastSyncId: "0" })
+    );
   }
 
   setMeta(updates: Partial<StorageMeta>): Promise<void> {
-    const raw = this.backend.getItem(this.key("meta"));
-    const current: StorageMeta = raw
-      ? (JSON.parse(raw) as StorageMeta)
-      : { lastSyncId: "0" };
+    const current = this.readJson<StorageMeta>("meta", { lastSyncId: "0" });
 
     const merged: StorageMeta = {
       ...current,
@@ -126,16 +120,17 @@ export class LocalStorageAdapter implements StorageAdapter {
         : current.subscribedSyncGroups,
     };
 
-    this.backend.setItem(this.key("meta"), JSON.stringify(merged));
+    this.safeSetItem(this.key("meta"), JSON.stringify(merged));
     return Promise.resolve();
   }
 
   getModelPersistence(modelName: string): Promise<ModelPersistenceMeta> {
-    const raw = this.backend.getItem(this.key(`persistence:${modelName}`));
-    if (!raw) {
-      return Promise.resolve({ modelName, persisted: false });
-    }
-    return Promise.resolve(JSON.parse(raw) as ModelPersistenceMeta);
+    return Promise.resolve(
+      this.readJson<ModelPersistenceMeta>(`persistence:${modelName}`, {
+        modelName,
+        persisted: false,
+      })
+    );
   }
 
   setModelPersistence(modelName: string, persisted: boolean): Promise<void> {
@@ -144,7 +139,7 @@ export class LocalStorageAdapter implements StorageAdapter {
       persisted,
       updatedAt: Date.now(),
     };
-    this.backend.setItem(
+    this.safeSetItem(
       this.key(`persistence:${modelName}`),
       JSON.stringify(meta)
     );
@@ -152,11 +147,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   getOutbox(): Promise<Transaction[]> {
-    const raw = this.backend.getItem(this.key("outbox"));
-    if (!raw) {
-      return Promise.resolve([]);
-    }
-    return Promise.resolve(JSON.parse(raw) as Transaction[]);
+    return Promise.resolve(this.readOutbox());
   }
 
   addToOutbox(tx: Transaction): Promise<void> {
@@ -282,6 +273,23 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   /**
+   * Reads and parses a JSON value from the backend, returning {@link fallback}
+   * when the key is absent or holds corrupted JSON. This keeps a single bad
+   * localStorage entry from permanently bricking the adapter.
+   */
+  private readJson<T>(suffix: string, fallback: T): T {
+    const raw = this.backend.getItem(this.key(suffix));
+    if (!raw) {
+      return fallback;
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
    * Writes to the backend, translating a quota-exceeded throw into a typed
    * {@link StorageQuotaError}. localStorage throws synchronously when full.
    */
@@ -299,11 +307,10 @@ export class LocalStorageAdapter implements StorageAdapter {
   private readModelStore(
     modelName: string
   ): Record<string, Record<string, unknown>> {
-    const raw = this.backend.getItem(this.key(`model:${modelName}`));
-    if (!raw) {
-      return {};
-    }
-    return JSON.parse(raw) as Record<string, Record<string, unknown>>;
+    return this.readJson<Record<string, Record<string, unknown>>>(
+      `model:${modelName}`,
+      {}
+    );
   }
 
   private writeModelStore(
@@ -314,11 +321,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private readOutbox(): Transaction[] {
-    const raw = this.backend.getItem(this.key("outbox"));
-    if (!raw) {
-      return [];
-    }
-    return JSON.parse(raw) as Transaction[];
+    return this.readJson<Transaction[]>("outbox", []);
   }
 
   private writeOutbox(outbox: Transaction[]): void {
@@ -326,23 +329,15 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   private readPartialIndexes(): Set<string> {
-    const raw = this.backend.getItem(this.key("partial"));
-    if (!raw) {
-      return new Set();
-    }
-    return new Set(JSON.parse(raw) as string[]);
+    return new Set(this.readJson<string[]>("partial", []));
   }
 
   private writePartialIndexes(indexes: Set<string>): void {
-    this.backend.setItem(this.key("partial"), JSON.stringify([...indexes]));
+    this.safeSetItem(this.key("partial"), JSON.stringify([...indexes]));
   }
 
   private readSyncActions(): SyncAction[] {
-    const raw = this.backend.getItem(this.key("sync-actions"));
-    if (!raw) {
-      return [];
-    }
-    return JSON.parse(raw) as SyncAction[];
+    return this.readJson<SyncAction[]>("sync-actions", []);
   }
 
   private writeSyncActions(actions: SyncAction[]): void {
