@@ -390,6 +390,42 @@ describe(prefetchBootstrap, () => {
       })
     ).rejects.toThrow("Bootstrap prefetch timed out after 10ms");
   });
+
+  it("does not emit an unhandled rejection when the stream rejects after the timeout wins", async () => {
+    const streamError = new Error("stream read failed after timeout");
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        setTimeout(() => controller.error(streamError), 50);
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(stream, { status: 200 }))
+    );
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      await expect(
+        prefetchBootstrap({
+          endpoint: "https://api.example.com/sync",
+          timeout: 10,
+        })
+      ).rejects.toThrow("Bootstrap prefetch timed out after 10ms");
+
+      // Wait past the stream's rejection so any missing handler would surface.
+      await delay(80);
+      await delay(0);
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
 
 describe("bootstrap snapshot utilities", () => {

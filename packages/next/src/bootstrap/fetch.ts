@@ -130,8 +130,14 @@ export const prefetchBootstrap = async (
       controller.signal.addEventListener("abort", onAbort, { once: true });
     });
 
+    // Attach a no-op catch before racing so a stream rejection that lands
+    // after the timeout wins does not surface as an unhandled rejection.
+    const streamPromise = readBootstrapStream(response.body);
+    // oxlint-disable-next-line promise/prefer-await-to-then -- attach a synchronous no-op catch so a stream rejection landing after the timeout wins is not an unhandled rejection; cannot await here without joining the race
+    streamPromise.catch(noop);
+
     const { rows, metadata, rowCount } = await Promise.race([
-      readBootstrapStream(response.body),
+      streamPromise,
       timeoutPromise,
     ]);
 
