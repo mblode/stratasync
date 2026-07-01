@@ -186,9 +186,6 @@ const relationKindFromProperty = (
     case "referenceArray": {
       return "referenceArray";
     }
-    case "reference": {
-      return "reference";
-    }
     default: {
       return undefined;
     }
@@ -205,6 +202,10 @@ export const snapshotToSchemaDefinition = (
     const relations: Record<string, RelationDefinition> = {};
 
     for (const [propertyName, property] of Object.entries(entry.properties)) {
+      // A `reference`-typed property round-trips back to a plain field rather
+      // than a relation: the snapshot only carries the reference as a property
+      // marker, so there is no relation metadata to rebuild. This branch (not
+      // `relationKindFromProperty`) is what consumes reference-typed props.
       if (
         property.type === "property" ||
         property.type === "ephemeralProperty" ||

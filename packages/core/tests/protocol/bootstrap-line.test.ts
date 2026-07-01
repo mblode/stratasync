@@ -69,6 +69,13 @@ describe(parseBootstrapLine, () => {
     });
   });
 
+  it("parses an end line carrying lastSyncId as end, not metadata", () => {
+    const parsed = parseBootstrapLine(
+      JSON.stringify({ lastSyncId: "99", rowCount: 2, type: "end" })
+    );
+    expect(parsed).toEqual({ rowCount: 2, type: "end" });
+  });
+
   it("throws on a server error line", () => {
     const line = JSON.stringify({ message: "Bad token", type: "error" });
     expect(() => parseBootstrapLine(line)).toThrow(

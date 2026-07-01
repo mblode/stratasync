@@ -8,8 +8,14 @@ export class CachedPromise<T> implements PromiseLike<T> {
   status: CachedPromiseStatus = "pending";
   value: T | undefined;
   error: unknown;
+  /**
+   * The id of the referenced model, stamped by the reference resolver so a
+   * still-pending CachedPromise can synchronously hand its FK to a setter.
+   */
+  readonly referenceId?: string;
 
-  constructor(promise: Promise<T>) {
+  constructor(promise: Promise<T>, referenceId?: string) {
+    this.referenceId = referenceId;
     this.promise = (async () => {
       try {
         const value = await promise;
@@ -25,14 +31,16 @@ export class CachedPromise<T> implements PromiseLike<T> {
   }
 
   static resolve<T = undefined>(
-    value?: T | PromiseLike<T>
+    value?: T | PromiseLike<T>,
+    referenceId?: string
   ): CachedPromise<Awaited<T>> {
     if (value instanceof CachedPromise) {
       return value as CachedPromise<Awaited<T>>;
     }
     const cached = new CachedPromise<Awaited<T>>(
       // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
-      Promise.resolve(value as T | PromiseLike<T>)
+      Promise.resolve(value as T | PromiseLike<T>),
+      referenceId
     );
     if (!isThenable(value)) {
       cached.status = "fulfilled";

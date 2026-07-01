@@ -170,18 +170,20 @@ const resolveCachedReference = <T>(
   if (result instanceof CachedPromise) {
     return result as CachedPromise<T | undefined>;
   }
-  // Handle synchronous values directly without wrapping in Promise
+  // Handle synchronous values directly without wrapping in Promise. A
+  // resolved-empty reference carries no FK, so a setter clears it to null; a
+  // present value stamps the FK so a setter can copy it synchronously.
   if (!(result instanceof Promise)) {
     const value =
       result === null || result === undefined ? undefined : (result as T);
-    return CachedPromise.resolve(value);
+    return CachedPromise.resolve(value, value === undefined ? undefined : id);
   }
-  // Handle actual promises
+  // Handle actual promises. Stamp the FK so a still-pending assignment copies it.
   const promise = (async () => {
     const value = await result;
     return value === null || value === undefined ? undefined : (value as T);
   })();
-  return new CachedPromise(promise);
+  return new CachedPromise(promise, id);
 };
 
 const getCachedPromiseMap = (
@@ -238,7 +240,14 @@ export const makeCachedReferenceModelProperty = (
       const modelName = resolveReferenceModelName(referenceModelName);
       const cache = getCachedPromiseMap(this);
       const cached = cache.get(propertyName);
-      if (cached && cached.id === id && cached.modelName === modelName) {
+      // A rejected cached promise is treated as a miss so the next access
+      // retries instead of replaying the poisoned rejection.
+      if (
+        cached &&
+        cached.id === id &&
+        cached.modelName === modelName &&
+        cached.promise.status !== "rejected"
+      ) {
         return cached.promise;
       }
       const promise = resolveCachedReference<unknown>(store, modelName, id);
@@ -252,9 +261,11 @@ export const makeCachedReferenceModelProperty = (
       }
       if (value instanceof CachedPromise) {
         const resolved = value.value as { id?: string } | null | undefined;
-        if (resolved?.id) {
-          (this as Record<string, unknown>)[referenceIdKey] = resolved.id;
-        }
+        // A pending getter-sourced promise carries its FK on `referenceId`, so
+        // copy it synchronously; a resolved-empty promise clears the FK to null
+        // (mirroring the plain-value setter below).
+        (this as Record<string, unknown>)[referenceIdKey] =
+          resolved?.id ?? value.referenceId ?? null;
         return;
       }
       const refId = (value as { id?: string } | null)?.id ?? null;

@@ -116,16 +116,18 @@ export const parseBootstrapLine = (
     throw new Error(`Bootstrap server error: ${message}`);
   }
 
-  if (isBootstrapMetadata(parsed)) {
-    return { metadata: normalizeBootstrapMetadata(parsed), type: "meta" };
-  }
-
+  // Checked before the metadata heuristic: an `end` line may carry a
+  // `lastSyncId`, which would otherwise be misparsed as bootstrap metadata.
   if (parsed.type === "end") {
     return {
       rowCount:
         typeof parsed.rowCount === "number" ? parsed.rowCount : undefined,
       type: "end",
     };
+  }
+
+  if (isBootstrapMetadata(parsed)) {
+    return { metadata: normalizeBootstrapMetadata(parsed), type: "meta" };
   }
 
   throw new Error("Bootstrap row is missing __class");

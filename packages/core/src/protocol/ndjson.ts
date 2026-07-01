@@ -57,6 +57,9 @@ export async function* readNdjsonLines(
       }
     }
 
+    // Flush the streaming decoder before processing the trailing remainder so a
+    // multi-byte character split across the final chunk is not dropped.
+    buffer += decoder.decode();
     const trailing = buffer.trim();
     if (trailing) {
       yield trailing;
