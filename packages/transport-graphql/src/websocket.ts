@@ -405,6 +405,13 @@ export class WebSocketManager {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.retryConfig.maxRetries) {
       this.setConnectionState("error");
+      this.failSubscriptions(
+        this.lastSubscribeError ??
+          createTransportError("Reconnect retry limit exceeded", {
+            code: "RECONNECT_RETRY_LIMIT",
+            retryable: false,
+          })
+      );
       return;
     }
 

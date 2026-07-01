@@ -330,6 +330,34 @@ describe(WebSocketManager, () => {
     await manager.close();
   });
 
+  it("fails active subscriptions when reconnect retries are exhausted", async () => {
+    const manager = createManager();
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+
+    await flush();
+    lastSocket().simulateOpen();
+    await flush();
+
+    // Each close schedules a reconnect that never opens, so reconnectAttempts
+    // accumulates until the budget is exhausted and subscriptions fail.
+    for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt += 1) {
+      lastSocket().simulateClose();
+      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+      await new Promise((resolve) => {
+        setTimeout(resolve, retryConfig.maxDelay + 5);
+      });
+      await flush();
+    }
+
+    expect(manager.getConnectionState()).toBe("error");
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "RECONNECT_RETRY_LIMIT",
+    });
+
+    await manager.close();
+  });
+
   it("stops subscribe retries after the retry budget is exhausted", async () => {
     let token: string | null = null;
     const manager = createManager({
@@ -452,6 +480,32 @@ describe(WebSocketManager, () => {
 
     await expect(iterator.next()).rejects.toMatchObject({
       code: "SUBSCRIBE_ERROR",
+    });
+
+    await manager.close();
+  });
+
+  it("fails active subscriptions when reconnect retries are exhausted", async () => {
+    const manager = createManager();
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    const iterator = subscription[Symbol.asyncIterator]();
+
+    await flush();
+
+    // Close the socket before it opens so "open" never resets reconnectAttempts,
+    // exhausting the reconnect budget after maxRetries schedules.
+    for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt += 1) {
+      lastSocket().simulateClose();
+      // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
+      await new Promise((resolve) => {
+        setTimeout(resolve, retryConfig.baseDelay + 5);
+      });
+      await flush();
+    }
+
+    expect(manager.getConnectionState()).toBe("error");
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "RECONNECT_RETRY_LIMIT",
     });
 
     await manager.close();
