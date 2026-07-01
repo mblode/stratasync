@@ -46,5 +46,5 @@ export const calculateRetryDelay = (
 
   const jitterWindow = clampedDelay * config.jitter;
   const jitteredDelay = clampedDelay + (Math.random() * 2 - 1) * jitterWindow;
-  return Math.max(0, Math.round(jitteredDelay));
+  return Math.round(clamp(jitteredDelay, 0, config.maxDelayMs));
 };
