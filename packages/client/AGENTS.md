@@ -15,19 +15,37 @@ Offline-first sync orchestration: identity maps, outbox batching, delta reconcil
 ```
 src/
   index.ts              public API barrel export
-  client.ts             SyncClient factory, mutation coordination, model loading (930 lines)
-  sync-orchestrator.ts  state machine: bootstrap, subscribe, delta application, rebase (1306 lines)
-  outbox-manager.ts     offline mutation queue with batching and retry (408 lines)
-  identity-map.ts       per-model ObservableMap with MobX reactivity (307 lines)
-  history-manager.ts    undo/redo stack with inverse operation tracking (197 lines)
-  query.ts              predicate builders (eq, neq, gt, lt, isIn, and, or, not) and executeQuery (224 lines)
-  types.ts              StorageAdapter, TransportAdapter, SyncClientOptions, SyncClientEvent (458 lines)
-  utils.ts              getModelKey, getModelData, pickOriginal helpers (34 lines)
+  client.ts             SyncClient factory: wires the pieces, model loading, events
+  mutations.ts          MutationCoordinator: mutation lifecycle (optimistic apply,
+                        outbox enqueue, history entry) — extracted from client.ts
+  loader.ts             lazy model loading and hydration entry points
+  materializer.ts       builds model instances into the identity maps
+  sync-orchestrator.ts  state machine: bootstrap, subscribe, delta application, rebase
+  sync/                 orchestrator internals, split by concern
+    bootstrap-runner.ts   bootstrap streaming + apply
+    delta-pipeline.ts     delta reconciliation + pending replay
+    pending-hydration.ts  re-apply pending outbox txs onto identity maps
+    cursor.ts             sync-id cursor tracking
+    sync-groups.ts        multi-tenant group membership
+    context.ts / state.ts shared orchestrator context + state
+  outbox-manager.ts     offline mutation queue with batching and retry
+  identity-map.ts       per-model ObservableMap + registry (with onEvict)
+  history-manager.ts    undo/redo stack with inverse operation tracking
+  query.ts              predicate builders (eq, neq, gt, lt, isIn, and, or, not) + executeQuery
+  types.ts              StorageAdapter, TransportAdapter, SyncClientOptions, SyncClientEvent
+  errors.ts             typed client errors
+  utils.ts              getModelKey, getModelData, pickOriginal helpers
+  internal/             async-queue.ts, gate.ts (concurrency primitives)
 
 tests/
-  history-manager.test.ts            undo/redo entry building (3 tests)
-  rebase-integration.test.ts         conflict detection and resolution (8 tests)
-  sync-engine.test.ts                full sync lifecycle: bootstrap to steady-state (14 tests)
+  client.test.ts                     factory wiring and public API
+  outbox-manager.test.ts             queue, batching, sync-id completion
+  identity-map.test.ts               dedup, reactivity, eviction (onEvict)
+  pending-hydration.test.ts          optimistic re-apply preserves instances
+  history-manager.test.ts            undo/redo entry building
+  rebase-integration.test.ts         conflict detection and resolution
+  sync-engine.test.ts                full sync lifecycle: bootstrap to steady-state
+  internal/                          async-queue and gate primitives
 ```
 
 ### Data flow
@@ -44,7 +62,7 @@ tests/
 
 ### Outbox transaction states
 
-`queued` → `sent` → `awaitingSync` → completed (removed). On error: `sent` → `queued` (retry on reconnect).
+`queued` → `sent` → `awaitingSync` → completed (removed). On error: `sent` → `queued` (retry on reconnect). When a mutate result carries **no** sync id, the transaction skips `awaitingSync` and completes immediately.
 
 ## Gotchas
 
@@ -57,10 +75,13 @@ tests/
 - **Own-client echo suppression**: `modelChange` events are NOT emitted for confirmed optimistic updates from this client, but cross-tab updates (same clientId, different instance) DO emit events.
 - **Outbox survives bootstrap.** Full bootstrap clears model and metadata storage but preserves the outbox, so unsynced mutations survive schema resets.
 - `"sent"` transactions reset to `"queued"` on reconnect. This prevents lost mutations but can cause duplicate sends if the server already processed them.
-- **`clientRef` is late-bound.** The SyncClient closure assigns `clientRef` after the object literal is defined. Calling any method before `createSyncClient()` returns will throw.
+- **Mutations run through `MutationCoordinator` (`mutations.ts`).** `client.ts` wires it up and delegates; there is no `clientRef` late-binding hack any more.
+- **Eviction emits a `modelChange`.** When the identity map evicts an entry (LRU pressure), it invokes `onEvict`, which the client turns into a `modelChange` "update" so hooks re-render and Suspense re-hydrates on next access. `missingModels` is cleared, not poisoned.
+- **Sync-less mutate results complete immediately** (see the outbox state note above) rather than parking forever in `awaitingSync`.
 - `pickOriginal()` captures only changed fields, not the full model. Original baselines must be minimal for efficient conflict resolution.
 - Query `includeArchived` defaults to `false`. Archived models are filtered from `getAll()` and `query()` unless explicitly included.
 - Yjs integration is optional. `yjsTransport` in `SyncClientOptions` enables collaborative editing. Without it, offline-first sync still works.
+- **Known deferred limitations (by design):** own-client echo suppression is intentional and all-or-nothing (confirmed optimistic updates from this client do not re-emit); cross-tab read-modify-write races on shared storage are inherent to lightweight storage adapters and are not arbitrated here.
 
 ## Conventions
 

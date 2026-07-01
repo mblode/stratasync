@@ -6,7 +6,7 @@ Core model runtime, schema metadata, sync primitives, and transaction system for
 
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
-- `npm run test`: run tests (Node built-in test runner with tsx)
+- `npm run test`: run tests (Vitest)
 - `npm run lint`: lint with Oxlint
 - `npm run check-types`: type check without emitting
 
@@ -18,7 +18,7 @@ Core model runtime, schema metadata, sync primitives, and transaction system for
 - Delta application uses last-writer-wins conflict resolution at the field level, not document level. Concurrent writes to different fields merge cleanly, but same-field conflicts always take the server's value.
 - Transaction serialization uses abbreviated field names (`cid`, `cli`, `m`, `mid`, `a`, `p`, `o`). Always use `serializeTransaction()`/`deserializeTransaction()`, never construct the compact format manually.
 - Schema hash is deterministic and order-independent. Model registration order does not affect it, but adding, removing, or renaming fields changes the hash and triggers a client re-bootstrap.
-- Tests use Node's built-in test runner (not Vitest). Run with `node --test --import tsx`; async test fixture methods may trigger Oxlint's `useAwait` lint rule (false positives for interface-matching stubs).
+- Tests use **Vitest** (`vitest run`). Async test fixture methods may trigger Oxlint's `useAwait` lint rule (false positives for interface-matching stubs).
 
 ## Conventions
 
