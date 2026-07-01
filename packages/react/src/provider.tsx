@@ -77,10 +77,6 @@ export const SyncProvider = ({
     readyPromiseRef.current = createReadyPromiseController(
       client.state === "syncing"
     );
-  } else if (state === "syncing") {
-    readyPromiseRef.current.resolve();
-  } else if (readyPromiseRef.current.isSettled()) {
-    readyPromiseRef.current = createReadyPromiseController();
   }
 
   const readyPromise = readyPromiseRef.current.promise;
@@ -100,6 +96,12 @@ export const SyncProvider = ({
   useEffect(() => {
     let mounted = true;
     stateClientRef.current = client;
+
+    // Resolve immediately if the client is already syncing at mount;
+    // subsequent transitions are handled by onStateChange below.
+    if (client.state === "syncing") {
+      readyPromiseRef.current.resolve();
+    }
 
     // Subscribe to state changes
     const unsubState = client.onStateChange((nextState) => {

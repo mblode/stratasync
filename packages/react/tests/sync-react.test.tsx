@@ -13,7 +13,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { Suspense, useCallback } from "react";
+import { Suspense, useCallback, useEffect } from "react";
 
 import {
   SyncProvider,
@@ -29,6 +29,7 @@ import {
   useSyncClient,
   useSyncClientInstance,
   useSyncReady,
+  useSyncReadyPromise,
   useSyncState,
 } from "../src";
 
@@ -376,6 +377,38 @@ const SuspenseModelProbe = ({ id }: { id: string }) => {
   const task = useModel<Task>("Task", id);
 
   return <div data-testid="suspenseTitle">{task?.title ?? ""}</div>;
+};
+
+const QueryModelProbe = ({ modelName }: { modelName: string }) => {
+  const { data, isLoading } = useQuery<Task>(modelName, { limit: 10 });
+
+  return (
+    <div>
+      <div data-testid="mnLoading">{booleanText(isLoading)}</div>
+      <div data-testid="mnCount">{String(data.length)}</div>
+      <div data-testid="mnFirst">{data[0]?.title ?? ""}</div>
+    </div>
+  );
+};
+
+const ReadyPromiseProbe = ({ onResolved }: { onResolved: () => void }) => {
+  const readyPromise = useSyncReadyPromise();
+
+  useEffect(() => {
+    let active = true;
+    const waitForReady = async () => {
+      await readyPromise;
+      if (active) {
+        onResolved();
+      }
+    };
+    waitForReady();
+    return () => {
+      active = false;
+    };
+  }, [readyPromise, onResolved]);
+
+  return <div data-testid="readyProbe" />;
 };
 
 const QueryFilterProbe = ({ type }: { type: string }) => {
@@ -1262,5 +1295,83 @@ describe("sync-react bindings", () => {
     });
 
     expect(useModelSuspense).toBe(useModel);
+  });
+
+  it("useQuery resets data and loading when modelName changes", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const taskDeferred = createDeferred<QueryResult<Task>>();
+    const noteDeferred = createDeferred<QueryResult<Task>>();
+
+    client.query = vi.fn((modelName: string) =>
+      modelName === "Task" ? taskDeferred.promise : noteDeferred.promise
+    ) as typeof client.query;
+    client.getIdentityMap = vi.fn(
+      () => new Map<string, Task>()
+    ) as typeof client.getIdentityMap;
+
+    const { rerender } = render(
+      <SyncProvider client={client}>
+        <QueryModelProbe modelName="Task" />
+      </SyncProvider>
+    );
+
+    act(() => {
+      taskDeferred.resolve({
+        data: [{ id: "task-1", title: "Task One" }],
+        hasMore: false,
+        totalCount: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mnFirst").textContent).toBe("Task One");
+    });
+    expect(screen.getByTestId("mnCount").textContent).toBe("1");
+
+    rerender(
+      <SyncProvider client={client}>
+        <QueryModelProbe modelName="Note" />
+      </SyncProvider>
+    );
+
+    // Render-time key reset clears the stale Task data and restores loading
+    // while the Note query is still in flight.
+    await waitFor(() => {
+      expect(screen.getByTestId("mnCount").textContent).toBe("0");
+    });
+    expect(screen.getByTestId("mnFirst").textContent).toBe("");
+    expect(screen.getByTestId("mnLoading").textContent).toBe("true");
+
+    act(() => {
+      noteDeferred.resolve({
+        data: [{ id: "note-1", title: "Note One" }],
+        hasMore: false,
+        totalCount: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mnFirst").textContent).toBe("Note One");
+    });
+    expect(screen.getByTestId("mnLoading").textContent).toBe("false");
+  });
+
+  it("ready promise resolves when client already syncing at mount", async () => {
+    const client = createTestClient({ state: "syncing" });
+    let resolved = false;
+    // oxlint-disable-next-line react-perf/jsx-no-new-function-as-prop -- test-only callback; no re-render perf concern
+    const handleResolved = () => {
+      resolved = true;
+    };
+
+    render(
+      <SyncProvider client={client}>
+        <ReadyPromiseProbe onResolved={handleResolved} />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(resolved).toBeTruthy();
+    });
   });
 });

@@ -252,6 +252,31 @@ export const useQuery = <T>(
   const requestVersionRef = useRef(0);
   const handledOptionsVersionRef = useRef(optionsVersion);
 
+  // Render-time key reset: when the client or model name changes, treat the
+  // hook as a fresh mount. Invalidate in-flight requests, recompute the initial
+  // state, and reset every ref + state slice so stale data/loading never leak
+  // across a `modelName` change. The effect below then re-runs the query.
+  const queryKeyRef = useRef({ client, modelName });
+  const queryKey = queryKeyRef.current;
+  if (queryKey.client !== client || queryKey.modelName !== modelName) {
+    queryKeyRef.current = { client, modelName };
+    requestVersionRef.current += 1;
+    const nextState = computeState();
+    initialRef.current = nextState;
+    dataRef.current = nextState.data;
+    snapshotsRef.current = captureSnapshots(nextState.data);
+    hasDataRef.current = nextState.data.length > 0;
+    totalCountRef.current = nextState.totalCount;
+    hasMoreRef.current = nextState.hasMore;
+    isLoadingRef.current = nextState.isLoading;
+    errorRef.current = null;
+    setData(nextState.data);
+    setIsLoading(nextState.isLoading);
+    setError(null);
+    setTotalCount(nextState.totalCount);
+    setHasMore(nextState.hasMore);
+  }
+
   /**
    * Apply a query result to React state. Only calls setters when values
    * actually changed, preventing unnecessary re-renders.
