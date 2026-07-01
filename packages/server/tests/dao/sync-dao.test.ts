@@ -102,4 +102,41 @@ describe("SyncDao suite", () => {
 
     await expect(dao.getEarliestSyncId()).resolves.toBe(3n);
   });
+
+  it("acquires the insert-order advisory lock before inserting the row", async () => {
+    const calls: string[] = [];
+    const db = {
+      execute(query: unknown) {
+        calls.push("execute");
+        expect(query).toBeDefined();
+        return Promise.resolve([]);
+      },
+      insert() {
+        return {
+          values() {
+            return {
+              returning() {
+                calls.push("insert");
+                return Promise.resolve([{ id: 42n }]);
+              },
+            };
+          },
+        };
+      },
+    } as unknown as SyncDb;
+
+    const dao = new SyncDao(db, { syncActions, syncGroupMemberships });
+    const created = await dao.createSyncAction({
+      action: "I",
+      clientId: "client-1",
+      clientTxId: "tx-1",
+      data: { title: "Hello" },
+      groupId: "workspace-1",
+      model: "Task",
+      modelId: "task-1",
+    });
+
+    expect(created.id).toBe(42n);
+    expect(calls).toEqual(["execute", "insert"]);
+  });
 });

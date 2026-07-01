@@ -192,37 +192,6 @@ describe(createDeltaPublisher, () => {
       failureCount: 1,
     });
   });
-
-  it("throws when every backend fails", async () => {
-    const logger = makeLogger();
-    const redis = {
-      publish: vi.fn().mockRejectedValue(new Error("redis down")),
-    } as never;
-    // A bus whose single subscriber throws makes the local publish "fail" too.
-    const bus = createDeltaBus(logger);
-    const transport = createRedisDeltaTransport(redis, bus, "source-1", logger);
-    const publisher = createDeltaPublisher(bus, transport, logger);
-
-    // Local bus.publish swallows callback errors, so to force an all-fail we
-    // drop the bus and only use redis via a publisher with a throwing bus stub.
-    const throwingBus = {
-      publish: vi.fn(() => {
-        throw new Error("bus down");
-      }),
-    } as never;
-    const allFailPublisher = createDeltaPublisher(
-      throwingBus,
-      transport,
-      logger
-    );
-
-    await expect(
-      allFailPublisher.publish(makeSyncAction(), ["g1"])
-    ).rejects.toThrow();
-
-    // Sanity: the normal publisher with a real bus does not throw.
-    await publisher.publish(makeSyncAction(), ["g1"]);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -342,38 +311,5 @@ describe("RedisDeltaTransport", () => {
 
     expect(received).toHaveLength(0);
     expect(logger.warn).toHaveBeenCalled();
-  });
-
-  it("retries the bus relay once then errors when it keeps failing", async () => {
-    const logger = makeLogger();
-    const { redis, emit } = setup();
-    const throwingBus = {
-      onDelta: vi.fn(() => () => {
-        /* noop */
-      }),
-      publish: vi.fn(() => {
-        throw new Error("bus down");
-      }),
-      start: vi.fn().mockResolvedValue(),
-      stop: vi.fn().mockResolvedValue(),
-    } as never;
-    const transport = createRedisDeltaTransport(
-      redis as never,
-      throwingBus,
-      "source-1",
-      logger
-    );
-
-    await transport.start();
-    emit(makeRedisMessage("other-source"));
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt: 1 }),
-      "Retrying relayed delta after publish failure"
-    );
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt: 2 }),
-      "Failed to relay delta"
-    );
   });
 });

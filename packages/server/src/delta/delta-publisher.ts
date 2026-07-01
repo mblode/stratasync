@@ -97,6 +97,12 @@ export class DeltaBus implements DeltaSubscriberLike {
     this.logger = logger;
   }
 
+  /**
+   * Fans out to every subscriber. Each callback is isolated in its own
+   * try/catch, so a throwing subscriber is logged and skipped — this method
+   * never throws. Callers can rely on that to treat local delivery as
+   * infallible.
+   */
   publish(action: SyncActionOutput, groups: string[]): void {
     for (const callback of this.callbacks) {
       try {
@@ -133,7 +139,7 @@ export class DeltaBus implements DeltaSubscriberLike {
 /**
  * Redis pub/sub transport. Owns the publisher, the duplicated subscriber
  * connection (with reconnect/resubscribe), sourceId loopback suppression, and
- * the relay-with-retry that fans redis-received deltas back into the local bus.
+ * the relay that fans redis-received deltas back into the local bus.
  */
 export class RedisDeltaTransport implements DeltaPublisherLike {
   private readonly redis: RedisClient;
@@ -192,30 +198,9 @@ export class RedisDeltaTransport implements DeltaPublisherLike {
       return;
     }
 
-    this.relayWithRetry(delta.action, delta.groups);
-  }
-
-  private relayWithRetry(action: SyncActionOutput, groups: string[]): void {
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        this.bus.publish(action, groups);
-        return;
-      } catch (error) {
-        const logContext = {
-          attempt,
-          err: formatError(error),
-          syncId: action.syncId,
-        };
-        if (attempt === 1) {
-          this.logger.warn(
-            logContext,
-            "Retrying relayed delta after publish failure"
-          );
-        } else {
-          this.logger.error(logContext, "Failed to relay delta");
-        }
-      }
-    }
+    // DeltaBus.publish never throws (each subscriber callback is wrapped in its
+    // own try/catch), so relaying is a direct call — no retry needed.
+    this.bus.publish(delta.action, delta.groups);
   }
 
   private async subscribeToChannel(): Promise<void> {
@@ -291,7 +276,8 @@ export class RedisDeltaTransport implements DeltaPublisherLike {
 /**
  * Composes local-first delta delivery. The in-process bus is always published
  * to (so live sessions in this process see the delta immediately); redis (if
- * present) is best-effort. A publish throws only when every backend fails.
+ * present) is best-effort. A publish never throws: local delivery is
+ * infallible and a redis failure is warned but swallowed.
  */
 class DeltaPublisher implements DeltaPublisherLike {
   private readonly bus: DeltaBus;
@@ -305,39 +291,24 @@ class DeltaPublisher implements DeltaPublisherLike {
   }
 
   async publish(action: SyncActionOutput, groups: string[]): Promise<void> {
-    let successCount = 0;
-    const errors: unknown[] = [];
-
-    // Local-first: always deliver to the in-process bus.
-    try {
-      this.bus.publish(action, groups);
-      successCount += 1;
-    } catch (error) {
-      errors.push(error);
-    }
+    // Local-first: the in-process bus always receives the delta. DeltaBus.publish
+    // never throws, so local delivery cannot fail. Redis is best-effort — a
+    // failure there is warned but never propagated. This method never throws.
+    this.bus.publish(action, groups);
 
     if (this.redis) {
       try {
         await this.redis.publish(action, groups);
-        successCount += 1;
       } catch (error) {
-        errors.push(error);
+        this.logger.warn(
+          {
+            error: formatError(error),
+            event: "sync.delta.publish_partial_failure",
+            failureCount: 1,
+          },
+          "Delta publish failed for one or more backends"
+        );
       }
-    }
-
-    if (errors.length > 0) {
-      this.logger.warn(
-        {
-          error: formatError(errors[0]),
-          event: "sync.delta.publish_partial_failure",
-          failureCount: errors.length,
-        },
-        "Delta publish failed for one or more backends"
-      );
-    }
-
-    if (successCount === 0) {
-      throw normalizeError(errors[0] ?? new Error("Delta publish failed"));
     }
   }
 

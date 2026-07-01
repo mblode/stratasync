@@ -10,6 +10,7 @@ import type { AnyPgTable } from "drizzle-orm/pg-core";
  */
 export interface SyncDb {
   transaction<T>(callback: (tx: SyncDb) => Promise<T>): Promise<T>;
+  execute(query: unknown): Promise<unknown>;
   select(fields?: Record<string, unknown>): SyncDbSelectBuilder;
   insert(table: AnyPgTable): {
     values(data: Record<string, unknown>): {

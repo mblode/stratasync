@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableName,
+  gt,
+  inArray,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import type { RawSyncActionRow } from "../core/sync-action.js";
@@ -58,19 +69,16 @@ export class SyncDao {
   }
 
   /**
-   * Gets the last sync ID.
+   * Acquires a transaction-scoped advisory lock keyed on the sync_actions
+   * table. Held from insert through commit so IDs are allocated in commit
+   * order: a keyset reader (`gt(id, cursor)`) can never skip a lower ID that
+   * commits after a higher one already became visible.
    */
-  async getLastSyncId(): Promise<bigint> {
-    const idCol = getColumn(this.tables.syncActions, "id");
-    const rows = await this.db
-      .select({ id: idCol })
-      .from(this.tables.syncActions)
-      .where()
-      .orderBy(desc(idCol))
-      .limit(1);
-
-    const [result] = rows;
-    return result ? ensureBigint(result.id as bigint | string) : 0n;
+  private async acquireInsertOrderLock(): Promise<void> {
+    const tableName = getTableName(this.tables.syncActions);
+    await this.db.execute(
+      sql`select pg_advisory_xact_lock(hashtext('stratasync:sync_actions'), hashtext(${tableName}))`
+    );
   }
 
   /**
@@ -182,6 +190,8 @@ export class SyncDao {
    * Creates a sync action.
    */
   async createSyncAction(data: SyncActionInsert): Promise<RawSyncActionRow> {
+    await this.acquireInsertOrderLock();
+
     const rows = await this.db
       .insert(this.tables.syncActions)
       .values({

@@ -262,6 +262,11 @@ export const registerSyncRoutes = (
       const input: MutateInput = { batchId, transactions };
 
       const result = await mutateService.mutate(syncUser, input, (action) => {
+        // The DAO's insert-order advisory lock guarantees IDs are allocated in
+        // commit order, but this post-commit publish still races: two committed
+        // actions can be handed to `onAction` out of order relative to their
+        // IDs. Tolerated here — a fully ordered fix would require transactional
+        // NOTIFY (publish inside the commit), which is out of scope.
         if (deltaPublisher) {
           const groups = resolvePublishedDeltaGroups(
             action.groupId,
