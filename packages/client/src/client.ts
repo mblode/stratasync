@@ -57,7 +57,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const identityMaps = new IdentityMapRegistry(
     resolvedOptions.reactivity,
     undefined,
-    resolvedOptions.identityMapMaxSize
+    resolvedOptions.identityMapMaxSize,
+    // Emit an "update" (not "delete") when the LRU cache evicts an entry: hooks
+    // re-render and Suspense re-hydrates the model, and because it is not a
+    // delete, missingModels is cleared rather than poisoned. The arrow resolves
+    // emitModelChange lazily at eviction time (it is defined below).
+    (m, id) => emitModelChange(m, id, "update")
   );
   const eventListeners = new Set<(event: SyncClientEvent) => void>();
   const missingModels = new Set<string>();

@@ -74,6 +74,27 @@ describe("IdentityMap eviction", () => {
     expect(map.get("task-3")).toMatchObject({ id: "task-3" });
   });
 
+  it("notifies onEvict after evicting entries", () => {
+    const evicted: [string, string][] = [];
+    const registry = new IdentityMapRegistry(
+      noopReactivityAdapter,
+      undefined,
+      2,
+      (modelName, id) => {
+        evicted.push([modelName, id]);
+      }
+    );
+    const map = registry.getMap<Record<string, unknown>>("Task");
+
+    map.set("task-1", { id: "task-1" });
+    map.set("task-2", { id: "task-2" });
+    // Exceeds the cap, evicting the least-recently-used task-1.
+    map.set("task-3", { id: "task-3" });
+
+    expect(evicted).toEqual([["Task", "task-1"]]);
+    expect(map.has("task-1")).toBeFalsy();
+  });
+
   it("does not evict when maxSize is non-positive or infinite", () => {
     const registry = new IdentityMapRegistry(
       noopReactivityAdapter,

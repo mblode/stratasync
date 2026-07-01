@@ -610,6 +610,37 @@ describe(OutboxManager, () => {
     expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeFalsy();
   });
 
+  it("completes immediately when mutate result carries no sync id", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      // No per-result syncId and lastSyncId "0" (ZERO_SYNC_ID) means there is
+      // no cursor to await, so the transaction must complete rather than park
+      // in awaitingSync forever.
+      transport: new TestTransport((batch) => ({
+        lastSyncId: "0",
+        results: batch.transactions.map((tx) => ({
+          clientTxId: tx.clientTxId,
+          success: true,
+        })),
+        success: true,
+      })),
+    });
+
+    const tx = await manager.insert("Task", "task-1", {
+      id: "task-1",
+      title: "No sync id",
+    });
+
+    await manager.flush();
+
+    expect(tx.state).toBe("completed");
+    expect(await storage.getOutbox()).toHaveLength(0);
+    expect(manager.getLocalClientTxIds().has(tx.clientTxId)).toBeFalsy();
+  });
+
   it("getActiveTransactions returns only in-flight transactions", async () => {
     const storage = new InMemoryStorage();
     const manager = new OutboxManager({

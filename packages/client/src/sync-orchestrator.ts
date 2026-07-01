@@ -247,10 +247,6 @@ export class SyncOrchestrator {
       if (!this.isRunActive(activeRunToken)) {
         return;
       }
-      await this.applyPendingOutboxTransactions();
-      if (!this.isRunActive(activeRunToken)) {
-        return;
-      }
 
       // Local data is ready. Mark as syncing so the UI can render
       // cached content immediately without waiting for network ops.
@@ -269,12 +265,10 @@ export class SyncOrchestrator {
           this.handleSyncError(error);
         }
       });
-      // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
-      this.processOutboxTransactions().catch((error) => {
-        if (this.isRunActive(activeRunToken)) {
-          this.handleSyncError(error);
-        }
-      });
+      // No outbox drain here: outboxManager is attached only after start()
+      // resolves (see client.ts createOutboxManager), so this call would be a
+      // no-op at startup. The client owns the post-start drain via
+      // synchronizeOutboxWithSyncCursor.
     } catch (error) {
       if (this.isRunActive(activeRunToken)) {
         this.handleSyncError(error);

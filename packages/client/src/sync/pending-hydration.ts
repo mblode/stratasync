@@ -69,13 +69,11 @@ export const applyPendingTransactionsToIdentityMaps = (
         break;
       }
       case "V": {
-        const existing = map.get(tx.modelId);
-        if (existing) {
-          const updated = {
-            ...existing,
-            ...createUnarchivePatch(),
-          };
-          map.set(tx.modelId, updated);
+        // Merge in place (mirroring the "A" branch) so class-model instance
+        // identity and prototype getters survive. Spreading + set() would
+        // shed the prototype and corrupt class-model instances.
+        if (map.has(tx.modelId)) {
+          map.merge(tx.modelId, createUnarchivePatch());
         }
         break;
       }

@@ -441,14 +441,20 @@ export class OutboxManager {
         const syncIdNeededForCompletion =
           txResult.syncId ??
           (highestSyncId === ZERO_SYNC_ID ? undefined : highestSyncId);
-        tx.state = "awaitingSync";
-        tx.syncIdNeededForCompletion = syncIdNeededForCompletion;
-        tx.lastError = undefined;
-        await this.storage.updateOutboxTransaction(tx.clientTxId, {
-          lastError: undefined,
-          state: "awaitingSync",
-          syncIdNeededForCompletion,
-        });
+        if (syncIdNeededForCompletion === undefined) {
+          // No sync id means there is no cursor to wait for. Completing now
+          // avoids parking the transaction in awaitingSync forever.
+          await this.completeTransactionNow(tx);
+        } else {
+          tx.state = "awaitingSync";
+          tx.syncIdNeededForCompletion = syncIdNeededForCompletion;
+          tx.lastError = undefined;
+          await this.storage.updateOutboxTransaction(tx.clientTxId, {
+            lastError: undefined,
+            state: "awaitingSync",
+            syncIdNeededForCompletion,
+          });
+        }
       } else {
         tx.state = "failed";
         tx.lastError = txResult.error ?? "Unknown error";
@@ -652,6 +658,16 @@ export class OutboxManager {
   }
 
   /**
+   * Removes a transaction from the outbox and marks it completed. Shared by
+   * the mutate-result path (when no sync id is owed) and completeUpToSyncId.
+   */
+  private async completeTransactionNow(tx: Transaction): Promise<void> {
+    await this.storage.removeFromOutbox(tx.clientTxId);
+    this.localClientTxIds.delete(tx.clientTxId);
+    tx.state = "completed";
+  }
+
+  /**
    * Completes any awaiting transactions up to the given sync ID
    */
   async completeUpToSyncId(lastSyncId: SyncId): Promise<number> {
@@ -664,9 +680,7 @@ export class OutboxManager {
         typeof tx.syncIdNeededForCompletion === "string" &&
         !isSyncIdGreaterThan(tx.syncIdNeededForCompletion, lastSyncId)
       ) {
-        await this.storage.removeFromOutbox(tx.clientTxId);
-        this.localClientTxIds.delete(tx.clientTxId);
-        tx.state = "completed";
+        await this.completeTransactionNow(tx);
         completed += 1;
       }
     }

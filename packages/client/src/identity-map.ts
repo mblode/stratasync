@@ -16,6 +16,9 @@ interface IdentityMapMutationOptions {
   serialized?: boolean;
 }
 
+/** Notified with (modelName, id) after an entry is evicted from a map. */
+type EvictionListener = (modelName: string, id: string) => void;
+
 const DEFAULT_IDENTITY_MAP_MAX_SIZE = 10_000;
 
 const isModelInstanceLike = (value: unknown): value is ModelInstanceLike => {
@@ -42,17 +45,20 @@ export class IdentityMap<T extends Record<string, unknown>> {
   // Gives O(1) touch (delete + re-add) and O(1) eviction (drop the first key).
   private readonly accessOrder = new Set<string>();
   private modelFactory?: ModelFactory;
+  private readonly onEvict?: EvictionListener;
 
   constructor(
     modelName: string,
     reactivity: ReactivityAdapter,
     modelFactory?: ModelFactory,
-    maxSize = DEFAULT_IDENTITY_MAP_MAX_SIZE
+    maxSize = DEFAULT_IDENTITY_MAP_MAX_SIZE,
+    onEvict?: EvictionListener
   ) {
     this.modelName = modelName;
     this.reactivity = reactivity;
     this.modelFactory = modelFactory;
     this.maxSize = maxSize;
+    this.onEvict = onEvict;
     this.map = reactivity.createMap<string, T>(undefined, {
       name: `IdentityMap:${modelName}`,
     });
@@ -285,6 +291,7 @@ export class IdentityMap<T extends Record<string, unknown>> {
       return;
     }
 
+    const evicted: string[] = [];
     while (this.map.size > this.maxSize) {
       const oldestKey = this.accessOrder.values().next().value;
       if (oldestKey === undefined) {
@@ -292,6 +299,14 @@ export class IdentityMap<T extends Record<string, unknown>> {
       }
       this.accessOrder.delete(oldestKey);
       this.map.delete(oldestKey);
+      evicted.push(oldestKey);
+    }
+
+    // Notify after the eviction loop so observers see the settled map state.
+    if (this.onEvict) {
+      for (const id of evicted) {
+        this.onEvict(this.modelName, id);
+      }
     }
   }
 }
@@ -307,15 +322,18 @@ export class IdentityMapRegistry {
   private readonly reactivity: ReactivityAdapter;
   private readonly maxSize: number;
   private modelFactory?: ModelFactory;
+  private readonly onEvict?: EvictionListener;
 
   constructor(
     reactivity: ReactivityAdapter,
     modelFactory?: ModelFactory,
-    maxSize = DEFAULT_IDENTITY_MAP_MAX_SIZE
+    maxSize = DEFAULT_IDENTITY_MAP_MAX_SIZE,
+    onEvict?: EvictionListener
   ) {
     this.reactivity = reactivity;
     this.modelFactory = modelFactory;
     this.maxSize = maxSize;
+    this.onEvict = onEvict;
   }
 
   setModelFactory(modelFactory?: ModelFactory): void {
@@ -335,7 +353,8 @@ export class IdentityMapRegistry {
         modelName,
         this.reactivity,
         this.modelFactory,
-        this.maxSize
+        this.maxSize,
+        this.onEvict
       );
       this.maps.set(modelName, map);
     }
