@@ -322,8 +322,11 @@ const proxyDocsRequest = async (
     config.customUrl,
     config.docsUrl
   );
+  const headers = new Headers(docsResponse.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
   return new Response(rewrittenHtml, {
-    headers: docsResponse.headers,
+    headers,
     status: docsResponse.status,
     statusText: docsResponse.statusText,
   });

@@ -4,6 +4,7 @@ import type {
   StorageAdapter,
   StorageMeta,
 } from "@stratasync/client";
+import { compareSyncId, isSyncIdGreaterThan } from "@stratasync/core";
 import type { SyncAction, Transaction } from "@stratasync/core";
 
 export class InMemoryStorage implements StorageAdapter {
@@ -195,9 +196,13 @@ export class InMemoryStorage implements StorageAdapter {
   }
 
   getSyncActions(afterSyncId?: string, limit?: number): Promise<SyncAction[]> {
-    const filtered = afterSyncId
-      ? this.syncActions.filter((action) => action.id > afterSyncId)
-      : [...this.syncActions];
+    const filtered = (
+      afterSyncId
+        ? this.syncActions.filter((action) =>
+            isSyncIdGreaterThan(action.id, afterSyncId)
+          )
+        : [...this.syncActions]
+    ).toSorted((a, b) => compareSyncId(a.id, b.id));
     if (typeof limit === "number") {
       return Promise.resolve(filtered.slice(0, limit));
     }
@@ -210,7 +215,9 @@ export class InMemoryStorage implements StorageAdapter {
   }
 
   pruneSyncActions(beforeSyncId: string): Promise<void> {
-    const kept = this.syncActions.filter((action) => action.id > beforeSyncId);
+    const kept = this.syncActions.filter(
+      (action) => compareSyncId(action.id, beforeSyncId) > 0
+    );
     this.syncActions.length = 0;
     this.syncActions.push(...kept);
     return Promise.resolve();
