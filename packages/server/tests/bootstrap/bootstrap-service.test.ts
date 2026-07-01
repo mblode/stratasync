@@ -232,15 +232,9 @@ describe(BootstrapService, () => {
         modelIds: ["task-1", "task-2"],
         modelName: "NamedTask",
       },
-      {
-        firstSyncId: 7n,
-        groups: ["workspace-1"],
-        modelIds: ["task-1", "task-2"],
-        modelName: "NamedTask",
-      },
     ]);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":1}');
+    expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":2}');
     expect(lines[1]).toContain('"id":"task-1"');
     expect(lines[1]).toContain('"title":"Keep me"');
   });
@@ -313,15 +307,9 @@ describe(BootstrapService, () => {
         modelIds: ["1", "2"],
         modelName: "NumericTask",
       },
-      {
-        firstSyncId: 9n,
-        groups: ["workspace-1"],
-        modelIds: ["1", "2"],
-        modelName: "NumericTask",
-      },
     ]);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('"returnedModelsCount":{"NumericTask":1}');
+    expect(lines[0]).toContain('"returnedModelsCount":{"NumericTask":2}');
     expect(lines[1]).toContain('"id":1');
     expect(lines[1]).toContain('"sequence":1');
     expect(lines[1]).toContain('"title":"Keep me"');
@@ -395,16 +383,10 @@ describe(BootstrapService, () => {
         modelIds: ["task-1", "task-2"],
         modelName: "NamedTask",
       },
-      {
-        firstSyncId: 7n,
-        groups: ["workspace-1"],
-        modelIds: ["task-1", "task-2"],
-        modelName: "NamedTask",
-      },
     ]);
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain('"lastSyncId":"100"');
-    expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":1}');
+    expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":2}');
     expect(lines[1]).toContain('"id":"task-1"');
     expect(lines[1]).toContain('"title":"Keep me"');
   });

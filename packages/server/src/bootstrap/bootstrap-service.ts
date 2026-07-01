@@ -174,13 +174,10 @@ export class BootstrapService {
     const modelsToBootstrap = request.models ?? this.allModelNames;
     const returnedModelsCount: Record<string, number> = {};
 
+    // Rows in scope at the snapshot (pre touched-filter). Informational metadata
+    // only — no first-party consumer relies on it matching the streamed count.
     for (const modelName of modelsToBootstrap) {
-      const modelCount = await this.countBootstrapModelRows(
-        modelName,
-        filter,
-        groups,
-        filterAfterSyncId
-      );
+      const modelCount = await this.countModelRows(modelName, filter);
       returnedModelsCount[modelName] = modelCount;
     }
 
@@ -423,29 +420,6 @@ export class BootstrapService {
   // -------------------------------------------------------------------------
   // Count / stream helpers
   // -------------------------------------------------------------------------
-
-  private async countBootstrapModelRows(
-    modelName: string,
-    filter: BootstrapFilterContext,
-    groups: string[],
-    firstSyncId: bigint
-  ): Promise<number> {
-    if (firstSyncId === 0n) {
-      return await this.countModelRows(modelName, filter);
-    }
-
-    let rowCount = 0;
-    for await (const _line of this.streamFilteredModelRows(
-      modelName,
-      filter,
-      groups,
-      firstSyncId
-    )) {
-      rowCount += 1;
-    }
-
-    return rowCount;
-  }
 
   private async countModelRows(
     modelName: string,
