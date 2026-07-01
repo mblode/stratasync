@@ -23,16 +23,17 @@ const getCachedReference = function getCachedReference<T>(
   targetModelName: string,
   id: string
 ): T | null {
-  const cached = store.getCached?.(targetModelName, id);
-  if (cached !== undefined) {
-    return (cached as T | null) ?? null;
+  if (store.getCached) {
+    return (store.getCached(targetModelName, id) as T | null) ?? null;
   }
 
-  const result = store.get(targetModelName, id);
-  if (result instanceof Promise) {
+  // Without getCached the store only exposes async get; kick it off to warm
+  // the cache. A pending Promise has no value to return synchronously.
+  const pending = store.get(targetModelName, id);
+  if (pending instanceof Promise) {
     return null;
   }
-  return (result as T | null) ?? null;
+  return (pending as T | null) ?? null;
 };
 
 /**
