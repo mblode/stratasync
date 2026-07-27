@@ -1,6 +1,9 @@
 {
   "$schema": "https://blode.md/docs.json",
   "name": "Strata Sync",
+  "seo": {
+    "siteUrl": "https://stratasync.dev/docs"
+  },
   "description": "Build instant, offline-capable apps that sync with Strata Sync.",
   "navbar": {
     "links": [
