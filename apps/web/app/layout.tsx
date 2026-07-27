@@ -74,7 +74,6 @@ const webSiteJsonLd = {
 const softwareJsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareSourceCode",
-  applicationCategory: "DeveloperApplication",
   codeRepository: siteConfig.links.github,
   description: siteConfig.description,
   name: siteConfig.name,
