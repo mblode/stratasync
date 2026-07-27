@@ -72,6 +72,17 @@ const run = async () => {
     assert.equal(requests.length, 1);
     assertHost(requests[0], env.LANDING_URL);
 
+    // Paths the docs site does not serve belong to landing. Listing one in
+    // DOCS_PAGE_PATHS turns it into a 308 that lands on a docs 404.
+    requests.length = 0;
+    const landingPageRes = await worker.fetch(
+      new Request("https://stratasync.dev/manifesto"),
+      env
+    );
+    assert.equal(landingPageRes.status, 200);
+    assert.equal(requests.length, 1);
+    assertHost(requests[0], env.LANDING_URL);
+
     requests.length = 0;
     await worker.fetch(
       new Request("https://stratasync.dev/.well-known/test"),
@@ -124,13 +135,13 @@ const run = async () => {
     // Root-level docs page requests normalize back to /docs/*
     requests.length = 0;
     const leakedDocsPathRes = await worker.fetch(
-      new Request("https://stratasync.dev/manifesto?ref=test"),
+      new Request("https://stratasync.dev/installation?ref=test"),
       env
     );
     assert.equal(leakedDocsPathRes.status, 308);
     assert.equal(
       leakedDocsPathRes.headers.get("Location"),
-      "https://stratasync.dev/docs/manifesto?ref=test"
+      "https://stratasync.dev/docs/installation?ref=test"
     );
     assert.equal(requests.length, 0);
 
@@ -139,7 +150,7 @@ const run = async () => {
     const docsHomeRes = await worker.fetch(
       new Request("https://stratasync.dev/", {
         headers: {
-          Referer: "https://stratasync.dev/docs/manifesto",
+          Referer: "https://stratasync.dev/docs/installation",
         },
       }),
       env
@@ -155,24 +166,24 @@ const run = async () => {
     requests.length = 0;
     nextResponse = new Response(null, {
       headers: {
-        Location: "/values",
+        Location: "/quick-start",
       },
       status: 307,
     });
     const docsRedirectRes = await worker.fetch(
-      new Request("https://stratasync.dev/docs/manifesto"),
+      new Request("https://stratasync.dev/docs/installation"),
       env
     );
     assert.equal(docsRedirectRes.status, 307);
     assert.equal(
       docsRedirectRes.headers.get("Location"),
-      "https://stratasync.dev/docs/values"
+      "https://stratasync.dev/docs/quick-start"
     );
 
     // Root-relative docs links and canonicals in proxied HTML are rewritten under /docs
     requests.length = 0;
     nextResponse = new Response(
-      `<html><head><link rel="canonical" href="https://docs.example.com/manifesto"></head><body><a href="/">Home</a><a href="/manifesto">Manifesto</a><script>const page={"href":"/values","contentUrl":"/manifesto.mdx"}</script></body></html>`,
+      `<html><head><link rel="canonical" href="https://docs.example.com/installation"></head><body><a href="/">Home</a><a href="/installation">Installation</a><script>const page={"href":"/quick-start","contentUrl":"/installation.mdx"}</script></body></html>`,
       {
         headers: {
           "content-type": "text/html; charset=utf-8",
@@ -180,17 +191,17 @@ const run = async () => {
       }
     );
     const docsHtmlRes = await worker.fetch(
-      new Request("https://stratasync.dev/docs/manifesto"),
+      new Request("https://stratasync.dev/docs/installation"),
       env
     );
     const html = await docsHtmlRes.text();
     assert.match(html, /href="\/docs"/);
-    assert.match(html, /href="\/docs\/manifesto"/);
-    assert.match(html, /"href":"\/docs\/values"/);
-    assert.match(html, /"contentUrl":"\/docs\/manifesto\.mdx"/);
+    assert.match(html, /href="\/docs\/installation"/);
+    assert.match(html, /"href":"\/docs\/quick-start"/);
+    assert.match(html, /"contentUrl":"\/docs\/installation\.mdx"/);
     assert.match(
       html,
-      /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/manifesto">/
+      /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/installation">/
     );
 
     // The docs platform serves /docs-prefixed absolute URLs on its own host,

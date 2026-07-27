@@ -12,10 +12,6 @@ interface WorkerConfig {
 
 const DOCS_PREFIX = "/docs";
 const DOCS_PAGE_PATHS = [
-  "/manifesto",
-  "/values",
-  "/mission",
-  "/product-vision",
   "/installation",
   "/quick-start",
   "/architecture",
