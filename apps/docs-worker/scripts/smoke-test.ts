@@ -46,6 +46,27 @@ const run = async () => {
     assertHost(requests[0], env.DOCS_URL);
     assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
 
+    // Crawlers omit the Referer on assets: landing 404s, docs serves them.
+    requests.length = 0;
+    nextResponse = new Response("not found", { status: 404 });
+    const assetRes = await worker.fetch(
+      new Request("https://stratasync.dev/_next/static/chunks/main.js"),
+      env
+    );
+    assert.equal(requests.length, 2);
+    assertHost(requests[0], env.LANDING_URL);
+    assertHost(requests[1], env.DOCS_URL);
+    assert.equal(assetRes.status, 200);
+
+    // Landing's own assets still come from landing without a second hop.
+    requests.length = 0;
+    await worker.fetch(
+      new Request("https://stratasync.dev/_next/static/chunks/landing.js"),
+      env
+    );
+    assert.equal(requests.length, 1);
+    assertHost(requests[0], env.LANDING_URL);
+
     requests.length = 0;
     await worker.fetch(new Request("https://stratasync.dev/"), env);
     assert.equal(requests.length, 1);
@@ -171,6 +192,42 @@ const run = async () => {
       html,
       /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/manifesto">/
     );
+
+    // The docs platform serves /docs-prefixed absolute URLs on its own host,
+    // across canonical, og:url and escaped JSON-LD payloads.
+    requests.length = 0;
+    nextResponse = new Response(
+      `<html><head><link rel="canonical" href="https://docs.example.com/docs/installation"/><meta property="og:url" content="https://docs.example.com/docs/installation"/><meta property="og:image" content="https://docs.example.com/opengraph-image.png"/></head><body><script>{\\"url\\":\\"https://docs.example.com/docs/installation.md\\"}</script><a href="https://docs.example.com">Docs home</a></body></html>`,
+      {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+        },
+      }
+    );
+    const docsHostHtmlRes = await worker.fetch(
+      new Request("https://stratasync.dev/docs/installation"),
+      env
+    );
+    const docsHostHtml = await docsHostHtmlRes.text();
+    assert.doesNotMatch(docsHostHtml, /docs\.example\.com/);
+    assert.match(
+      docsHostHtml,
+      /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/installation"\/>/
+    );
+    assert.match(
+      docsHostHtml,
+      /property="og:url" content="https:\/\/stratasync\.dev\/docs\/installation"/
+    );
+    // Non-docs paths keep their path and only swap host.
+    assert.match(
+      docsHostHtml,
+      /property="og:image" content="https:\/\/stratasync\.dev\/opengraph-image\.png"/
+    );
+    assert.match(
+      docsHostHtml,
+      /\\"url\\":\\"https:\/\/stratasync\.dev\/docs\/installation\.md\\"/
+    );
+    assert.match(docsHostHtml, /href="https:\/\/stratasync\.dev\/docs"/);
   } finally {
     globalThis.fetch = originalFetch;
   }

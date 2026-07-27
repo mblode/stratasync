@@ -143,6 +143,39 @@ const rewriteDocsLocation = (
   return resolvedLocation.toString();
 };
 
+const REGEXP_SPECIAL_CHARS = /[.*+?^${}()|[\]\\]/g;
+// Absolute URL up to the first character that can terminate one inside HTML
+// attributes, JSON string literals, or escaped JSON payloads.
+const URL_TERMINATOR_CHARS = "\"'\\\\\\s<>";
+
+const escapeRegExp = (value: string): string =>
+  value.replace(REGEXP_SPECIAL_CHARS, "\\$&");
+
+// The docs platform emits absolute URLs on its own host (canonical, og:url,
+// JSON-LD). Left alone they tell crawlers the docs live on the docs host, so
+// every proxied page is treated as non-canonical on the custom domain.
+const rewriteDocsAbsoluteUrls = (
+  html: string,
+  customUrl: string,
+  docsUrl: string
+): string => {
+  const pattern = new RegExp(
+    `https://${escapeRegExp(docsUrl)}([^${URL_TERMINATOR_CHARS}]*)`,
+    "g"
+  );
+
+  return html.replace(pattern, (_match, path: string) => {
+    const pathname = path === "" ? "/" : path;
+    // The docs host only serves docs, so its root maps to the /docs prefix.
+    const rewrittenPath =
+      pathname === "/" || isDocsPath(pathname) || isKnownDocsPagePath(pathname)
+        ? toDocsPath(pathname)
+        : pathname;
+
+    return `https://${customUrl}${rewrittenPath}`;
+  });
+};
+
 const rewriteDocsHtml = (
   html: string,
   customUrl: string,
@@ -180,27 +213,40 @@ const rewriteDocsHtml = (
     );
   }
 
-  const canonicalHosts = [`https://${docsUrl}`, `https://${customUrl}`];
-  for (const host of canonicalHosts) {
-    rewrittenHtml = rewrittenHtml.replaceAll(
-      `rel="canonical" href="${host}"`,
-      `rel="canonical" href="https://${customUrl}${DOCS_PREFIX}"`
-    );
-    rewrittenHtml = rewrittenHtml.replaceAll(
-      `rel="canonical" href="${host}/"`,
-      `rel="canonical" href="https://${customUrl}${DOCS_PREFIX}"`
-    );
+  rewrittenHtml = rewriteDocsAbsoluteUrls(rewrittenHtml, customUrl, docsUrl);
 
-    for (const path of DOCS_PAGE_PATHS) {
-      rewrittenHtml = rewrittenHtml.replaceAll(
-        `rel="canonical" href="${host}${path}"`,
-        `rel="canonical" href="https://${customUrl}${toDocsPath(path)}"`
-      );
-    }
+  // Canonicals already on the custom domain can still carry the unprefixed
+  // docs path, so normalise those separately — a blanket host rewrite would
+  // also catch legitimate landing-page links.
+  const customHost = `https://${customUrl}`;
+  for (const rootHref of [`${customHost}"`, `${customHost}/"`]) {
+    rewrittenHtml = rewrittenHtml.replaceAll(
+      `rel="canonical" href="${rootHref}`,
+      `rel="canonical" href="${customHost}${DOCS_PREFIX}"`
+    );
+  }
+  for (const path of DOCS_PAGE_PATHS) {
+    rewrittenHtml = rewrittenHtml.replaceAll(
+      `rel="canonical" href="${customHost}${path}"`,
+      `rel="canonical" href="${customHost}${toDocsPath(path)}"`
+    );
   }
 
   return rewrittenHtml;
 };
+
+// sitemap.xml, llms.txt and the .md alternates all carry absolute docs-host
+// URLs that need the same treatment as HTML. Chunk assets are excluded so the
+// worker never buffers a bundle just to scan it.
+const REWRITABLE_DOCS_CONTENT_TYPES = [
+  "text/html",
+  "text/markdown",
+  "text/plain",
+  "xml",
+] as const;
+
+const shouldRewriteDocsBody = (contentType: string): boolean =>
+  REWRITABLE_DOCS_CONTENT_TYPES.some((type) => contentType.includes(type));
 
 const getWorkerConfig = (env: Env): WorkerConfig => ({
   customUrl: env?.CUSTOM_URL ?? "stratasync.dev",
@@ -313,15 +359,21 @@ const proxyDocsRequest = async (
   }
 
   const contentType = docsResponse.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html")) {
+  if (!shouldRewriteDocsBody(contentType)) {
     return docsResponse;
   }
 
-  const rewrittenHtml = rewriteDocsHtml(
-    await docsResponse.text(),
-    config.customUrl,
-    config.docsUrl
-  );
+  const rewrittenHtml = contentType.includes("text/html")
+    ? rewriteDocsHtml(
+        await docsResponse.text(),
+        config.customUrl,
+        config.docsUrl
+      )
+    : rewriteDocsAbsoluteUrls(
+        await docsResponse.text(),
+        config.customUrl,
+        config.docsUrl
+      );
   const headers = new Headers(docsResponse.headers);
   headers.delete("content-length");
   headers.delete("content-encoding");
@@ -330,6 +382,26 @@ const proxyDocsRequest = async (
     status: docsResponse.status,
     statusText: docsResponse.statusText,
   });
+};
+
+// Docs and landing are both Next apps sharing the /_next/ path space, so
+// asset routing normally leans on the Referer. Crawlers omit it, which used to
+// send every docs chunk to the landing app and 404 — making docs pages look
+// like they had broken CSS and JavaScript.
+const forwardAssetWithDocsFallback = async (
+  request: Request,
+  urlObject: URL,
+  config: WorkerConfig
+): Promise<Response> => {
+  const landingResponse = await forwardRequestToHost(
+    request,
+    config.landingHost
+  );
+  if (landingResponse.status !== 404) {
+    return landingResponse;
+  }
+
+  return proxyDocsRequest(request, urlObject, config);
 };
 
 const routeRequest = (
@@ -371,6 +443,13 @@ const routeRequest = (
 
   if (shouldRouteToDocs(urlObject.pathname, referer)) {
     return proxyDocsRequest(request, urlObject, config);
+  }
+
+  if (
+    isNextInternalPath(urlObject.pathname) &&
+    (request.method === "GET" || request.method === "HEAD")
+  ) {
+    return forwardAssetWithDocsFallback(request, urlObject, config);
   }
 
   return forwardRequestToHost(request, config.landingHost);
