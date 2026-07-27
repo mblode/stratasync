@@ -46,11 +46,45 @@
         "group": "Packages",
         "pages": [
           "packages",
-          "packages/core",
-          "packages/client",
-          "packages/react",
-          "packages/next",
-          "packages/y-doc",
+          {
+            "group": "@stratasync/core",
+            "root": "packages/core",
+            "pages": [
+              "packages/core/models",
+              "packages/core/schema",
+              "packages/core/decorators",
+              "packages/core/transactions"
+            ]
+          },
+          {
+            "group": "@stratasync/client",
+            "root": "packages/client",
+            "pages": [
+              "packages/client/configuration",
+              "packages/client/crud",
+              "packages/client/queries",
+              "packages/client/events",
+              "packages/client/undo-redo"
+            ]
+          },
+          {
+            "group": "@stratasync/react",
+            "root": "packages/react",
+            "pages": ["packages/react/hooks", "packages/react/collaborative"]
+          },
+          {
+            "group": "@stratasync/next",
+            "root": "packages/next",
+            "pages": ["packages/next/client", "packages/next/server"]
+          },
+          {
+            "group": "@stratasync/y-doc",
+            "root": "packages/y-doc",
+            "pages": [
+              "packages/y-doc/document-manager",
+              "packages/y-doc/presence"
+            ]
+          },
           "packages/mobx",
           "packages/storage-idb",
           "packages/transport-graphql"
