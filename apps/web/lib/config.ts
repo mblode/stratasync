@@ -4,7 +4,7 @@ export const siteConfig = {
   links: {
     author: "https://blode.co",
     docs: "https://stratasync.dev/docs",
-    github: "https://github.com/stratasync/stratasync",
+    github: "https://github.com/mblode/stratasync",
   },
   name: "Strata Sync",
   url: "https://stratasync.dev",

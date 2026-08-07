@@ -127,18 +127,16 @@ const Home = async () => {
                     size="lg"
                     variant="outline"
                   >
-                    <a href="https://github.com/stratasync/stratasync">
-                      GitHub
-                    </a>
+                    <a href="https://github.com/mblode/stratasync">GitHub</a>
                   </Button>
                 </div>
 
                 <code className="relative mt-8 inline-flex items-center gap-2 font-mono text-sm">
                   <div className="max-w-100 truncate">
-                    npx skills add stratasync/stratasync
+                    npx skills add mblode/stratasync
                   </div>
                   <CopyButton
-                    content="npx skills add stratasync/stratasync"
+                    content="npx skills add mblode/stratasync"
                     size="xs"
                     variant="ghost"
                   />
@@ -170,10 +168,10 @@ const Home = async () => {
                 <div className="flex justify-center">
                   <code className="relative inline-flex items-center gap-2 rounded-lg bg-muted/50 px-4 py-2 font-mono text-sm">
                     <span className="truncate">
-                      npx skills add stratasync/stratasync
+                      npx skills add mblode/stratasync
                     </span>
                     <CopyButton
-                      content="npx skills add stratasync/stratasync"
+                      content="npx skills add mblode/stratasync"
                       size="xs"
                       variant="ghost"
                     />
@@ -246,7 +244,7 @@ const Home = async () => {
                 <p className="text-center">
                   <Button asChild variant="link">
                     <a
-                      href="https://github.com/stratasync/stratasync/tree/main/examples"
+                      href="https://github.com/mblode/stratasync/tree/main/examples"
                       rel="noopener noreferrer"
                       target="_blank"
                     >
@@ -273,9 +271,7 @@ const Home = async () => {
                     <a href="https://stratasync.dev/docs">Get started</a>
                   </Button>
                   <Button asChild size="lg" variant="secondary">
-                    <a href="https://github.com/stratasync/stratasync">
-                      GitHub
-                    </a>
+                    <a href="https://github.com/mblode/stratasync">GitHub</a>
                   </Button>
                 </div>
               </div>

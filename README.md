@@ -31,7 +31,7 @@ Linear built a sync architecture that became the gold standard for local-first a
 Scaffold a full-stack app with the Claude Code skill:
 
 ```bash
-npx skills add stratasync/stratasync
+npx skills add mblode/stratasync
 ```
 
 Or install the packages manually:
