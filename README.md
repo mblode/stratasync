@@ -7,38 +7,36 @@
 Every read is instant, every write works offline, and every client converges.
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/@stratasync/core">
+    <img src="https://img.shields.io/npm/v/@stratasync/core?style=flat&colorA=000000&colorB=000000" />
+  </a>
   <a href="https://github.com/mblode/stratasync/blob/main/LICENSE.md">
     <img src="https://img.shields.io/github/license/mblode/stratasync?style=flat&colorA=000000&colorB=000000" />
   </a>
 </p>
 
 </div>
-## Why Strata Sync
 
-Linear built a sync architecture that became the gold standard for local-first apps, but never open-sourced it. [Strata Sync](https://stratasync.dev) is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
+## Docs
 
-## Features
+Models, adapters, and the sync protocol, with a full API reference.
 
-- **Instant reads**: Local IndexedDB replica. No spinners, no round-trips.
-- **Offline support**: Writes queue offline and sync when you reconnect.
-- **Fine-grained reactivity**: MobX observables. Only affected components re-render.
-- **Real-time collaboration**: Multiple users edit the same document with Yjs.
-- **Undo and redo**: Transaction-based history tracking.
-- **Modular**: Swap storage, transport, or reactivity adapters.
+<p>
+<a href="https://stratasync.dev/docs">
+<img alt="Read the docs" src=".github/assets/documentation.svg" width="200" />
+</a>
+</p>
 
-## Quickstart
-
-Scaffold a full-stack app with the Claude Code skill:
-
-```bash
-npx skills add mblode/stratasync
-```
-
-Or install the packages manually:
+## Install
 
 ```bash
 npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
 ```
+
+## Quickstart
+
+Three files. Or run `npx skills add mblode/stratasync` and let the skill
+scaffold them for you.
 
 ### 1. Define your models (`lib/sync/models.ts`)
 
@@ -84,14 +82,8 @@ const TodoList = observer(() => {
   });
   const { client } = useSyncClient();
 
-  const addTodo = async () => {
-    const todo = await client.create("Todo", {
-      title: "New todo",
-      completed: false,
-    });
-    todo.title = "Actually, a better title";
-    await todo.save();
-  };
+  const addTodo = () =>
+    client.create("Todo", { title: "New todo", completed: false });
 
   return (
     <ul>
@@ -104,13 +96,31 @@ const TodoList = observer(() => {
 });
 ```
 
-### Documentation
+## What you get
 
-Full documentation at [stratasync.dev/docs](https://stratasync.dev/docs).
+- **Instant reads:** every query hits a local IndexedDB replica, so there are no spinners and no round-trips.
+- **Writes that survive offline:** they queue locally and sync when the connection returns.
+- **Fine-grained reactivity:** MobX observables mean only the components touching changed data re-render.
+- **Live collaboration and undo:** Yjs CRDTs let several people edit one document, with history tracked per transaction.
+- **Swappable adapters:** storage, transport, and reactivity are each a separate package.
 
 ## Packages
 
-`core` | `client` | `react` | `mobx` | `y-doc` | `next` | `storage-idb` | `transport-graphql` | `server`
+Ten packages, so you install only the layers you use. Runnable examples live in
+[`examples/web`](examples/web) and [`examples/api`](examples/api).
+
+|                                                   |                                               |
+| ------------------------------------------------- | --------------------------------------------- |
+| [`core`](packages/core)                           | Models, properties, and the sync protocol     |
+| [`client`](packages/client)                       | The sync client and its lifecycle             |
+| [`react`](packages/react)                         | `useQuery`, `useSyncClient`, and the provider |
+| [`next`](packages/next)                           | Next.js App Router integration                |
+| [`mobx`](packages/mobx)                           | MobX reactivity adapter                       |
+| [`y-doc`](packages/y-doc)                         | Yjs CRDT documents for collaborative fields   |
+| [`server`](packages/server)                       | The sync server and delta packet endpoints    |
+| [`storage-idb`](packages/storage-idb)             | IndexedDB replica for the browser             |
+| [`storage-local`](packages/storage-local)         | In-memory replica for tests and SSR           |
+| [`transport-graphql`](packages/transport-graphql) | GraphQL transport over HTTP and WebSocket     |
 
 ## License
 
