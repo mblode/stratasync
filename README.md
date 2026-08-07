@@ -1,9 +1,18 @@
-# Strata Sync
+<div align="center">
 
-Sync that works offline.
+# [Strata Sync](https://stratasync.dev)
 
-A local-first sync engine for TypeScript, React, and Next.js. Every read is instant. Every write works offline. Every client converges.
+**A local-first sync engine for TypeScript, React, and Next.js, built on the architecture Linear never open-sourced**
 
+Every read is instant, every write works offline, and every client converges.
+
+<p align="center">
+  <a href="https://github.com/mblode/stratasync/blob/main/LICENSE.md">
+    <img src="https://img.shields.io/github/license/mblode/stratasync?style=flat&colorA=000000&colorB=000000" />
+  </a>
+</p>
+
+</div>
 ## Why Strata Sync
 
 Linear built a sync architecture that became the gold standard for local-first apps, but never open-sourced it. [Strata Sync](https://stratasync.dev) is an open-source implementation of that architecture, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
@@ -17,7 +26,7 @@ Linear built a sync architecture that became the gold standard for local-first a
 - **Undo and redo**: Transaction-based history tracking.
 - **Modular**: Swap storage, transport, or reactivity adapters.
 
-## Quick Start
+## Quickstart
 
 Scaffold a full-stack app with the Claude Code skill:
 
@@ -31,7 +40,7 @@ Or install the packages manually:
 npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
 ```
 
-### 1. Define your models — `lib/sync/models.ts`
+### 1. Define your models (`lib/sync/models.ts`)
 
 ```typescript
 import { ClientModel, Model, Property } from "@stratasync/core";
@@ -43,7 +52,7 @@ class Todo extends Model {
 }
 ```
 
-### 2. Create the client — `lib/sync/client.ts`
+### 2. Create the client (`lib/sync/client.ts`)
 
 ```typescript
 import { createSyncClient } from "@stratasync/client";
@@ -63,7 +72,7 @@ const client = createSyncClient({
 });
 ```
 
-### 3. Build reactive components — `components/todo-list.tsx`
+### 3. Build reactive components (`components/todo-list.tsx`)
 
 ```tsx
 import { observer } from "mobx-react-lite";
@@ -105,4 +114,8 @@ Full documentation at [stratasync.dev/docs](https://stratasync.dev/docs).
 
 ## License
 
-[MIT](LICENSE.md)
+MIT
+
+---
+
+Crafted by [<img src="https://blode.co/avatar-circle.png" width="20" align="top" />](https://blode.co) [Matthew Blode](https://blode.co)
