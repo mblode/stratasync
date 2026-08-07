@@ -1,5 +1,15 @@
 # @stratasync/next
 
+## 0.5.1
+
+### Patch Changes
+
+- e261dcb: Point `repository`, `bugs`, and `homepage` at `github.com/mblode/stratasync`. The repo moved out of the `stratasync` org, and package metadata is frozen at publish time, so the Repository link on npm kept pointing at the old path. The npm scope is unchanged.
+- Updated dependencies [e261dcb]
+  - @stratasync/core@0.5.1
+  - @stratasync/client@0.5.1
+  - @stratasync/react@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes
