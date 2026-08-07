@@ -23,7 +23,7 @@ ${siteConfig.description}
 ## Install
 
 \`\`\`bash
-npx skills add stratasync/stratasync
+npx skills add mblode/stratasync
 \`\`\`
 
 ## Quick start

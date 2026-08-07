@@ -4,15 +4,15 @@
   "private": true,
   "description": "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js",
   "keywords": [],
-  "homepage": "https://github.com/stratasync/stratasync#readme",
+  "homepage": "https://github.com/mblode/stratasync#readme",
   "bugs": {
-    "url": "https://github.com/stratasync/stratasync/issues"
+    "url": "https://github.com/mblode/stratasync/issues"
   },
   "license": "MIT",
   "author": "Matthew Blode",
   "repository": {
     "type": "git",
-    "url": "https://github.com/stratasync/stratasync"
+    "url": "https://github.com/mblode/stratasync"
   },
   "workspaces": [
     "apps/*",

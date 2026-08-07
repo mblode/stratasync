@@ -24,7 +24,7 @@ const SKILL_INDEX = {
       sha256:
         "698d04696b22e33684053e5419057ec199259b288445a4f36316a2bc413e4025",
       type: "skill-md",
-      url: "https://raw.githubusercontent.com/stratasync/stratasync/main/skills/scaffold-stratasync/SKILL.md",
+      url: "https://raw.githubusercontent.com/mblode/stratasync/main/skills/scaffold-stratasync/SKILL.md",
     },
   ],
 };
