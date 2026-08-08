@@ -12,11 +12,18 @@ export const SiteFooter = () => (
         rel="noopener noreferrer author"
         target="_blank"
       >
+        {/*
+          The 20px avatar, and 20px is the whole point: this used to load
+          matthew-blode-profile.jpg, a 1.3MB portrait, to fill a 40px box.
+          avatar-sm.png is the same face already sized for the job at 3.6KB,
+          and it is byte-identical to the copy every other project off blode.co
+          serves (md5 2fada23b), so the footers cannot drift apart.
+        */}
         <Image
           alt="Avatar of Matthew Blode"
           className="rounded-full"
           height={20}
-          src="/matthew-blode-profile.jpg"
+          src="/avatar-sm.png"
           width={20}
         />
         Matthew Blode
