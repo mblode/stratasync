@@ -51,7 +51,7 @@ const ZONE = "/stratasync";
 // domain until the docs worker is zone-ified.
 const agentDiscoveryLinkHeader = [
   `<${ZONE}/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
-  '<https://stratasync.dev/docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
+  '<https://stratasync.blode.md/docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
   `<${ZONE}/.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"`,
   `<${ZONE}/>; rel="alternate"; type="text/markdown"`,
 ].join(", ");
@@ -142,7 +142,7 @@ const nextConfig = {
   },
   redirects() {
     const apexHosts = ["stratasync.dev", "www.stratasync.dev"];
-    return apexHosts.flatMap((host) => {
+    const apexRedirects = apexHosts.flatMap((host) => {
       const has = [{ type: "host", value: host }];
       return [
         {
@@ -175,6 +175,28 @@ const nextConfig = {
         },
       ];
     });
+
+    // Apex worker 301s /docs → blode.co/stratasync/docs for GSC; forward to the
+    // real docs host so users don't land on a zone 404 / broken /_docs proxy.
+    const docsHostRedirects = [
+      {
+        destination: "https://stratasync.blode.md/docs",
+        permanent: true,
+        source: "/docs",
+      },
+      {
+        destination: "https://stratasync.blode.md/docs/:path*",
+        permanent: true,
+        source: "/docs/:path*",
+      },
+      {
+        destination: "https://stratasync.blode.md/_docs/:path*",
+        permanent: true,
+        source: "/_docs/:path*",
+      },
+    ];
+
+    return [...docsHostRedirects, ...apexRedirects];
   },
   rewrites() {
     return [

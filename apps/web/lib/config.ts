@@ -3,8 +3,7 @@ export const siteConfig = {
     "A local-first sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration.",
   links: {
     author: "https://blode.co",
-    // Docs stay on the custom domain until the docs worker is zone-ified.
-    docs: "https://stratasync.dev/docs",
+    docs: "https://stratasync.blode.md/docs",
     github: "https://github.com/mblode/stratasync",
     projects: "https://blode.co/projects",
   },

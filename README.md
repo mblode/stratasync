@@ -22,7 +22,7 @@ Every read is instant, every write works offline, and every client converges.
 Models, adapters, and the sync protocol, with a full API reference.
 
 <p>
-<a href="https://stratasync.dev/docs">
+<a href="https://stratasync.blode.md/docs">
 <img alt="Read the docs" src=".github/assets/documentation.svg" width="200" />
 </a>
 </p>

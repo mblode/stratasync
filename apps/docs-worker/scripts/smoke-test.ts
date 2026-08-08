@@ -4,248 +4,105 @@ import worker from "../src/index.ts";
 
 const env = {
   CUSTOM_URL: "stratasync.dev",
-  DOCS_URL: "docs.example.com",
-  LANDING_URL: "landing.example.com",
+  DOCS_URL: "stratasync.blode.md",
+  ZONE_ORIGIN: "https://blode.co/stratasync",
 };
 
-const requests: Request[] = [];
-const originalFetch = globalThis.fetch;
-let nextResponse: Response | null = null;
-
-globalThis.fetch = (input, init) => {
-  const request = input instanceof Request ? input : new Request(input, init);
-  requests.push(request);
-  const response = nextResponse ?? new Response("ok");
-  nextResponse = null;
-  return Promise.resolve(response.clone());
-};
-
-const assertHost = (request: Request, expectedHost: string) => {
-  const { hostname } = new URL(request.url);
-  assert.equal(hostname, expectedHost);
+const assertRedirect = (
+  response: Response,
+  status: number,
+  location: string
+) => {
+  assert.equal(response.status, status);
+  assert.equal(response.headers.get("Location"), location);
 };
 
 const run = async () => {
-  try {
-    requests.length = 0;
-    await worker.fetch(new Request("https://stratasync.dev/docs"), env);
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.DOCS_URL);
-    assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
+  // Homepage → blode.co zone
+  assertRedirect(
+    await worker.fetch(new Request("https://stratasync.dev/"), env),
+    301,
+    "https://blode.co/stratasync"
+  );
 
-    requests.length = 0;
+  // HTTP homepage also 301s to blode.co (when the worker sees the request)
+  assertRedirect(
+    await worker.fetch(new Request("http://stratasync.dev/"), env),
+    301,
+    "https://blode.co/stratasync"
+  );
+
+  // Marketing path preserved
+  assertRedirect(
+    await worker.fetch(new Request("https://stratasync.dev/manifesto"), env),
+    301,
+    "https://blode.co/stratasync/manifesto"
+  );
+
+  // Docs → blode.co (path-preserving) for GSC change-of-address
+  assertRedirect(
+    await worker.fetch(new Request("https://stratasync.dev/docs"), env),
+    301,
+    "https://blode.co/stratasync/docs"
+  );
+  assertRedirect(
     await worker.fetch(
-      new Request("https://stratasync.dev/_next/static/chunks/main.js", {
-        headers: {
-          Referer: "https://stratasync.dev/docs",
-        },
-      }),
+      new Request("https://stratasync.dev/docs/architecture/data-flow?x=1"),
       env
-    );
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.DOCS_URL);
-    assert.equal(requests[0].headers.get("X-Forwarded-Host"), env.CUSTOM_URL);
+    ),
+    301,
+    "https://blode.co/stratasync/docs/architecture/data-flow?x=1"
+  );
 
-    // Crawlers omit the Referer on assets: landing 404s, docs serves them.
-    requests.length = 0;
-    nextResponse = new Response("not found", { status: 404 });
-    const assetRes = await worker.fetch(
+  // Broken /_docs proxy paths → blode.co (zone then forwards to docs host)
+  assertRedirect(
+    await worker.fetch(
+      new Request("https://stratasync.dev/_docs/_next/static/chunks/main.js"),
+      env
+    ),
+    301,
+    "https://blode.co/stratasync/_docs/_next/static/chunks/main.js"
+  );
+
+  // Orphan /_next → real docs host assets
+  assertRedirect(
+    await worker.fetch(
       new Request("https://stratasync.dev/_next/static/chunks/main.js"),
       env
-    );
-    assert.equal(requests.length, 2);
-    assertHost(requests[0], env.LANDING_URL);
-    assertHost(requests[1], env.DOCS_URL);
-    assert.equal(assetRes.status, 200);
+    ),
+    301,
+    "https://stratasync.blode.md/_docs/_next/static/chunks/main.js"
+  );
 
-    // Landing's own assets still come from landing without a second hop.
-    requests.length = 0;
-    await worker.fetch(
-      new Request("https://stratasync.dev/_next/static/chunks/landing.js"),
-      env
-    );
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.LANDING_URL);
-
-    requests.length = 0;
-    await worker.fetch(new Request("https://stratasync.dev/"), env);
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.LANDING_URL);
-
-    // Paths the docs site does not serve belong to landing. Listing one in
-    // DOCS_PAGE_PATHS turns it into a 308 that lands on a docs 404.
-    requests.length = 0;
-    const landingPageRes = await worker.fetch(
-      new Request("https://stratasync.dev/manifesto"),
-      env
-    );
-    assert.equal(landingPageRes.status, 200);
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.LANDING_URL);
-
-    requests.length = 0;
-    await worker.fetch(
-      new Request("https://stratasync.dev/.well-known/test"),
-      env
-    );
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], "stratasync.dev");
-
-    // Agent discovery endpoints are forwarded to the landing app.
-    requests.length = 0;
+  // Agent discovery → zone
+  assertRedirect(
     await worker.fetch(
       new Request("https://stratasync.dev/.well-known/api-catalog"),
       env
-    );
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.LANDING_URL);
+    ),
+    301,
+    "https://blode.co/stratasync/.well-known/api-catalog"
+  );
 
-    requests.length = 0;
+  // docs.stratasync.dev → real docs host
+  assertRedirect(
     await worker.fetch(
-      new Request("https://stratasync.dev/.well-known/agent-skills/index.json"),
-      env
-    );
-    assert.equal(requests.length, 1);
-    assertHost(requests[0], env.LANDING_URL);
-
-    // docs.stratasync.dev → stratasync.dev/docs (301 redirect)
-    requests.length = 0;
-    const docsSubdomainRes = await worker.fetch(
       new Request("https://docs.stratasync.dev/quick-start?ref=test"),
       env
-    );
-    assert.equal(docsSubdomainRes.status, 301);
-    assert.equal(
-      docsSubdomainRes.headers.get("Location"),
-      "https://stratasync.dev/docs/quick-start?ref=test"
-    );
-
-    // docs.stratasync.dev root → stratasync.dev/docs
-    requests.length = 0;
-    const docsRootRes = await worker.fetch(
-      new Request("https://docs.stratasync.dev/"),
-      env
-    );
-    assert.equal(docsRootRes.status, 301);
-    assert.equal(
-      docsRootRes.headers.get("Location"),
-      "https://stratasync.dev/docs"
-    );
-
-    // Root-level docs page requests normalize back to /docs/*
-    requests.length = 0;
-    const leakedDocsPathRes = await worker.fetch(
-      new Request("https://stratasync.dev/installation?ref=test"),
-      env
-    );
-    assert.equal(leakedDocsPathRes.status, 308);
-    assert.equal(
-      leakedDocsPathRes.headers.get("Location"),
-      "https://stratasync.dev/docs/installation?ref=test"
-    );
-    assert.equal(requests.length, 0);
-
-    // Root requests from inside docs normalize to the docs home instead of landing page
-    requests.length = 0;
-    const docsHomeRes = await worker.fetch(
-      new Request("https://stratasync.dev/", {
-        headers: {
-          Referer: "https://stratasync.dev/docs/installation",
-        },
-      }),
-      env
-    );
-    assert.equal(docsHomeRes.status, 308);
-    assert.equal(
-      docsHomeRes.headers.get("Location"),
-      "https://stratasync.dev/docs"
-    );
-    assert.equal(requests.length, 0);
-
-    // Upstream redirects that leak the root path are rewritten back under /docs
-    requests.length = 0;
-    nextResponse = new Response(null, {
-      headers: {
-        Location: "/quick-start",
-      },
-      status: 307,
-    });
-    const docsRedirectRes = await worker.fetch(
-      new Request("https://stratasync.dev/docs/installation"),
-      env
-    );
-    assert.equal(docsRedirectRes.status, 307);
-    assert.equal(
-      docsRedirectRes.headers.get("Location"),
-      "https://stratasync.dev/docs/quick-start"
-    );
-
-    // Root-relative docs links and canonicals in proxied HTML are rewritten under /docs
-    requests.length = 0;
-    nextResponse = new Response(
-      `<html><head><link rel="canonical" href="https://docs.example.com/installation"></head><body><a href="/">Home</a><a href="/installation">Installation</a><script>const page={"href":"/quick-start","contentUrl":"/installation.mdx"}</script></body></html>`,
-      {
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-        },
-      }
-    );
-    const docsHtmlRes = await worker.fetch(
-      new Request("https://stratasync.dev/docs/installation"),
-      env
-    );
-    const html = await docsHtmlRes.text();
-    assert.match(html, /href="\/docs"/);
-    assert.match(html, /href="\/docs\/installation"/);
-    assert.match(html, /"href":"\/docs\/quick-start"/);
-    assert.match(html, /"contentUrl":"\/docs\/installation\.mdx"/);
-    assert.match(
-      html,
-      /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/installation">/
-    );
-
-    // The docs platform serves /docs-prefixed absolute URLs on its own host,
-    // across canonical, og:url and escaped JSON-LD payloads.
-    requests.length = 0;
-    nextResponse = new Response(
-      `<html><head><link rel="canonical" href="https://docs.example.com/docs/installation"/><meta property="og:url" content="https://docs.example.com/docs/installation"/><meta property="og:image" content="https://docs.example.com/opengraph-image.png"/></head><body><script>{\\"url\\":\\"https://docs.example.com/docs/installation.md\\"}</script><a href="https://docs.example.com">Docs home</a></body></html>`,
-      {
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-        },
-      }
-    );
-    const docsHostHtmlRes = await worker.fetch(
-      new Request("https://stratasync.dev/docs/installation"),
-      env
-    );
-    const docsHostHtml = await docsHostHtmlRes.text();
-    assert.doesNotMatch(docsHostHtml, /docs\.example\.com/);
-    assert.match(
-      docsHostHtml,
-      /<link rel="canonical" href="https:\/\/stratasync\.dev\/docs\/installation"\/>/
-    );
-    assert.match(
-      docsHostHtml,
-      /property="og:url" content="https:\/\/stratasync\.dev\/docs\/installation"/
-    );
-    // Non-docs paths keep their path and only swap host.
-    assert.match(
-      docsHostHtml,
-      /property="og:image" content="https:\/\/stratasync\.dev\/opengraph-image\.png"/
-    );
-    assert.match(
-      docsHostHtml,
-      /\\"url\\":\\"https:\/\/stratasync\.dev\/docs\/installation\.md\\"/
-    );
-    assert.match(docsHostHtml, /href="https:\/\/stratasync\.dev\/docs"/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    ),
+    301,
+    "https://stratasync.blode.md/docs/quick-start?ref=test"
+  );
+  assertRedirect(
+    await worker.fetch(new Request("https://docs.stratasync.dev/"), env),
+    301,
+    "https://stratasync.blode.md/docs"
+  );
 };
 
 try {
   await run();
+  console.log("smoke-test: ok");
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
