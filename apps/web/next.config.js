@@ -178,21 +178,22 @@ const nextConfig = {
 
     // Apex worker 301s /docs → blode.co/stratasync/docs for GSC; forward to the
     // real docs host so users don't land on a zone 404 / broken /_docs proxy.
+    // statusCode 301 (not permanent:true/308) — GSC change-of-address samples prefer 301.
     const docsHostRedirects = [
       {
         destination: "https://stratasync.blode.md/docs",
-        permanent: true,
         source: "/docs",
+        statusCode: 301,
       },
       {
         destination: "https://stratasync.blode.md/docs/:path*",
-        permanent: true,
         source: "/docs/:path*",
+        statusCode: 301,
       },
       {
         destination: "https://stratasync.blode.md/_docs/:path*",
-        permanent: true,
         source: "/_docs/:path*",
+        statusCode: 301,
       },
     ];
 
