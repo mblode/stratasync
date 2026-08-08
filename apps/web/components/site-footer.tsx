@@ -9,7 +9,7 @@ export const SiteFooter = () => (
       <a
         className="flex items-center gap-2 rounded-full py-1.5 pr-2.5 pl-1.5 transition-colors hover:text-foreground"
         href={siteConfig.links.author}
-        rel="noopener noreferrer"
+        rel="noopener noreferrer author"
         target="_blank"
       >
         <Image
@@ -22,10 +22,21 @@ export const SiteFooter = () => (
         Matthew Blode
       </a>
     </div>
-    <div className="flex items-center gap-2 text-muted-foreground/30">
+    <div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground/30">
       <span className="text-muted-foreground">
         v{process.env.STRATASYNC_VERSION}
       </span>{" "}
+      &bull;
+      {/* stratasync.dev is its own domain, so blode.co is a genuine
+          cross-origin link, unlike the zones proxied under blode.co itself. */}
+      <a
+        className="text-muted-foreground transition-colors hover:text-foreground"
+        href={siteConfig.links.projects}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        All projects
+      </a>
       &bull;
       <a
         className="text-muted-foreground transition-colors hover:text-foreground"
