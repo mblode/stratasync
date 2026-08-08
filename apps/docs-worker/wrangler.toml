@@ -8,4 +8,4 @@ enabled = true
 [vars]
 DOCS_URL = "stratasync.blode.md"
 CUSTOM_URL = "stratasync.dev"
-LANDING_URL = "landing.stratasync.dev"
+ZONE_ORIGIN = "https://blode.co/stratasync"

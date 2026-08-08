@@ -8,11 +8,10 @@ const robots = (): MetadataRoute.Robots => ({
     userAgent: "*",
   },
   // Zone robots.txt is inert on blode.co (only the host root is read). Kept
-  // accurate for the zone origin and preview. Docs sitemap stays on the custom
-  // domain until the docs worker is zone-ified.
+  // accurate for the zone origin and preview.
   sitemap: [
     `${siteConfig.url}/sitemap.xml`,
-    "https://stratasync.dev/docs/sitemap.xml",
+    "https://stratasync.blode.md/docs/sitemap.xml",
   ],
 });
 
