@@ -1,6 +1,7 @@
 import Image from "next/image";
 
 import { siteConfig } from "@/lib/config";
+import avatarSm from "@/public/avatar-sm.png";
 
 export const SiteFooter = () => (
   <footer className="flex flex-col items-center justify-center gap-2 pt-16 pb-8 text-muted-foreground text-sm">
@@ -9,21 +10,18 @@ export const SiteFooter = () => (
       <a
         className="flex items-center gap-2 rounded-full py-1.5 pr-2.5 pl-1.5 transition-colors hover:text-foreground"
         href={siteConfig.links.author}
-        rel="noopener noreferrer author"
-        target="_blank"
+        rel="author"
       >
         {/*
-          The 20px avatar, and 20px is the whole point: this used to load
-          matthew-blode-profile.jpg, a 1.3MB portrait, to fill a 40px box.
-          avatar-sm.png is the same face already sized for the job at 3.6KB,
-          and it is byte-identical to the copy every other project off blode.co
-          serves (md5 2fada23b), so the footers cannot drift apart.
+          Static import so next/image emits a basePath-aware URL. A bare
+          "/avatar-sm.png" resolves against the zone origin without /stratasync
+          and 400s under the rewrite. See moon/app/page.tsx.
         */}
         <Image
-          alt="Avatar of Matthew Blode"
+          alt=""
           className="rounded-full"
           height={20}
-          src="/avatar-sm.png"
+          src={avatarSm}
           width={20}
         />
         Matthew Blode
@@ -34,13 +32,12 @@ export const SiteFooter = () => (
         v{process.env.STRATASYNC_VERSION}
       </span>{" "}
       &bull;
-      {/* stratasync.dev is its own domain, so blode.co is a genuine
-          cross-origin link, unlike the zones proxied under blode.co itself. */}
+      {/* blode.co/projects is the same origin behind a rewrite: same tab, no
+          rel. Without this edge the zone is a dead end. See
+          blode-co/apps/web/.claude/knowledge/zone-conventions.md. */}
       <a
         className="text-muted-foreground transition-colors hover:text-foreground"
         href={siteConfig.links.projects}
-        rel="noopener noreferrer"
-        target="_blank"
       >
         All projects
       </a>

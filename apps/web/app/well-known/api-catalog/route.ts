@@ -12,7 +12,7 @@ const linkset = {
       anchor: siteConfig.url,
       "service-doc": [
         {
-          href: `${siteConfig.url}/docs`,
+          href: siteConfig.links.docs,
           title: `${siteConfig.name} Documentation`,
           type: "text/html",
         },

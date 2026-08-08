@@ -4,7 +4,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type React from "react";
 
-import { siteConfig } from "@/lib/config";
+import { siteConfig, zoneRootJsonLd } from "@/lib/config";
 
 import "./globals.css";
 
@@ -34,20 +34,23 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   alternates: {
-    canonical: "/",
+    canonical: siteConfig.url,
   },
   description: siteConfig.description,
-  metadataBase: new URL(siteConfig.url),
+  // Host origin, not the zone URL: relative OG/icon paths resolve under
+  // basePath to https://blode.co/stratasync/… (moon / beautiful-qr-code).
+  metadataBase: new URL("https://blode.co"),
   openGraph: {
     description: siteConfig.description,
     images: [
       {
         alt: siteTitle,
         height: 630,
-        url: "/opengraph-image.png",
+        url: `${siteConfig.url}/opengraph-image.png`,
         width: 1200,
       },
     ],
+    siteName: "Matthew Blode",
     title: siteTitle,
     type: "website",
     url: siteConfig.url,
@@ -59,36 +62,9 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     description: siteConfig.description,
-    images: ["/opengraph-image.png"],
+    images: [`${siteConfig.url}/opengraph-image.png`],
     title: siteTitle,
   },
-};
-
-const organizationJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  logo: `${siteConfig.url}/icon0.svg`,
-  name: siteConfig.name,
-  sameAs: [siteConfig.links.github],
-  url: siteConfig.url,
-};
-
-const webSiteJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  name: siteConfig.name,
-  url: siteConfig.url,
-};
-
-const softwareJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "SoftwareSourceCode",
-  codeRepository: siteConfig.links.github,
-  description: siteConfig.description,
-  name: siteConfig.name,
-  programmingLanguage: "TypeScript",
-  runtimePlatform: "Node.js",
-  url: siteConfig.url,
 };
 
 const RootLayout = ({
@@ -104,16 +80,8 @@ const RootLayout = ({
       {/* oxlint-disable react/no-danger -- JSON-LD structured data requires dangerouslySetInnerHTML */}
       <script
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(organizationJsonLd),
+          __html: JSON.stringify(zoneRootJsonLd),
         }}
-        type="application/ld+json"
-      />
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(webSiteJsonLd) }}
-        type="application/ld+json"
-      />
-      <script
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareJsonLd) }}
         type="application/ld+json"
       />
       {/* oxlint-enable react/no-danger */}

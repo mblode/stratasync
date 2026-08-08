@@ -2,21 +2,15 @@ import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/lib/config";
 
-// Only list URLs this site owns. /docs is served by a separate docs platform
-// and published through its own sitemap at /docs/sitemap.xml, which robots.txt
-// points crawlers at.
-const staticRoutes = [""];
-const TRAILING_SLASH_REGEX = /\/$/;
-
-const sitemap = (): MetadataRoute.Sitemap => {
-  const lastModified = new Date();
-
-  return staticRoutes.map((route) => ({
+// Only list URLs this zone owns. /docs is still served by the docs worker on
+// stratasync.dev and has its own sitemap.
+const sitemap = (): MetadataRoute.Sitemap => [
+  {
     changeFrequency: "weekly",
-    lastModified,
+    lastModified: new Date(),
     priority: 1,
-    url: `${siteConfig.url}/${route}`.replace(TRAILING_SLASH_REGEX, ""),
-  }));
-};
+    url: siteConfig.url,
+  },
+];
 
 export default sitemap;

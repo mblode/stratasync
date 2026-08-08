@@ -1,6 +1,6 @@
 <div align="center">
 
-# [Strata Sync](https://stratasync.dev)
+# [Strata Sync](https://blode.co/stratasync)
 
 **A local-first sync engine for TypeScript, React, and Next.js, built on the architecture Linear never open-sourced**
 

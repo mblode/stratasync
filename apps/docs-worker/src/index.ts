@@ -1,13 +1,11 @@
 interface Env {
   DOCS_URL?: string;
   CUSTOM_URL?: string;
-  LANDING_URL?: string;
 }
 
 interface WorkerConfig {
   customUrl: string;
   docsUrl: string;
-  landingHost: string;
 }
 
 const DOCS_PREFIX = "/docs";
@@ -247,38 +245,24 @@ const shouldRewriteDocsBody = (contentType: string): boolean =>
 const getWorkerConfig = (env: Env): WorkerConfig => ({
   customUrl: env?.CUSTOM_URL ?? "stratasync.dev",
   docsUrl: env?.DOCS_URL ?? "stratasync.blode.md",
-  landingHost: env?.LANDING_URL ?? "landing.stratasync.dev",
 });
-
-const forwardRequestToHost = (
-  request: Request,
-  hostname: string,
-  includeBody = true
-): Promise<Response> => {
-  const url = new URL(request.url);
-  url.hostname = hostname;
-  return fetch(url, {
-    body: includeBody ? request.body : undefined,
-    headers: request.headers,
-    method: request.method,
-  });
-};
 
 const getWellKnownResponse = (
   request: Request,
-  pathname: string,
-  landingHost: string
-): Promise<Response> | null => {
-  // Agent discovery endpoints are served by the landing app, so forward
-  // them explicitly to the landing host. All other /.well-known/ paths
-  // (Vercel/Let's Encrypt verification, etc.) pass through to origin.
+  pathname: string
+): Response | Promise<Response> | null => {
+  // Agent discovery lives on the blode.co zone (basePath /stratasync).
   if (
     pathname === "/.well-known/api-catalog" ||
     pathname === "/.well-known/agent-skills/index.json"
   ) {
-    return forwardRequestToHost(request, landingHost);
+    return Response.redirect(
+      `https://blode.co/stratasync${pathname}${new URL(request.url).search}`,
+      301
+    );
   }
 
+  // Vercel/Let's Encrypt verification, etc.
   return pathname.startsWith("/.well-known/") ? fetch(request) : null;
 };
 
@@ -380,26 +364,6 @@ const proxyDocsRequest = async (
   });
 };
 
-// Docs and landing are both Next apps sharing the /_next/ path space, so
-// asset routing normally leans on the Referer. Crawlers omit it, which used to
-// send every docs chunk to the landing app and 404 — making docs pages look
-// like they had broken CSS and JavaScript.
-const forwardAssetWithDocsFallback = async (
-  request: Request,
-  urlObject: URL,
-  config: WorkerConfig
-): Promise<Response> => {
-  const landingResponse = await forwardRequestToHost(
-    request,
-    config.landingHost
-  );
-  if (landingResponse.status !== 404) {
-    return landingResponse;
-  }
-
-  return proxyDocsRequest(request, urlObject, config);
-};
-
 const routeRequest = (
   request: Request,
   env: Env
@@ -407,11 +371,7 @@ const routeRequest = (
   const config = getWorkerConfig(env);
   const urlObject = new URL(request.url);
   const referer = request.headers.get("Referer");
-  const wellKnownResponse = getWellKnownResponse(
-    request,
-    urlObject.pathname,
-    config.landingHost
-  );
+  const wellKnownResponse = getWellKnownResponse(request, urlObject.pathname);
   if (wellKnownResponse) {
     return wellKnownResponse;
   }
@@ -433,22 +393,22 @@ const routeRequest = (
     return docsPathRedirect;
   }
 
-  if (urlObject.pathname === "/opengraph-image.png") {
-    return forwardRequestToHost(request, config.landingHost, false);
-  }
-
   if (shouldRouteToDocs(urlObject.pathname, referer)) {
     return proxyDocsRequest(request, urlObject, config);
   }
 
+  // Orphan /_next/* on the apex — prefer docs assets (marketing 301s away).
   if (
     isNextInternalPath(urlObject.pathname) &&
     (request.method === "GET" || request.method === "HEAD")
   ) {
-    return forwardAssetWithDocsFallback(request, urlObject, config);
+    return proxyDocsRequest(request, urlObject, config);
   }
 
-  return forwardRequestToHost(request, config.landingHost);
+  // Apex marketing → blode.co/stratasync zone.
+  const zonePath = urlObject.pathname === "/" ? "" : urlObject.pathname;
+  const zoneUrl = `https://blode.co/stratasync${zonePath}${urlObject.search}`;
+  return Response.redirect(zoneUrl, 301);
 };
 
 const handleFetch = async (request: Request, env: Env): Promise<Response> => {
