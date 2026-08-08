@@ -9,7 +9,7 @@
     var(--font-glide), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
   --font-mono:
-    var(--font-geist-mono), ui-monospace, "SFMono-Regular", "SF Mono", Menlo,
+    var(--font-glide-mono), ui-monospace, "SFMono-Regular", "SF Mono", Menlo,
     Consolas, "Liberation Mono", monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -102,78 +102,87 @@
   --danger-color: #ef4444;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.18 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.18 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.18 0 0);
+  /* StrataSync green. Also the icon0.svg fill and the hero band, so it is
+     brand, not a shadcn default. */
   --primary: #2e6f40;
   --primary-foreground: #fff;
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.18 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.52 0 0);
   --accent: #2e6f40;
   --accent-foreground: #fff;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.97 0.01 17);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.18 0 0 / 0.16);
+  --input: oklch(0.18 0 0 / 0.16);
+  --ring: oklch(0.487 0.1 150.2);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  --surface: oklch(0.98 0 0);
+  --sidebar: oklch(0.96 0 0);
+  --sidebar-foreground: oklch(0.18 0 0);
+  --sidebar-primary: #2e6f40;
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: oklch(0.96 0 0);
+  --sidebar-accent-foreground: oklch(0.18 0 0);
+  --sidebar-border: oklch(0.18 0 0 / 0.16);
+  --sidebar-ring: oklch(0.487 0.1 150.2);
+  --surface: oklch(0.96 0 0);
   --surface-foreground: var(--foreground);
   --code: var(--surface);
   --code-foreground: var(--surface-foreground);
-  --code-highlight: oklch(0.96 0 0);
-  --code-number: oklch(0.56 0 0);
+  /* A step off --code, or a highlighted line is invisible against it. */
+  --code-highlight: oklch(0.92 0 0);
+  --code-number: oklch(0.52 0 0);
 
   @media (prefers-color-scheme: dark) {
-    --background: oklch(0.145 0 0);
+    --background: oklch(0.18 0 0);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
+    --card: oklch(0.22 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
+    --popover: oklch(0.22 0 0);
     --popover-foreground: oklch(0.985 0 0);
     --primary: #2e6f40;
     --primary-foreground: #fff;
-    --secondary: oklch(0.269 0 0);
+    --secondary: oklch(0.27 0 0);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
+    --muted: oklch(0.27 0 0);
+    --muted-foreground: oklch(0.7 0 0);
     --accent: #2e6f40;
     --accent-foreground: #fff;
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --border: oklch(1 0 0 / 0.16);
+    --input: oklch(1 0 0 / 0.16);
+    /* Lifted off --primary so the focus ring stays visible on the dark
+       ground; the brand green at L 0.487 sits too close to it. */
+    --ring: oklch(0.62 0.12 150.2);
     --chart-1: oklch(0.488 0.243 264.376);
     --chart-2: oklch(0.696 0.17 162.48);
     --chart-3: oklch(0.769 0.188 70.08);
     --chart-4: oklch(0.627 0.265 303.9);
     --chart-5: oklch(0.645 0.246 16.439);
-    --sidebar: oklch(0.205 0 0);
+    --sidebar: oklch(0.22 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-primary: #2e6f40;
+    --sidebar-primary-foreground: #fff;
+    --sidebar-accent: oklch(0.27 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-border: oklch(1 0 0 / 0.16);
+    --sidebar-ring: oklch(0.62 0.12 150.2);
+    --surface: oklch(0.22 0 0);
+    --surface-foreground: oklch(0.7 0 0);
+    --code-highlight: oklch(0.28 0 0);
+    --code-number: oklch(0.7 0 0);
     --frame: oklch(0.203, 0.035, 285.102);
-    --widget-background: oklch(0.269 0 0);
+    --widget-background: oklch(0.27 0 0);
     --custom-shadow-xs:
       0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 8px -2px rgba(0, 0, 0, 0.3),
       0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15),
