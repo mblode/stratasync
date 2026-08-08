@@ -9,7 +9,6 @@ import { LandingHow } from "@/components/landing/landing-how";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
-import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import { siteConfig } from "@/lib/config";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
@@ -280,7 +279,6 @@ const Home = async () => {
             </div>
           </section>
 
-          <ZoneBreadcrumb />
           <SiteFooter />
         </div>
       </main>

@@ -19,8 +19,8 @@ const REWRITABLE_CONTENT_TYPES = [
   "xml",
 ] as const;
 
-const LEGACY_DOCS_ORIGINS = [
-  `https://${DOCS_HOST}`,
+const DOCS_HOST_ORIGINS = [`https://${DOCS_HOST}`] as const;
+const LEGACY_SITE_ORIGINS = [
   "https://stratasync.dev",
   "http://stratasync.dev",
 ] as const;
@@ -28,7 +28,7 @@ const LEGACY_DOCS_ORIGINS = [
 export const shouldRewriteDocsBody = (contentType: string): boolean =>
   REWRITABLE_CONTENT_TYPES.some((type) => contentType.includes(type));
 
-/** Map a docs-host pathname onto the blode.co zone. */
+/** Map a docs-host pathname onto the blode.co zone (/docs stays under /docs). */
 export const toZoneDocsPath = (pathname: string): string => {
   if (
     pathname === DOCS_PREFIX ||
@@ -46,6 +46,22 @@ export const toZoneDocsPath = (pathname: string): string => {
   return `${ZONE}${DOCS_PREFIX}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
 };
 
+/** Map a legacy marketing-host pathname onto the blode.co zone. */
+export const toZoneSitePath = (pathname: string): string => {
+  if (pathname === "/" || pathname === "") {
+    return ZONE;
+  }
+  if (
+    pathname === DOCS_PREFIX ||
+    pathname.startsWith(`${DOCS_PREFIX}/`) ||
+    pathname === DOCS_ASSET_PREFIX ||
+    pathname.startsWith(`${DOCS_ASSET_PREFIX}/`)
+  ) {
+    return `${ZONE}${pathname}`;
+  }
+  return `${ZONE}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+};
+
 export const docsUpstreamUrl = (
   slug: string[] | undefined,
   search: string
@@ -54,10 +70,14 @@ export const docsUpstreamUrl = (
   return new URL(`https://${DOCS_HOST}${DOCS_PREFIX}${suffix}${search}`);
 };
 
-const rewriteAbsoluteDocsUrls = (body: string): string => {
+const rewriteOriginUrls = (
+  body: string,
+  origins: readonly string[],
+  toPath: (pathname: string) => string
+): string => {
   let rewritten = body;
 
-  for (const origin of LEGACY_DOCS_ORIGINS) {
+  for (const origin of origins) {
     const pattern = new RegExp(
       `${escapeRegExp(origin)}([^${URL_TERMINATOR_CHARS}]*)`,
       "g"
@@ -65,18 +85,23 @@ const rewriteAbsoluteDocsUrls = (body: string): string => {
     rewritten = rewritten.replace(pattern, (_match, path: string) => {
       const pathname = path === "" ? "/" : (path.split("?")[0] ?? "/");
       const query = path.includes("?") ? path.slice(path.indexOf("?")) : "";
-      return `${PUBLIC_ORIGIN}${toZoneDocsPath(pathname)}${query}`;
+      return `${PUBLIC_ORIGIN}${toPath(pathname)}${query}`;
     });
   }
 
   return rewritten;
 };
 
-const rewriteRootRelativeDocsPaths = (body: string): string => body
-    .replaceAll(
-      /(?<!\/stratasync)\/_docs\//g,
-      `${ZONE}/_docs/`
-    )
+const rewriteAbsoluteDocsUrls = (body: string): string =>
+  rewriteOriginUrls(
+    rewriteOriginUrls(body, DOCS_HOST_ORIGINS, toZoneDocsPath),
+    LEGACY_SITE_ORIGINS,
+    toZoneSitePath
+  );
+
+const rewriteRootRelativeDocsPaths = (body: string): string =>
+  body
+    .replaceAll(/(?<!\/stratasync)\/_docs\//g, `${ZONE}/_docs/`)
     .replaceAll(/(?<!\/stratasync)\/docs\//g, `${ZONE}/docs/`)
     .replaceAll(/(?<!\/stratasync)\/docs"/g, `${ZONE}/docs"`)
     .replaceAll(/(?<!\/stratasync)\/docs'/g, `${ZONE}/docs'`)
