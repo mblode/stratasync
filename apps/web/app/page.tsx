@@ -9,6 +9,8 @@ import { LandingHow } from "@/components/landing/landing-how";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
+import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
+import { siteConfig } from "@/lib/config";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
 
@@ -119,7 +121,7 @@ const Home = async () => {
                     className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
                     size="lg"
                   >
-                    <a href="https://stratasync.dev/docs">Get started</a>
+                    <a href={siteConfig.links.docs}>Get started</a>
                   </Button>
                   <Button
                     asChild
@@ -127,7 +129,7 @@ const Home = async () => {
                     size="lg"
                     variant="outline"
                   >
-                    <a href="https://github.com/mblode/stratasync">GitHub</a>
+                    <a href={siteConfig.links.github}>GitHub</a>
                   </Button>
                 </div>
 
@@ -268,16 +270,17 @@ const Home = async () => {
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   <Button asChild size="lg">
-                    <a href="https://stratasync.dev/docs">Get started</a>
+                    <a href={siteConfig.links.docs}>Get started</a>
                   </Button>
                   <Button asChild size="lg" variant="secondary">
-                    <a href="https://github.com/mblode/stratasync">GitHub</a>
+                    <a href={siteConfig.links.github}>GitHub</a>
                   </Button>
                 </div>
               </div>
             </div>
           </section>
 
+          <ZoneBreadcrumb />
           <SiteFooter />
         </div>
       </main>

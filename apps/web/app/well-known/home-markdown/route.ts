@@ -15,7 +15,7 @@ ${siteConfig.description}
 
 ## Links
 
-- Documentation: ${siteConfig.url}/docs
+- Documentation: ${siteConfig.links.docs}
 - GitHub: ${siteConfig.links.github}
 - API catalog: ${siteConfig.url}/.well-known/api-catalog
 - Agent skills: ${siteConfig.url}/.well-known/agent-skills/index.json

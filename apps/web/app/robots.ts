@@ -7,11 +7,12 @@ const robots = (): MetadataRoute.Robots => ({
     allow: "/",
     userAgent: "*",
   },
-  // /docs is served by a separate docs platform that publishes its own
-  // sitemap, proxied onto this domain by the docs worker.
+  // Zone robots.txt is inert on blode.co (only the host root is read). Kept
+  // accurate for the zone origin and preview. Docs sitemap stays on the custom
+  // domain until the docs worker is zone-ified.
   sitemap: [
     `${siteConfig.url}/sitemap.xml`,
-    `${siteConfig.url}/docs/sitemap.xml`,
+    "https://stratasync.dev/docs/sitemap.xml",
   ],
 });
 

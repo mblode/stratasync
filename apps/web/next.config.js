@@ -40,15 +40,20 @@ const securityHeaders = [
   { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
 ];
 
+const ZONE = "/stratasync";
+
 // RFC 8288 Link headers for agent discovery.
 // - api-catalog: RFC 9727 machine-readable index of API resources
 // - service-doc: IANA-registered rel for human-readable API docs
 // - alternate (text/markdown): advertises markdown content negotiation
+// Paths are absolute from the public origin so they resolve under the zone
+// rewrite (and under the zone host with basePath). Docs stay on the custom
+// domain until the docs worker is zone-ified.
 const agentDiscoveryLinkHeader = [
-  '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
-  '</docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
-  '</.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"',
-  '</>; rel="alternate"; type="text/markdown"',
+  `<${ZONE}/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
+  '<https://stratasync.dev/docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
+  `<${ZONE}/.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"`,
+  `<${ZONE}/>; rel="alternate"; type="text/markdown"`,
 ].join(", ");
 
 const agentDiscoveryHeaders = [
@@ -57,6 +62,10 @@ const agentDiscoveryHeaders = [
 ];
 
 const nextConfig = {
+  // blode.co proxies /stratasync to this deployment, so every route and asset
+  // has to live under that prefix (beautiful-qr-code / moon gold standard).
+  assetPrefix: ZONE,
+  basePath: ZONE,
   env: {
     STRATASYNC_VERSION: version,
   },
@@ -130,6 +139,42 @@ const nextConfig = {
         protocol: "https",
       },
     ],
+  },
+  redirects() {
+    const apexHosts = ["stratasync.dev", "www.stratasync.dev"];
+    return apexHosts.flatMap((host) => {
+      const has = [{ type: "host", value: host }];
+      return [
+        {
+          basePath: false,
+          destination: "https://blode.co/stratasync",
+          has,
+          permanent: true,
+          source: "/stratasync",
+        },
+        {
+          basePath: false,
+          destination: "https://blode.co/stratasync/:path*",
+          has,
+          permanent: true,
+          source: "/stratasync/:path*",
+        },
+        {
+          basePath: false,
+          destination: "https://blode.co/stratasync",
+          has,
+          permanent: true,
+          source: "/",
+        },
+        {
+          basePath: false,
+          destination: "https://blode.co/stratasync/:path*",
+          has,
+          permanent: true,
+          source: "/:path*",
+        },
+      ];
+    });
   },
   rewrites() {
     return [
