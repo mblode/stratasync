@@ -2,6 +2,13 @@ name = "stratasync-docs-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
+# Apex + www must both be Worker custom domains. Proxied www without a Worker
+# route hits the zone's 100:: placeholder origin and returns Cloudflare 522 on HTTP.
+routes = [
+  { pattern = "stratasync.dev", custom_domain = true },
+  { pattern = "www.stratasync.dev", custom_domain = true },
+]
+
 [observability]
 enabled = true
 

@@ -32,6 +32,26 @@ const run = async () => {
     "https://blode.co/stratasync"
   );
 
+  // www (http + https) must also land on the zone — CF custom domain + redirects
+  assertRedirect(
+    await worker.fetch(new Request("https://www.stratasync.dev/"), env),
+    301,
+    "https://blode.co/stratasync"
+  );
+  assertRedirect(
+    await worker.fetch(new Request("http://www.stratasync.dev/"), env),
+    301,
+    "https://blode.co/stratasync"
+  );
+  assertRedirect(
+    await worker.fetch(
+      new Request("https://www.stratasync.dev/manifesto?ref=1"),
+      env
+    ),
+    301,
+    "https://blode.co/stratasync/manifesto?ref=1"
+  );
+
   // Marketing path preserved
   assertRedirect(
     await worker.fetch(new Request("https://stratasync.dev/manifesto"), env),
