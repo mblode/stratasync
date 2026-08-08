@@ -3,7 +3,7 @@ export const siteConfig = {
     "A local-first sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration.",
   links: {
     author: "https://blode.co",
-    docs: "https://stratasync.blode.md/docs",
+    docs: "https://blode.co/stratasync/docs",
     github: "https://github.com/mblode/stratasync",
     projects: "https://blode.co/projects",
   },

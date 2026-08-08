@@ -47,11 +47,10 @@ const ZONE = "/stratasync";
 // - service-doc: IANA-registered rel for human-readable API docs
 // - alternate (text/markdown): advertises markdown content negotiation
 // Paths are absolute from the public origin so they resolve under the zone
-// rewrite (and under the zone host with basePath). Docs stay on the custom
-// domain until the docs worker is zone-ified.
+// rewrite (and under the zone host with basePath).
 const agentDiscoveryLinkHeader = [
   `<${ZONE}/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
-  '<https://stratasync.blode.md/docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"',
+  `<${ZONE}/docs>; rel="service-doc"; type="text/html"; title="Strata Sync Documentation"`,
   `<${ZONE}/.well-known/agent-skills/index.json>; rel="https://agentskills.io/rel/index"; type="application/json"`,
   `<${ZONE}/>; rel="alternate"; type="text/markdown"`,
 ].join(", ");
@@ -176,40 +175,31 @@ const nextConfig = {
       ];
     });
 
-    // Apex worker 301s /docs → blode.co/stratasync/docs for GSC; forward to the
-    // real docs host so users don't land on a zone 404 / broken /_docs proxy.
-    // statusCode 301 (not permanent:true/308) — GSC change-of-address samples prefer 301.
-    const docsHostRedirects = [
-      {
-        destination: "https://stratasync.blode.md/docs",
-        source: "/docs",
-        statusCode: 301,
-      },
-      {
-        destination: "https://stratasync.blode.md/docs/:path*",
-        source: "/docs/:path*",
-        statusCode: 301,
-      },
-      {
-        destination: "https://stratasync.blode.md/_docs/:path*",
-        source: "/_docs/:path*",
-        statusCode: 301,
-      },
-    ];
-
-    return [...docsHostRedirects, ...apexRedirects];
+    return apexRedirects;
   },
   rewrites() {
-    return [
-      {
-        destination: "/well-known/api-catalog",
-        source: "/.well-known/api-catalog",
-      },
-      {
-        destination: "/well-known/agent-skills-index",
-        source: "/.well-known/agent-skills/index.json",
-      },
-    ];
+    return {
+      afterFiles: [
+        {
+          destination: "/well-known/api-catalog",
+          source: "/.well-known/api-catalog",
+        },
+        {
+          destination: "/well-known/agent-skills-index",
+          source: "/.well-known/agent-skills/index.json",
+        },
+      ],
+      beforeFiles: [
+        // basePath:false — an external destination must not get /stratasync
+        // prefixed (that 404s on the docs host). HTML is proxied by
+        // app/docs/[[...slug]]/route.ts and rewrites asset URLs onto this path.
+        {
+          basePath: false,
+          destination: "https://stratasync.blode.md/_docs/:path*",
+          source: `${ZONE}/_docs/:path*`,
+        },
+      ],
+    };
   },
 };
 
