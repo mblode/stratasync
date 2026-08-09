@@ -25,7 +25,10 @@ const glideMono = localFont({
   weight: "400",
 });
 
-const siteTitle = `${siteConfig.name} - Local-first sync engine`;
+// "Product: what it does", colon and not a hyphen, under 60 characters so the
+// SERP does not truncate it. Rule 8 of
+// blode-co/apps/web/.claude/knowledge/zone-conventions.md.
+const siteTitle = `${siteConfig.name}: local-first sync engine for TypeScript`;
 
 export const viewport: Viewport = {
   maximumScale: 1,
@@ -36,6 +39,10 @@ export const metadata: Metadata = {
   alternates: {
     canonical: siteConfig.url,
   },
+  // Person-level attribution as metadata, not only as footer HTML and JSON-LD.
+  // Rule 10 of blode-co/apps/web/.claude/knowledge/zone-conventions.md.
+  authors: [{ name: "Matthew Blode", url: "https://blode.co" }],
+  creator: "Matthew Blode",
   description: siteConfig.description,
   // Host origin, not the zone URL: relative OG/icon paths resolve under
   // basePath to https://blode.co/stratasync/… (moon / beautiful-qr-code).
@@ -58,9 +65,14 @@ export const metadata: Metadata = {
   other: {
     "apple-mobile-web-app-title": siteConfig.name,
   },
-  title: siteTitle,
+  // Inner pages inherit the template; the root uses `default` as-is.
+  title: {
+    default: siteTitle,
+    template: `%s | ${siteConfig.name}`,
+  },
   twitter: {
     card: "summary_large_image",
+    creator: "@mattblode",
     description: siteConfig.description,
     images: [`${siteConfig.url}/opengraph-image.png`],
     title: siteTitle,

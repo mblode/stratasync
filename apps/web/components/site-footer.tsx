@@ -16,6 +16,9 @@ export const SiteFooter = () => (
           Static import so next/image emits a basePath-aware URL. A bare
           "/avatar-sm.png" resolves against the zone origin without /stratasync
           and 400s under the rewrite. See moon/app/page.tsx.
+
+          `alt` is empty on purpose: the name follows in text, so describing the
+          avatar makes a screen reader say "Matthew Blode" twice.
         */}
         <Image
           alt=""
@@ -30,8 +33,8 @@ export const SiteFooter = () => (
     <div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground/30">
       <span className="text-muted-foreground">
         v{process.env.STRATASYNC_VERSION}
-      </span>{" "}
-      &bull;
+      </span>
+      <span aria-hidden="true">·</span>
       {/* blode.co/projects is the same origin behind a rewrite: same tab, no
           rel. Without this edge the zone is a dead end. See
           blode-co/apps/web/.claude/knowledge/zone-conventions.md. */}
@@ -41,7 +44,7 @@ export const SiteFooter = () => (
       >
         All projects
       </a>
-      &bull;
+      <span aria-hidden="true">·</span>
       <a
         className="text-muted-foreground transition-colors hover:text-foreground"
         href={siteConfig.links.github}

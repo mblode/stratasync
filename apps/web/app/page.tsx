@@ -9,6 +9,7 @@ import { LandingHow } from "@/components/landing/landing-how";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
+import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import { siteConfig } from "@/lib/config";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
@@ -144,6 +145,18 @@ const Home = async () => {
                 </code>
               </div>
             </section>
+          </div>
+
+          {/*
+            The trail sits directly under the hero rather than above it: the
+            hero is a solid #2E6F40 block, and the shared component's
+            muted-foreground tokens are a grey tuned for the page background,
+            not for white-on-green. First thing in the light half is as high as
+            it goes while staying legible. Rule 4 of
+            blode-co/apps/web/.claude/knowledge/zone-conventions.md.
+          */}
+          <div className="container-wrapper pt-8">
+            <ZoneBreadcrumb product={siteConfig.name} />
           </div>
 
           {/* WHY — problem */}

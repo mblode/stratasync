@@ -1,36 +1,68 @@
-import { siteConfig } from "@/lib/config";
-
 /**
- * Visible Home → Projects → Strata Sync trail. JSON-LD alone is not enough:
- * zone-conventions.md rule 4 requires the trail on the zone root page too.
+ * The trail back to the hub, rendered at the top of a zone's ROOT page.
+ *
+ * Copied verbatim from `blode-co/apps/web/components/zone-breadcrumb.tsx`.
+ * Zones are separate Next apps and cannot import from the hub, so keep this
+ * dependency-free: no `next/link`, no icon package, no local `cn()`. Fix bugs
+ * in the reference first, then re-copy.
+ *
+ * Three constraints, all of them load-bearing:
+ *
+ * 1. **Absolute `https://blode.co` hrefs.** A bare `href="/"` is not
+ *    `basePath`-prefixed, so in a zone it resolves against the child's own
+ *    origin and breaks on preview deployments.
+ * 2. **Plain `<a>`, never `next/link`.** `next/link` would prefetch an RSC
+ *    payload for a route this app does not own. These are also same-origin
+ *    (a zone is blode.co behind a rewrite), so: same tab, and no
+ *    `rel="noopener noreferrer"`, which only means something cross-origin.
+ * 3. **The visible trail must match `BreadcrumbList` exactly.** Google treats a
+ *    mismatch as a markup error. Both start at "Matthew Blode", not "Home":
+ *    the root crumb is the one piece of chrome every zone shows above the fold,
+ *    so it may as well say who made the thing.
+ *
+ * Root page only. Inner pages have their own navigation and a second trail
+ * would just be noise.
  */
-export const ZoneBreadcrumb = () => (
-  <nav aria-label="Breadcrumb" className="container-wrapper pb-4">
-    <ol className="flex flex-wrap items-center justify-center gap-1.5 text-muted-foreground text-sm">
-      <li>
+
+const HOME = "https://blode.co";
+const PROJECTS = `${HOME}/projects`;
+
+const Separator = () => (
+  // Decorative: the <ol> already conveys the structure to assistive tech.
+  <span aria-hidden className="select-none opacity-40">
+    ›
+  </span>
+);
+
+export const ZoneBreadcrumb = ({ product }: { product: string }) => (
+  <nav aria-label="Breadcrumb" className="text-[13px] text-muted-foreground">
+    <ol className="flex flex-wrap items-center gap-1.5">
+      <li className="flex items-center gap-1.5">
+        {/*
+          `rel="author"` marks this as the identity edge, matching the footer
+          credit. Only this crumb carries it; /projects is a collection.
+        */}
         <a
-          className="transition-colors hover:text-foreground"
-          href="https://blode.co/"
+          className="underline decoration-current/25 underline-offset-2 transition-colors hover:text-foreground hover:decoration-current"
+          href={HOME}
+          rel="author"
         >
-          Home
+          Matthew Blode
         </a>
+        <Separator />
       </li>
-      <li aria-hidden="true" className="text-muted-foreground/40">
-        /
-      </li>
-      <li>
+      <li className="flex items-center gap-1.5">
         <a
-          className="transition-colors hover:text-foreground"
-          href="https://blode.co/projects"
+          className="underline decoration-current/25 underline-offset-2 transition-colors hover:text-foreground hover:decoration-current"
+          href={PROJECTS}
         >
           Projects
         </a>
+        <Separator />
       </li>
-      <li aria-hidden="true" className="text-muted-foreground/40">
-        /
-      </li>
+      {/* The current page is not a link, and says so. */}
       <li aria-current="page" className="text-foreground">
-        {siteConfig.name}
+        {product}
       </li>
     </ol>
   </nav>
