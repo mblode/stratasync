@@ -30,7 +30,16 @@ export const breadcrumbSchema = () => ({
   "@id": breadcrumbId,
   "@type": "BreadcrumbList",
   itemListElement: [
-    { "@type": "ListItem", item: `${host}/`, name: "Home", position: 1 },
+    // "Matthew Blode", not "Home": the root crumb is the one piece of chrome
+    // every zone shows above the fold, and it must match the visible trail in
+    // `components/zone-breadcrumb.tsx` exactly or Google reads the mismatch as
+    // a markup error.
+    {
+      "@type": "ListItem",
+      item: `${host}/`,
+      name: "Matthew Blode",
+      position: 1,
+    },
     {
       "@type": "ListItem",
       item: `${host}/projects`,
