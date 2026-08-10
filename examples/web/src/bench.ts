@@ -8,6 +8,7 @@
  * a real browser store.
  *
  * Open `/bench.html`, or read `window.__benchResults` after `__benchDone`.
+ * Size the run with `?rows=&pageSize=&pages=`.
  */
 import type { SyncClient } from "@stratasync/client";
 import { createSyncClient } from "@stratasync/client";
@@ -31,9 +32,10 @@ import { createIndexedDbStorage } from "@stratasync/storage-idb";
 
 import "./lib/sync/models";
 
-const ROW_COUNT = 5000;
-const DELTA_PAGE_SIZE = 1000;
-const DELTA_PAGE_COUNT = 4;
+const params = new URLSearchParams(globalThis.location?.search ?? "");
+const ROW_COUNT = Number(params.get("rows") ?? "5000");
+const DELTA_PAGE_SIZE = Number(params.get("pageSize") ?? "1000");
+const DELTA_PAGE_COUNT = Number(params.get("pages") ?? "4");
 const GROUP_ID = "bench-group";
 
 interface BenchResult {
@@ -43,6 +45,18 @@ interface BenchResult {
 }
 
 const results: BenchResult[] = [];
+
+/**
+ * Chrome-only, and only granular to a few hundred KB, but enough to size the
+ * identity map: `instant` models are never evicted, so their full row set is
+ * resident for the life of the session.
+ */
+const heapMb = (): number | null => {
+  const mem = (
+    performance as unknown as { memory?: { usedJSHeapSize: number } }
+  ).memory;
+  return mem ? Math.round((mem.usedJSHeapSize / 1024 / 1024) * 10) / 10 : null;
+};
 
 const noop = (): void => {
   // Nothing to unsubscribe from: the stub transport never changes state.
@@ -215,13 +229,19 @@ const run = async (): Promise<void> => {
   // 1. Warm start: hydrate ROW_COUNT rows from IndexedDB into identity maps.
   await seed(dbName);
   const warm = makeClient(dbName, createBenchTransport());
+  const heapBefore = heapMb();
   const warmStart = performance.now();
   await warm.client.start();
   const warmMs = performance.now() - warmStart;
   const hydrated = warm.client.getIdentityMap("Todo").size;
+  const heapAfter = heapMb();
+  const heapDelta =
+    heapBefore !== null && heapAfter !== null
+      ? ` (+${Math.round((heapAfter - heapBefore) * 10) / 10} MB heap, ${heapAfter} MB total)`
+      : "";
   await warm.client.stop();
   results.push({
-    detail: `${hydrated} rows, ${warm.flushes()} top-level reaction flushes`,
+    detail: `${hydrated} rows, ${warm.flushes()} top-level reaction flushes${heapDelta}`,
     ms: warmMs,
     name: `Warm start (${ROW_COUNT} rows)`,
   });
