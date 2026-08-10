@@ -151,9 +151,38 @@ export const rewriteOgSiteName = (body: string): string =>
       node.replace(FLIGHT_CONTENT_ATTR, `\\"content\\":\\"${HOST_SITE_NAME}\\"`)
     );
 
+/**
+ * `twitter:creator` is absent from the upstream entirely: blode.md has no field
+ * for it, so unlike `og:site_name` there is nothing to rewrite and the tag has
+ * to be added. Rule 10 wants person-level attribution on every blode.co path,
+ * and these are blode.co paths.
+ *
+ * Inserted into `<head>` only, not into the flight payload. Social crawlers do
+ * not run JavaScript, so the served HTML is what builds the card; React may
+ * drop the tag on hydration since it is not in the payload it renders from.
+ * Adding it there too would mean hand-forging a serialized React element, which
+ * is far more likely to break the page than to help it. The upstream `seo`
+ * config is the real fix.
+ */
+const TWITTER_CREATOR = "@mattblode";
+const TWITTER_CREATOR_META = /<meta[^>]*name="twitter:creator"[^>]*>/iu;
+const HEAD_OPEN = /<head\b[^>]*>/iu;
+
+export const ensureTwitterCreator = (body: string): string => {
+  if (TWITTER_CREATOR_META.test(body)) {
+    return body;
+  }
+  return body.replace(
+    HEAD_OPEN,
+    (tag) => `${tag}<meta name="twitter:creator" content="${TWITTER_CREATOR}"/>`
+  );
+};
+
 export const rewriteDocsBody = (body: string): string =>
-  rewriteOgSiteName(
-    rewriteRootRelativeDocsPaths(rewriteAbsoluteDocsUrls(body))
+  ensureTwitterCreator(
+    rewriteOgSiteName(
+      rewriteRootRelativeDocsPaths(rewriteAbsoluteDocsUrls(body))
+    )
   );
 
 export const rewriteDocsLocation = (
