@@ -7,11 +7,19 @@ const { version } = JSON.parse(
   )
 );
 
+// Analytics is proxied through r.blode.co so tracker blockers do not drop it.
+// Defaulted rather than left empty: an unset var would compile down to
+// `connect-src 'self'`, which is how this policy blocked PostHog outright —
+// `instrumentation-client.ts` has been initialising a client that could never
+// reach its host, on every docs page, since this CSP shipped.
+const posthogOrigin =
+  process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://r.blode.co";
+
 /** @type {import('next').NextConfig} */
 const contentSecurityPolicy = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""} https://www.googletagmanager.com`,
-  "connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""} https://www.googletagmanager.com ${posthogOrigin}`,
+  `connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com ${posthogOrigin}`,
   "img-src 'self' data: https://www.google-analytics.com https://images.unsplash.com",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
@@ -60,6 +68,11 @@ const agentDiscoveryHeaders = [
   { key: "Vary", value: "Accept" },
 ];
 
+/** An override that sets only the one key it changes; see `headers()` below. */
+const crossOriginResourcePolicy = (value) => [
+  { key: "Cross-Origin-Resource-Policy", value },
+];
+
 const nextConfig = {
   // blode.co proxies /stratasync to this deployment, so every route and asset
   // has to live under that prefix (beautiful-qr-code / moon gold standard).
@@ -75,59 +88,53 @@ const nextConfig = {
     turbopackFileSystemCacheForDev: true,
   },
   headers() {
+    /*
+     * Every matching rule applies in array order and a later one wins per
+     * header key, so the catch-all goes FIRST and the overrides after it.
+     *
+     * It used to be last, and that silently undid all five overrides below:
+     * blode.co/stratasync/opengraph-image.png served `Cross-Origin-Resource-
+     * Policy: same-origin` rather than the `cross-origin` this file asks for,
+     * so no off-site consumer could fetch the share card. Nothing failed a
+     * build and the config still read as if it worked.
+     *
+     * The pattern is also `/:path*` rather than `/(.*)`: with `basePath` set
+     * Next prefixes the source, and `/stratasync/(.*)` does not match the bare
+     * `/stratasync`. The zone root — the most-visited URL here — was shipping
+     * no security headers at all while every inner page carried the full set.
+     * blode.co/allmd has the same miss from the same pattern.
+     *
+     * Each override now sets only the key it is changing and lets the
+     * catch-all supply the rest.
+     */
     return [
       {
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
+        headers: securityHeaders,
+        source: "/:path*",
+      },
+      {
+        headers: crossOriginResourcePolicy("cross-origin"),
         source: "/opengraph-image.png",
       },
       {
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
+        headers: crossOriginResourcePolicy("cross-origin"),
         source: "/twitter-image.png",
       },
       {
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
-        ],
+        headers: crossOriginResourcePolicy("cross-origin"),
         source: "/web-app-manifest-:size.png",
       },
       {
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-        ],
+        headers: crossOriginResourcePolicy("same-site"),
         source: "/images/:path*",
       },
       {
-        headers: [
-          ...securityHeaders.filter(
-            (h) => h.key !== "Cross-Origin-Resource-Policy"
-          ),
-          { key: "Cross-Origin-Resource-Policy", value: "same-site" },
-        ],
+        headers: crossOriginResourcePolicy("same-site"),
         source: "/fonts/:path*",
       },
       {
         headers: agentDiscoveryHeaders,
         source: "/",
-      },
-      {
-        headers: securityHeaders,
-        source: "/(.*)",
       },
     ];
   },
