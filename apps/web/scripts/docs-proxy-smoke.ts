@@ -1,16 +1,9 @@
 /**
- * Guards the `og:site_name` rewrite in `lib/docs-proxy.ts`.
+ * Guards the docs proxy after `og:site_name` moved to docs.json.
  *
- * Every case asserts the upstream product name is GONE rather than that
- * "Matthew Blode" is present. A rewrite that matches nothing leaves the old
- * value in place, and a present-tense assertion cannot tell that apart from a
- * rewrite that worked. That is not hypothetical: the equivalent patch in
- * `dnd-grid` shipped for a few minutes replacing the whole `<meta>` tag with a
- * mangled one, and "Matthew Blode" was present in the output the whole time.
- *
- * Both attribute orders are covered because the upstream is a platform we do
- * not control. A fixture cannot notice the platform changing by construction,
- * which is what SMOKE_LIVE=1 is for.
+ * `seo.siteName` / `metadata.ogImage` in `apps/docs/docs.json` own the card
+ * credit and image. The proxy must pass `og:site_name` through unchanged and
+ * still inject `twitter:creator`.
  *
  *   npm run smoke:docs-proxy               # fixtures only, no network
  *   SMOKE_LIVE=1 npm run smoke:docs-proxy  # also checks the real upstream
@@ -18,7 +11,7 @@
 
 import assert from "node:assert/strict";
 
-import { HOST_SITE_NAME, rewriteDocsBody } from "../lib/docs-proxy.ts";
+import { rewriteDocsBody } from "../lib/docs-proxy.ts";
 
 const UPSTREAM_DOCS_URL = "https://stratasync.blode.md/docs";
 const PRODUCT = "Strata Sync";
@@ -33,13 +26,9 @@ const OG_SITE_NAME_CASES = [
 
 for (const html of OG_SITE_NAME_CASES) {
   const out = rewriteDocsBody(html);
-  assert.equal(out.includes(PRODUCT), false, `old value survived: ${html}`);
-  assert.equal(out.includes(HOST_SITE_NAME), true, html);
-  assert.match(out, /og:site_name/, `tag lost entirely: ${html}`);
+  assert.equal(out, html, `og:site_name was rewritten: ${html}`);
 }
 
-// Rule 8 before Rule 9: og:site_name may only become the person while og:title
-// still names the product, or the card ends up identifying nothing.
 const titleHtml = `<meta property="og:title" content="Introduction · ${PRODUCT}"/>`;
 assert.equal(rewriteDocsBody(titleHtml), titleHtml);
 
@@ -70,15 +59,16 @@ if (process.env.SMOKE_LIVE) {
   const upstreamName = live.match(
     /property="og:site_name"[^>]*content="([^"]*)"/u
   )?.[1];
-  assert.ok(upstreamName, "upstream served no og:site_name to rewrite");
+  assert.ok(upstreamName, "upstream served no og:site_name");
 
   const out = rewriteDocsBody(live);
-  assert.match(out, /og:site_name/, "og:site_name lost from live HTML");
+  const rewrittenName = out.match(
+    /property="og:site_name"[^>]*content="([^"]*)"/u
+  )?.[1];
   assert.equal(
-    out.includes(`content="${upstreamName}"`) &&
-      upstreamName !== HOST_SITE_NAME,
-    false,
-    `upstream og:site_name "${upstreamName}" survived the rewrite`
+    rewrittenName,
+    upstreamName,
+    `og:site_name was rewritten from "${upstreamName}" to "${rewrittenName}"`
   );
   assert.match(
     out,
@@ -91,7 +81,7 @@ if (process.env.SMOKE_LIVE) {
     "twitter:creator missing from live HTML"
   );
   process.stdout.write(
-    `live upstream og:site_name "${upstreamName}" rewritten\n`
+    `live upstream og:site_name "${upstreamName}" passed through\n`
   );
 }
 
