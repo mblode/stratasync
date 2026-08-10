@@ -1,5 +1,14 @@
 # @stratasync/next
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [d10cce1]
+  - @stratasync/client@0.6.0
+  - @stratasync/react@0.6.0
+  - @stratasync/core@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes
