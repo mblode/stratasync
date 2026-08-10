@@ -109,49 +109,6 @@ const rewriteRootRelativeDocsPaths = (body: string): string =>
     .replaceAll('href="/llms-full.txt"', `href="${ZONE}/docs/llms-full.txt"`);
 
 /**
- * The docs are a blode.md tenant, and its `docs.json` `name` drives both the
- * title suffix and `og:site_name`. Behind this rewrite these pages are blode.co
- * paths, so Rule 9 wants the person in `og:site_name`: the product is already
- * in `og:title` ("Introduction · Strata Sync"), and repeating it there spends
- * the one slot in the card that could say who made the thing.
- *
- * Rewritten here rather than in `docs.json` because `name` feeds the title too.
- * Setting it to "Matthew Blode" would make every docs page read "Introduction ·
- * Matthew Blode" and leave nothing on the card naming the product, which is the
- * exact failure Rule 9's "Do Rule 8 first" section describes.
- *
- * This is a stopgap. The real home is a `seo.siteName` in blode.md, which would
- * fix every tenant at once; the schema at https://blode.md/docs.json has no
- * such key today, and `allmd`, `diffhub`, `dnd-grid` and `react-vello` all
- * serve their product name here for the same reason.
- *
- * Both copies are replaced: the rendered `<meta>`, and the one React
- * re-renders from the flight payload on hydration.
- */
-export const HOST_SITE_NAME = "Matthew Blode";
-
-/**
- * Matched on `og:site_name` alone, then the `content` attribute is replaced
- * inside whatever matched. An earlier version required `property` before
- * `content` in one pattern: if the platform ever emits them the other way the
- * regex matches nothing, rewrites nothing, and the old value ships while any
- * assertion phrased as "the new value is present" still passes.
- */
-const OG_SITE_NAME_META = /<meta\b[^>]*\bproperty="og:site_name"[^>]*>/giu;
-const META_CONTENT_ATTR = /\bcontent="[^"]*"/iu;
-const OG_SITE_NAME_FLIGHT = /\{[^{}]*\\"og:site_name\\"[^{}]*\}/gu;
-const FLIGHT_CONTENT_ATTR = /\\"content\\":\\"[^"\\]*\\"/u;
-
-export const rewriteOgSiteName = (body: string): string =>
-  body
-    .replace(OG_SITE_NAME_META, (tag) =>
-      tag.replace(META_CONTENT_ATTR, `content="${HOST_SITE_NAME}"`)
-    )
-    .replace(OG_SITE_NAME_FLIGHT, (node) =>
-      node.replace(FLIGHT_CONTENT_ATTR, `\\"content\\":\\"${HOST_SITE_NAME}\\"`)
-    );
-
-/**
  * `twitter:creator` is absent from the upstream entirely: blode.md has no field
  * for it, so unlike `og:site_name` there is nothing to rewrite and the tag has
  * to be added. Rule 10 wants person-level attribution on every blode.co path,
@@ -178,11 +135,16 @@ export const ensureTwitterCreator = (body: string): string => {
   );
 };
 
+/**
+ * `og:site_name` used to be rewritten here. It now comes from
+ * `apps/docs/docs.json` (`seo.siteName`, plus `metadata.ogImage` for the card)
+ * once the upstream tenant config is refreshed. Until that deploy lands,
+ * upstream may still emit the product name; do not reintroduce the rewrite —
+ * fix the config.
+ */
 export const rewriteDocsBody = (body: string): string =>
   ensureTwitterCreator(
-    rewriteOgSiteName(
-      rewriteRootRelativeDocsPaths(rewriteAbsoluteDocsUrls(body))
-    )
+    rewriteRootRelativeDocsPaths(rewriteAbsoluteDocsUrls(body))
   );
 
 export const rewriteDocsLocation = (
