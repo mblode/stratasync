@@ -44,19 +44,16 @@ export const metadata: Metadata = {
   authors: [{ name: "Matthew Blode", url: "https://blode.co" }],
   creator: "Matthew Blode",
   description: siteConfig.description,
-  // Host origin, not the zone URL: relative OG/icon paths resolve under
-  // basePath to https://blode.co/stratasync/… (moon / beautiful-qr-code).
-  metadataBase: new URL("https://blode.co"),
+  // The zone URL, not the bare origin (Rule 11). Only correct because the card
+  // is a generated `opengraph-image.tsx` route: Next does not prefix those with
+  // `basePath`, so `metadataBase` supplies the prefix exactly once. Against the
+  // static PNG this replaced, the two would have stacked into
+  // `/stratasync/stratasync/…`.
+  metadataBase: new URL(siteConfig.url),
+  // No `images` here: `app/opengraph-image.tsx` is the card. Next reuses it for
+  // `twitter:image` too when there is no `twitter-image` file.
   openGraph: {
     description: siteConfig.description,
-    images: [
-      {
-        alt: siteTitle,
-        height: 630,
-        url: `${siteConfig.url}/opengraph-image.png`,
-        width: 1200,
-      },
-    ],
     siteName: "Matthew Blode",
     title: siteTitle,
     type: "website",
@@ -74,7 +71,6 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     creator: "@mattblode",
     description: siteConfig.description,
-    images: [`${siteConfig.url}/opengraph-image.png`],
     title: siteTitle,
   },
 };

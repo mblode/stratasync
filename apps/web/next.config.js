@@ -93,7 +93,7 @@ const nextConfig = {
      * header key, so the catch-all goes FIRST and the overrides after it.
      *
      * It used to be last, and that silently undid all five overrides below:
-     * blode.co/stratasync/opengraph-image.png served `Cross-Origin-Resource-
+     * blode.co/stratasync/opengraph-image served `Cross-Origin-Resource-
      * Policy: same-origin` rather than the `cross-origin` this file asks for,
      * so no off-site consumer could fetch the share card. Nothing failed a
      * build and the config still read as if it worked.
@@ -114,11 +114,7 @@ const nextConfig = {
       },
       {
         headers: crossOriginResourcePolicy("cross-origin"),
-        source: "/opengraph-image.png",
-      },
-      {
-        headers: crossOriginResourcePolicy("cross-origin"),
-        source: "/twitter-image.png",
+        source: "/opengraph-image",
       },
       {
         headers: crossOriginResourcePolicy("cross-origin"),
