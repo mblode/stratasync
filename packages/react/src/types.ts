@@ -37,6 +37,12 @@ export interface SyncStatusContextValue {
   isSyncing: boolean;
   /** Whether the client is offline */
   isOffline: boolean;
+  /**
+   * Whether a multi-page delta backlog is being applied. The client is ready
+   * and rendering cached data throughout — use this for a quiet indicator,
+   * not to gate rendering.
+   */
+  isCatchingUp: boolean;
   /** Client ID */
   clientId: string;
   /** Promise that resolves when the current readiness cycle completes */

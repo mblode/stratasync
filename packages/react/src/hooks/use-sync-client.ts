@@ -54,6 +54,15 @@ export const useSyncClientInstance = (): SyncContextValue["client"] =>
  */
 export const useSyncReady = (): boolean => useSyncStatusValue().isReady;
 
+/**
+ * Hook to check whether a multi-page delta backlog is being applied.
+ *
+ * The client stays ready and keeps rendering cached data while this is true,
+ * so use it for a quiet indicator rather than to gate rendering.
+ */
+export const useSyncCatchingUp = (): boolean =>
+  useSyncStatusValue().isCatchingUp;
+
 export const useSyncReadyPromise = (): Promise<void> =>
   useSyncStatusValue().readyPromise;
 

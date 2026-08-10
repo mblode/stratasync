@@ -436,6 +436,29 @@ function AppContent() {
 
 **Signature:** `useSyncReady(): boolean`
 
+## useSyncCatchingUp
+
+`true` while a multi-page delta backlog is being fetched and applied, which happens
+after a long disconnect. The client stays ready and keeps rendering cached data
+throughout, and the whole backlog lands in one update — so use this for a quiet
+indicator, not to gate rendering.
+
+```tsx
+import { useSyncCatchingUp } from "@stratasync/react";
+
+function CatchUpBadge() {
+  const isCatchingUp = useSyncCatchingUp();
+
+  if (!isCatchingUp) {
+    return null;
+  }
+
+  return <span>Catching up…</span>;
+}
+```
+
+**Signature:** `useSyncCatchingUp(): boolean`
+
 ## useSyncState
 
 Returns the current `SyncClientState` string value.

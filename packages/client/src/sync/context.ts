@@ -68,6 +68,8 @@ export interface SyncContext {
   setDeferredConflictTxs(txs: Transaction[]): void;
 
   setState(state: SyncClientState): void;
+  /** Flags that a multi-page delta backlog is being applied. */
+  setCatchingUp(catchingUp: boolean): void;
   recordError(error: unknown): void;
 
   /** Runs `operation` through the shared state queue. */

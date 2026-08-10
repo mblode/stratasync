@@ -225,31 +225,42 @@ export class BootstrapRunner {
 
   /**
    * Loads existing data from storage into identity maps.
+   *
+   * Reads every eager model first, then commits all rows inside a single
+   * `batch()`. Committing row-by-row would emit one reaction flush per row
+   * (each `map.set` self-wraps in `runInAction`), which is what made a warm
+   * start visibly churn through the dataset instead of landing on final state.
    */
   async hydrateIdentityMaps(runToken: number): Promise<void> {
+    const loaded: { modelName: string; rows: Record<string, unknown>[] }[] = [];
+
     for (const modelName of this.ctx.registry.getEagerHydrationModelNames()) {
       if (!this.ctx.isRunActive(runToken)) {
         return;
       }
       const rows =
         await this.ctx.storage.getAll<Record<string, unknown>>(modelName);
-      if (!this.ctx.isRunActive(runToken)) {
-        return;
-      }
-      const map = this.ctx.identityMaps.getMap(modelName);
-      const primaryKey = this.ctx.registry.getPrimaryKey(modelName);
-
-      for (const row of rows) {
-        if (!this.ctx.isRunActive(runToken)) {
-          return;
-        }
-        const id = row[primaryKey] as string;
-        if (typeof id !== "string") {
-          continue;
-        }
-        map.set(id, row, { serialized: true });
-      }
+      loaded.push({ modelName, rows });
     }
+
+    if (!this.ctx.isRunActive(runToken)) {
+      return;
+    }
+
+    this.ctx.identityMaps.batch(() => {
+      for (const { modelName, rows } of loaded) {
+        const map = this.ctx.identityMaps.getMap(modelName);
+        const primaryKey = this.ctx.registry.getPrimaryKey(modelName);
+
+        for (const row of rows) {
+          const id = row[primaryKey] as string;
+          if (typeof id !== "string") {
+            continue;
+          }
+          map.set(id, row, { serialized: true });
+        }
+      }
+    });
   }
 
   private async areModelsPersisted(modelNames: string[]): Promise<boolean> {
