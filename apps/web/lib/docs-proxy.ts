@@ -216,6 +216,15 @@ export const filterUpstreamResponseHeaders = (
     if (HOP_BY_HOP.has(lower)) {
       continue;
     }
+    // Never forward upstream CDN TTLs: blodemd sets s-maxage=3600 on docs HTML,
+    // and a HIT here freezes og:site_name / og:image for an hour after publish.
+    if (
+      lower === "cdn-cache-control" ||
+      lower === "vercel-cdn-cache-control" ||
+      lower === "cache-control"
+    ) {
+      continue;
+    }
     if (lower === "location") {
       out.set(key, rewriteDocsLocation(value, requestUrl) ?? value);
       continue;
@@ -226,5 +235,6 @@ export const filterUpstreamResponseHeaders = (
     }
     out.set(key, value);
   }
+  out.set("cache-control", "no-store");
   return out;
 };
