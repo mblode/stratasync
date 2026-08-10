@@ -44,6 +44,29 @@ All decorated model properties become MobX observables:
 - Components wrapped with `observer()` re-render on observed changes
 - Sync engine batch updates run inside `runInAction`
 
+## Rendering granularity
+
+Every model property is its own observable. Push `observer()` down to the smallest
+component that reads a property, rather than wrapping a whole list or page.
+
+```tsx
+// A delta touching 50 tasks re-renders 50 cells.
+const TaskRow = observer(({ task }: { task: Task }) => <li>{task.title}</li>);
+
+// Not this: the whole list re-renders when any task changes.
+const TaskList = observer(({ tasks }: { tasks: Task[] }) => (
+  <ul>
+    {tasks.map((task) => (
+      <li key={task.id}>{task.title}</li>
+    ))}
+  </ul>
+));
+```
+
+The sync engine wraps each delta packet's identity map mutations in one
+`runInAction`, so nested writes are free and observers only see final state. Keep
+your own multi-property writes inside `runInAction` for the same reason.
+
 ## API reference
 
 ### mobxReactivityAdapter

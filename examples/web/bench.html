@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strata Sync boot benchmark</title>
+    <style>
+      body {
+        font:
+          14px/1.5 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        margin: 2rem;
+        max-width: 60rem;
+      }
+      h1 {
+        font-size: 1.1rem;
+      }
+      table {
+        border-collapse: collapse;
+        margin-top: 1rem;
+      }
+      td,
+      th {
+        border: 1px solid #ccc;
+        padding: 0.35rem 0.75rem;
+        text-align: left;
+      }
+      th {
+        background: #f4f4f4;
+      }
+      #status {
+        margin-top: 1rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Strata Sync boot benchmark</h1>
+    <p>
+      Runs against real IndexedDB in this browser. Results are written to
+      <code>window.__benchResults</code> and printed below.
+    </p>
+    <div id="status">Running…</div>
+    <div id="results"></div>
+    <script type="module" src="/src/bench.ts"></script>
+  </body>
+</html>

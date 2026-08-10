@@ -18,6 +18,7 @@ import type {
   ModelRegistrySnapshot,
   ModelRow,
   MutateResult,
+  ReactivityAdapter,
   SchemaDefinition,
   SubscribeOptions,
   SyncAction,
@@ -45,6 +46,11 @@ class InMemoryStorage implements StorageAdapter {
   private readonly outbox: Transaction[] = [];
   private readonly partialIndexes = new Set<string>();
   private readonly syncActions: SyncAction[] = [];
+
+  /** Counts `writeBatch` calls, to assert delta writes stay batched. */
+  writeBatchCalls = 0;
+  /** Counts single-row `put`/`delete` calls made outside a batch. */
+  rowWriteCalls = 0;
 
   open(_options: {
     name?: string;
@@ -88,20 +94,25 @@ class InMemoryStorage implements StorageAdapter {
     return Promise.resolve([...store.values()] as T[]);
   }
 
-  put<T extends Record<string, unknown>>(
-    modelName: string,
-    row: T
-  ): Promise<void> {
+  private writeRow(modelName: string, row: Record<string, unknown>): void {
     const { id } = row;
     if (typeof id !== "string") {
       throw new TypeError(`Missing id for model ${modelName}`);
     }
-    const store = this.getModelStore(modelName);
-    store.set(id, { ...row });
+    this.getModelStore(modelName).set(id, { ...row });
+  }
+
+  put<T extends Record<string, unknown>>(
+    modelName: string,
+    row: T
+  ): Promise<void> {
+    this.rowWriteCalls += 1;
+    this.writeRow(modelName, row);
     return Promise.resolve();
   }
 
   delete(modelName: string, id: string): Promise<void> {
+    this.rowWriteCalls += 1;
     this.data.get(modelName)?.delete(id);
     return Promise.resolve();
   }
@@ -124,7 +135,7 @@ class InMemoryStorage implements StorageAdapter {
     return Promise.resolve(results);
   }
 
-  async writeBatch(
+  writeBatch(
     ops: {
       type: "put" | "delete";
       modelName: string;
@@ -132,15 +143,17 @@ class InMemoryStorage implements StorageAdapter {
       data?: Record<string, unknown>;
     }[]
   ): Promise<void> {
+    this.writeBatchCalls += 1;
     for (const op of ops) {
       if (op.type === "put" && op.data) {
-        await this.put(op.modelName, op.data);
+        this.writeRow(op.modelName, op.data);
         continue;
       }
       if (op.type === "delete" && op.id) {
-        await this.delete(op.modelName, op.id);
+        this.data.get(op.modelName)?.delete(op.id);
       }
     }
+    return Promise.resolve();
   }
 
   getMeta(): Promise<StorageMeta> {
@@ -916,6 +929,43 @@ class ResubscribeBootstrapRequiredTransport implements TransportAdapter {
   }
 }
 
+/**
+ * Wraps the noop adapter and counts *top-level* `runInAction` entries.
+ *
+ * In MobX a top-level action is exactly one reaction flush, so this is the
+ * measurable stand-in for "how many times did the UI re-render". Nested
+ * actions are free, which is the whole point of batching.
+ */
+const createCountingReactivityAdapter = (): {
+  adapter: ReactivityAdapter;
+  readonly topLevelActions: number;
+} => {
+  let depth = 0;
+  let topLevelActions = 0;
+
+  const adapter: ReactivityAdapter = {
+    ...noopReactivityAdapter,
+    runInAction<T>(fn: () => T): T {
+      if (depth === 0) {
+        topLevelActions += 1;
+      }
+      depth += 1;
+      try {
+        return noopReactivityAdapter.runInAction(fn);
+      } finally {
+        depth -= 1;
+      }
+    },
+  };
+
+  return {
+    adapter,
+    get topLevelActions(): number {
+      return topLevelActions;
+    },
+  };
+};
+
 const schema: SchemaDefinition = {
   models: {
     Task: {
@@ -1176,6 +1226,138 @@ describe("reverse-done alignment", () => {
       expect(transport.bootstrapCalls[0]?.onlyModels).toEqual(["Task", "Team"]);
       expect(transport.fetchDeltaCalls[0]?.after).toBe("42");
     } finally {
+      await client.stop();
+    }
+  });
+
+  it("hydrates a warm start in a single reaction flush", async () => {
+    const schemaHash = new ModelRegistry(schema).getSchemaHash();
+    const storage = new InMemoryStorage();
+    const rowCount = 500;
+    for (let i = 0; i < rowCount; i += 1) {
+      await storage.put("Task", {
+        id: `task-${i}`,
+        teamId: "team-1",
+        title: `Task ${i}`,
+      });
+    }
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "7",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    await storage.setModelPersistence("Team", true);
+
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "7", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+    const reactivity = createCountingReactivityAdapter();
+
+    const client = createSyncClient({
+      reactivity: reactivity.adapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      const flushesBefore = reactivity.topLevelActions;
+      await client.start();
+
+      expect(transport.bootstrapCalls).toHaveLength(0);
+      expect(client.getIdentityMap<Record<string, unknown>>("Task").size).toBe(
+        rowCount
+      );
+      // The whole warm start must land as one flush, not one per row.
+      // Without batching this was `rowCount` flushes and the UI visibly
+      // churned through the dataset.
+      expect(reactivity.topLevelActions - flushesBefore).toBe(1);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("applies a multi-page catch-up as one flush and one batched write", async () => {
+    const schemaHash = new ModelRegistry(schema).getSchemaHash();
+    const storage = new InMemoryStorage();
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "10",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    await storage.setModelPersistence("Team", true);
+
+    const pageSize = 50;
+    const pageCount = 4;
+    const pages: DeltaPacket[] = [];
+    let syncId = 10;
+    for (let page = 0; page < pageCount; page += 1) {
+      const actions: SyncAction[] = [];
+      for (let i = 0; i < pageSize; i += 1) {
+        syncId += 1;
+        actions.push({
+          action: "I",
+          data: {
+            id: `task-${page}-${i}`,
+            teamId: "team-1",
+            title: `Task ${page}-${i}`,
+          },
+          id: String(syncId),
+          modelId: `task-${page}-${i}`,
+          modelName: "Task",
+        });
+      }
+      pages.push({
+        actions,
+        hasMore: page < pageCount - 1,
+        lastSyncId: String(syncId),
+      });
+    }
+
+    const transport = new TestTransport({
+      fetchDeltaPackets: pages,
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+    const reactivity = createCountingReactivityAdapter();
+
+    const client = createSyncClient({
+      reactivity: reactivity.adapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    const catchUpEvents: boolean[] = [];
+    const unsubscribe = client.onEvent((event) => {
+      if (event.type === "catchUpChange") {
+        catchUpEvents.push(event.catchingUp);
+      }
+    });
+
+    try {
+      await client.start();
+      await delay(50);
+
+      expect(client.getIdentityMap<Record<string, unknown>>("Task").size).toBe(
+        pageSize * pageCount
+      );
+      expect(client.lastSyncId).toBe(String(syncId));
+
+      // One flush for the (empty) warm-start hydration plus one for the
+      // whole catch-up. Previously each page produced its own flush, so the
+      // UI stepped visibly through the backlog.
+      expect(reactivity.topLevelActions).toBe(2);
+      // And the backlog persists as one writeBatch rather than ~2 IDB round
+      // trips per action.
+      expect(storage.writeBatchCalls).toBe(1);
+      expect(storage.rowWriteCalls).toBe(0);
+      expect(catchUpEvents).toEqual([true, false]);
+    } finally {
+      unsubscribe();
       await client.stop();
     }
   });
@@ -1616,6 +1798,117 @@ describe("reverse-done alignment", () => {
         id: "task-2",
         title: "Local",
       });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("never evicts instant models, which cannot be refetched", async () => {
+    const schemaHash = new ModelRegistry(eagerPartialSchema).getSchemaHash();
+    const storage = new InMemoryStorage();
+    // Twice the configured ceiling, for both an instant and a partial model.
+    for (let i = 0; i < 6; i += 1) {
+      await storage.put("Task", { id: `task-${i}`, title: `Task ${i}` });
+      await storage.put("Comment", {
+        body: `Comment ${i}`,
+        id: `comment-${i}`,
+        taskId: "task-0",
+      });
+    }
+    await storage.setMeta({
+      bootstrapComplete: true,
+      lastSyncId: "7",
+      schemaHash,
+    });
+    await storage.setModelPersistence("Task", true);
+    await storage.setModelPersistence("Comment", true);
+
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "7", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      identityMapMaxSize: 3,
+      reactivity: noopReactivityAdapter,
+      schema: eagerPartialSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+
+      // Task is `instant`: the schema promises the full set and ensureModel
+      // refuses to refetch it, so evicting would silently shrink every query.
+      expect(client.getIdentityMap<Record<string, unknown>>("Task").size).toBe(
+        6
+      );
+      // Comment is `partial`: demand-loadable, so the LRU ceiling still applies.
+      expect(
+        client.getIdentityMap<Record<string, unknown>>("Comment").size
+      ).toBe(3);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("fetches the rows behind a coverage action instead of claiming empty coverage", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      batchRows: [
+        {
+          data: { body: "Covered", id: "comment-1", taskId: "task-1" },
+          modelName: "Comment",
+        },
+      ],
+      fetchDeltaPacket: {
+        actions: [
+          {
+            action: "C",
+            data: { indexedKey: "taskId", keyValue: "task-1" },
+            id: "43",
+            modelId: "task-1",
+            modelName: "Comment",
+          },
+        ],
+        lastSyncId: "43",
+      },
+      fullMetadata: { lastSyncId: "42", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema: regularPartialSchema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await delay(50);
+
+      // The rows behind the granted key are not in the delta stream, so the
+      // client must batch-load them. Recording coverage without the rows would
+      // make loadByIndex report a complete — but empty — set forever.
+      expect(transport.batchLoadCalls).toEqual([
+        {
+          firstSyncId: "42",
+          requests: [
+            { indexedKey: "taskId", keyValue: "task-1", modelName: "Comment" },
+          ],
+        },
+      ]);
+      expect(
+        await storage.hasPartialIndex("Comment", "taskId", "task-1")
+      ).toBeTruthy();
+      expect(
+        await storage.getByIndex("Comment", "taskId", "task-1")
+      ).toMatchObject([{ body: "Covered", id: "comment-1", taskId: "task-1" }]);
+      expect(
+        client.getCached<Record<string, unknown>>("Comment", "comment-1")
+      ).toMatchObject({ body: "Covered", id: "comment-1" });
     } finally {
       await client.stop();
     }

@@ -65,6 +65,7 @@ export const SyncProvider = ({
   );
   const [lastSyncId, setLastSyncId] = useState<SyncId>(client.lastSyncId);
   const [backlog, setBacklog] = useState<number>(0);
+  const [catchingUp, setCatchingUp] = useState<boolean>(client.catchingUp);
   const [error, setError] = useState<Error | null>(client.lastError ?? null);
   const stateClientRef = useRef(client);
   const readyPromiseClientRef = useRef(client);
@@ -89,6 +90,9 @@ export const SyncProvider = ({
     ? lastSyncId
     : client.lastSyncId;
   const effectiveBacklog = isCurrentClientSnapshot ? backlog : 0;
+  const effectiveCatchingUp = isCurrentClientSnapshot
+    ? catchingUp
+    : client.catchingUp;
   const effectiveError = isCurrentClientSnapshot
     ? error
     : (client.lastError ?? null);
@@ -142,6 +146,10 @@ export const SyncProvider = ({
           setBacklog(event.pendingCount);
           break;
         }
+        case "catchUpChange": {
+          setCatchingUp(event.catchingUp);
+          break;
+        }
         default: {
           break;
         }
@@ -153,6 +161,7 @@ export const SyncProvider = ({
     setConnectionState(client.connectionState);
     setLastSyncId(client.lastSyncId);
     setBacklog(0);
+    setCatchingUp(client.catchingUp);
     setError(client.lastError ?? null);
     (async () => {
       try {
@@ -202,6 +211,7 @@ export const SyncProvider = ({
       clientId: client.clientId,
       connectionState: effectiveConnectionState,
       error: effectiveError,
+      isCatchingUp: effectiveCatchingUp,
       isOffline: effectiveConnectionState === "disconnected",
       isReady: effectiveState === "syncing",
       isSyncing:
@@ -214,6 +224,7 @@ export const SyncProvider = ({
       effectiveState,
       effectiveConnectionState,
       effectiveError,
+      effectiveCatchingUp,
       client.clientId,
       effectiveLastSyncId,
       readyPromise,

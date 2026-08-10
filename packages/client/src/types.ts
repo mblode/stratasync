@@ -343,6 +343,7 @@ export type SyncClientEvent =
   | { type: "stateChange"; state: SyncClientState }
   | { type: "connectionChange"; state: ConnectionState }
   | { type: "outboxChange"; pendingCount: number }
+  | { type: "catchUpChange"; catchingUp: boolean }
   | {
       type: "modelChange";
       modelName: string;
@@ -366,6 +367,13 @@ export interface SyncClient {
 
   /** Current connection state */
   connectionState: ConnectionState;
+
+  /**
+   * True while a multi-page delta backlog is being applied. The client is
+   * already `"syncing"` and rendering cached data throughout, so this is for
+   * showing a quiet indicator — not for gating readiness.
+   */
+  catchingUp: boolean;
 
   /** Last sync ID received from server */
   lastSyncId: SyncId;
