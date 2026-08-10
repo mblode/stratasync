@@ -337,6 +337,65 @@ const noopMutate = (batch: TransactionBatch): Promise<MutateResult> =>
   });
 
 describe(OutboxManager, () => {
+  it("stamps a strictly increasing batchIndex so same-tick order survives replay", async () => {
+    const storage = new InMemoryStorage();
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(
+        vi.fn(() => Promise.reject(new Error("offline")))
+      ),
+    });
+
+    // Created in one tick, so `createdAt` (millisecond resolution) ties. Only
+    // batchIndex distinguishes them, and replay order depends on it.
+    await manager.insert("Task", "task-1", { id: "task-1", title: "Created" });
+    await manager.update("Task", "task-1", { title: "Renamed" }, {});
+    await manager.delete("Task", "task-1", {});
+
+    const outbox = await storage.getOutbox();
+    const indexes = outbox.map((tx) => tx.batchIndex);
+
+    expect(indexes).toEqual([0, 1, 2]);
+    expect(outbox.map((tx) => tx.action)).toEqual(["I", "U", "D"]);
+  });
+
+  it("keeps batchIndex above transactions already persisted by another runtime", async () => {
+    const storage = new InMemoryStorage();
+    await storage.addToOutbox({
+      action: "I",
+      batchIndex: 41,
+      clientId: "other-tab",
+      clientTxId: "tx-existing",
+      createdAt: Date.now(),
+      modelId: "task-9",
+      modelName: "Task",
+      payload: { id: "task-9" },
+      retryCount: 0,
+      state: "queued",
+    } as Transaction);
+
+    const manager = new OutboxManager({
+      batchDelay: 1000,
+      clientId: "client-1",
+      storage,
+      transport: new TestTransport(
+        vi.fn(() => Promise.reject(new Error("offline")))
+      ),
+    });
+
+    // The replay attempt fails (offline); only the batchIndex seeding matters.
+    await expect(manager.processPendingTransactions()).rejects.toThrow(
+      "offline"
+    );
+    await manager.insert("Task", "task-1", { id: "task-1", title: "New" });
+
+    const outbox = await storage.getOutbox();
+    const created = outbox.find((tx) => tx.modelId === "task-1");
+    expect(created?.batchIndex).toBe(42);
+  });
+
   it("requeues transport failures for reconnect recovery", async () => {
     const storage = new InMemoryStorage();
     const mutate = vi

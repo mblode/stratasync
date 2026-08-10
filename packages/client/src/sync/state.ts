@@ -11,6 +11,7 @@ export class SyncStateMachine {
   private _state: SyncClientState = "disconnected";
   private _connectionState: ConnectionState = "disconnected";
   private _lastError: Error | null = null;
+  private _catchingUp = false;
   private readonly stateListeners = new Set<(state: SyncClientState) => void>();
   private readonly connectionListeners = new Set<
     (state: ConnectionState) => void
@@ -31,6 +32,26 @@ export class SyncStateMachine {
 
   get lastError(): Error | null {
     return this._lastError;
+  }
+
+  /**
+   * True while a multi-page delta backlog is being fetched and applied.
+   *
+   * Deliberately separate from `state`: the client is already `"syncing"` and
+   * rendering cached data at this point, so readiness must not be gated on it.
+   * It exists so apps can show a quiet indicator instead of the user inferring
+   * "something is happening" from data moving underneath them.
+   */
+  get catchingUp(): boolean {
+    return this._catchingUp;
+  }
+
+  setCatchingUp(catchingUp: boolean): void {
+    if (this._catchingUp === catchingUp) {
+      return;
+    }
+    this._catchingUp = catchingUp;
+    this.emitEvent?.({ catchingUp, type: "catchUpChange" });
   }
 
   // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration

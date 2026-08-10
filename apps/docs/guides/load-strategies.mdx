@@ -101,6 +101,36 @@ export class DraftMessage extends Model {
 | Sensitive data     | AdminSettings       | `explicitlyRequested`  | Access-controlled            |
 | Client-only state  | Draft, UIPreference | `local`                | Never synced                 |
 
+## Server-granted coverage
+
+A server can widen a client's partial-index coverage mid-stream by emitting a
+`"C"` (covering) sync action naming a model, an indexed key, and a key value.
+
+The rows behind a newly covered key are not carried in the delta stream, so the
+client batch-loads them and only then records the coverage. Recording coverage
+first would leave `loadByIndex` reporting a complete — but empty — set for that
+key, with nothing to trigger a repair.
+
+The fetch runs after the packet is applied, so a `"C"` action never blocks the
+rest of the packet.
+
+## Identity map eviction
+
+The identity map applies an LRU ceiling (`identityMapMaxSize`, default 10,000 rows
+per model) to bound memory.
+
+Only **demand-loadable** models are evicted. `instant` models are declared to sync
+in full and `ensureModel()` refuses to refetch them, so evicting one would silently
+shrink every query against it until the next bootstrap. `local` models never sync,
+so the in-memory copy is the only copy. Both are exempt, whatever the ceiling.
+
+`lazy`, `partial`, and `explicitlyRequested` models are evictable: each can be
+fetched again on next access, and eviction emits a `modelChange` so hooks re-render
+and Suspense re-hydrates.
+
+This means a large `instant` model is held in memory in full. If that is too much,
+the fix is to move it to `partial` or `lazy` — not to lower the ceiling.
+
 ## Performance implications
 
 - **Bootstrap payload size**: Includes all `instant` models and `partial` subsets. If slow, move large models to `partial`/`lazy`, limit via `prefetchBootstrap`, or enable compression.

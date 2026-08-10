@@ -93,6 +93,17 @@ export class OutboxManager {
    */
   private readonly localClientTxIds = new Set<string>();
 
+  /**
+   * Strictly increasing sequence stamped on every queued transaction.
+   *
+   * `createdAt` is only millisecond-resolution, so transactions created in the
+   * same tick tie. The outbox replay order breaks that tie on `batchIndex`
+   * (see `storage-idb/stores/outbox.ts`), which without this counter fell
+   * through to comparing random `clientTxId`s — so `create X` followed by
+   * `update X` in one tick could replay in the wrong order after a reload.
+   */
+  private nextBatchIndex = 0;
+
   constructor(options: OutboxManagerOptions) {
     this.storage = options.storage;
     this.transport = options.transport;
@@ -196,6 +207,8 @@ export class OutboxManager {
    */
   private async queueTransaction(tx: Transaction): Promise<void> {
     this.localClientTxIds.add(tx.clientTxId);
+    tx.batchIndex = this.nextBatchIndex;
+    this.nextBatchIndex += 1;
     // Persist to storage first
     await this.storage.addToOutbox(tx);
     this.onTransactionStateChange?.(tx);
@@ -500,6 +513,14 @@ export class OutboxManager {
     await this.waitForInflightSends();
 
     const pending = await this.storage.getOutbox();
+
+    // Keep the sequence above anything already persisted (by this runtime or
+    // another tab) so newly queued transactions never sort before replayed ones.
+    for (const tx of pending) {
+      if (tx.batchIndex !== undefined && tx.batchIndex >= this.nextBatchIndex) {
+        this.nextBatchIndex = tx.batchIndex + 1;
+      }
+    }
 
     // Reset unconfirmed transport states back to queued so they can retry.
     for (const tx of pending) {

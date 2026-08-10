@@ -40,7 +40,7 @@ export class IdentityMap<T extends Record<string, unknown>> {
   private readonly map: ObservableMap<string, T>;
   private readonly modelName: string;
   private readonly reactivity: ReactivityAdapter;
-  private readonly maxSize: number;
+  private maxSize: number;
   // Insertion order is access order: oldest-touched id first, most-recent last.
   // Gives O(1) touch (delete + re-add) and O(1) eviction (drop the first key).
   private readonly accessOrder = new Set<string>();
@@ -62,6 +62,11 @@ export class IdentityMap<T extends Record<string, unknown>> {
     this.map = reactivity.createMap<string, T>(undefined, {
       name: `IdentityMap:${modelName}`,
     });
+  }
+
+  /** Adjusts the LRU ceiling; `Infinity` disables eviction for this map. */
+  setMaxSize(maxSize: number): void {
+    this.maxSize = maxSize;
   }
 
   setModelFactory(modelFactory?: ModelFactory): void {
@@ -323,6 +328,7 @@ export class IdentityMapRegistry {
   private readonly maxSize: number;
   private modelFactory?: ModelFactory;
   private readonly onEvict?: EvictionListener;
+  private isEvictable?: (modelName: string) => boolean;
 
   constructor(
     reactivity: ReactivityAdapter,
@@ -334,6 +340,33 @@ export class IdentityMapRegistry {
     this.modelFactory = modelFactory;
     this.maxSize = maxSize;
     this.onEvict = onEvict;
+  }
+
+  /**
+   * Declares which models may be LRU-evicted under memory pressure.
+   *
+   * Eviction is only safe when the model can be fetched again on demand.
+   * `instant` models are declared to sync in full, and `ensureModel` refuses to
+   * refetch them (see `loader.ts`) — evicting one silently drops it from every
+   * query until the next bootstrap. `local` models never sync at all, so
+   * evicting one destroys the only copy.
+   */
+  setEvictionPolicy(isEvictable: (modelName: string) => boolean): void {
+    this.isEvictable = isEvictable;
+    for (const [modelName, map] of this.maps) {
+      map.setMaxSize(
+        isEvictable(modelName) ? this.maxSize : Number.POSITIVE_INFINITY
+      );
+    }
+  }
+
+  private maxSizeFor(modelName: string): number {
+    if (!this.isEvictable) {
+      return this.maxSize;
+    }
+    return this.isEvictable(modelName)
+      ? this.maxSize
+      : Number.POSITIVE_INFINITY;
   }
 
   setModelFactory(modelFactory?: ModelFactory): void {
@@ -353,7 +386,7 @@ export class IdentityMapRegistry {
         modelName,
         this.reactivity,
         this.modelFactory,
-        this.maxSize,
+        this.maxSizeFor(modelName),
         this.onEvict
       );
       this.maps.set(modelName, map);

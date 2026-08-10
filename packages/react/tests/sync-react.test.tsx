@@ -105,6 +105,7 @@ const createTestClient = (options: TestClientOptions = {}): TestClient => {
     }),
     canRedo: vi.fn(() => false),
     canUndo: vi.fn(() => false),
+    catchingUp: false,
     clearAll: vi.fn(async () => {
       /* noop */
     }),
@@ -721,6 +722,74 @@ describe("sync-react bindings", () => {
     });
 
     expect(client.query).toHaveBeenCalledOnce();
+  });
+
+  it("skips rescanning when a change cannot affect the query result", async () => {
+    const client = createTestClient({ state: "syncing" });
+    const tasks = [
+      { id: "task-a", title: "A", type: "a" },
+      { id: "task-b", title: "B", type: "b" },
+    ];
+    const map = new Map(tasks.map((task) => [task.id, task]));
+
+    client.getIdentityMap = vi.fn(
+      () => map
+    ) as unknown as typeof client.getIdentityMap;
+    client.query = vi.fn(() => {
+      const data = tasks.filter((task) => task.type === "a");
+      return Promise.resolve({ data, hasMore: false, totalCount: data.length });
+    }) as typeof client.query;
+
+    let whereCalls = 0;
+    const FilterProbe = () => {
+      const { data } = useQuery<(typeof tasks)[number]>("Task", {
+        where: useCallback((task: (typeof tasks)[number]) => {
+          whereCalls += 1;
+          return task.type === "a";
+        }, []),
+      });
+      return <div data-testid="relevanceTitle">{data[0]?.title ?? ""}</div>;
+    };
+
+    render(
+      <SyncProvider client={client}>
+        <FilterProbe />
+      </SyncProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("relevanceTitle").textContent).toBe("A");
+    });
+
+    // A change to task-b: not in the matched set, and it still fails the
+    // predicate, so the query must not rescan the whole model.
+    const callsBefore = whereCalls;
+    act(() => {
+      client.emitEvent({
+        action: "update",
+        modelId: "task-b",
+        modelName: "Task",
+        type: "modelChange",
+      });
+    });
+    await waitFor(() => {
+      expect(whereCalls).toBeLessThanOrEqual(callsBefore + 1);
+    });
+    expect(whereCalls - callsBefore).toBeLessThanOrEqual(1);
+
+    // A change to task-a IS relevant, so it does rescan.
+    const callsBeforeRelevant = whereCalls;
+    act(() => {
+      client.emitEvent({
+        action: "update",
+        modelId: "task-a",
+        modelName: "Task",
+        type: "modelChange",
+      });
+    });
+    await waitFor(() => {
+      expect(whereCalls).toBeGreaterThan(callsBeforeRelevant + 1);
+    });
   });
 
   it("does not run a queued query refresh after unmount", async () => {

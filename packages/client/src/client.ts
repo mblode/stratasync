@@ -254,6 +254,17 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     emitEvent
   );
 
+  // Only demand-loadable models may be evicted. `instant` models are declared
+  // to sync in full and `ensureModel` refuses to refetch them, so evicting one
+  // would silently drop it from every query until the next bootstrap; `local`
+  // models never sync, so the in-memory copy is the only one.
+  identityMaps.setEvictionPolicy((modelName) => {
+    const strategy =
+      orchestrator.getRegistry().getModelMetadata(modelName)?.loadStrategy ??
+      "instant";
+    return strategy !== "instant" && strategy !== "local";
+  });
+
   const getStorageOpenOptions = () => ({
     name: resolvedOptions.dbName,
     schema: resolvedOptions.schema ?? orchestrator.getRegistry().snapshot(),
@@ -424,6 +435,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     transport: options.transport,
   });
 
+  // A `"C"` action grants coverage of a partial index key without carrying the
+  // rows, so fetch them. `loadByIndex` records the coverage once the rows land.
+  orchestrator.setCoverageLoader(async (modelName, indexedKey, keyValue) => {
+    await loader.loadByIndex(modelName, indexedKey, keyValue);
+  });
+
   const ensureModelInternal = <T>(
     modelName: string,
     id: string
@@ -515,6 +532,10 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
 
     canUndo(): boolean {
       return history.canUndo();
+    },
+
+    get catchingUp(): boolean {
+      return orchestrator.catchingUp;
     },
 
     async clearAll(): Promise<void> {

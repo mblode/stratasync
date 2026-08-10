@@ -37,6 +37,13 @@ export class SyncOrchestrator {
   private readonly transport: TransportAdapter;
   private readonly identityMaps: IdentityMapRegistry;
   private outboxManager: OutboxManager | null = null;
+  private coverageLoader:
+    | ((
+        modelName: string,
+        indexedKey: string,
+        keyValue: string
+      ) => Promise<void>)
+    | null = null;
   private readonly options: SyncClientOptions;
   private readonly registry: ModelRegistry;
 
@@ -105,6 +112,12 @@ export class SyncOrchestrator {
         this.applyPendingOutboxTransactions(),
       handleSyncGroupActions: (actions, nextSyncId) =>
         this.syncGroups.handleSyncGroupActions(actions, nextSyncId),
+      // Without a lazy loader attached there is nothing to fetch, so fall back
+      // to recording the coverage as before.
+      loadCoverage: (modelName, indexedKey, keyValue) =>
+        this.coverageLoader
+          ? this.coverageLoader(modelName, indexedKey, keyValue)
+          : this.storage.setPartialIndex(modelName, indexedKey, keyValue),
       processOutboxTransactions: () => this.processOutboxTransactions(),
       runBootstrap: (runToken) => this.bootstrapRunner.bootstrap(runToken),
     });
@@ -134,6 +147,8 @@ export class SyncOrchestrator {
       registry: this.registry,
       runWithStateLock: (operation) => this.runWithStateLock(operation),
       schemaHash: this.schemaHash,
+      setCatchingUp: (catchingUp) =>
+        this.stateMachine.setCatchingUp(catchingUp),
       setDeferredConflictTxs: (txs) => {
         this.deferredConflictTxs = txs;
       },
@@ -168,6 +183,23 @@ export class SyncOrchestrator {
     this.outboxManager = outboxManager;
   }
 
+  /**
+   * Attaches the fetcher used when a `"C"` action grants coverage of a partial
+   * index key. Late-bound because the lazy loader is composed in the client,
+   * which needs the orchestrator to exist first.
+   */
+  setCoverageLoader(
+    loader:
+      | ((
+          modelName: string,
+          indexedKey: string,
+          keyValue: string
+        ) => Promise<void>)
+      | null
+  ): void {
+    this.coverageLoader = loader;
+  }
+
   setConflictHandler(handler: (tx: Transaction) => void): void {
     this.onTransactionConflict = handler;
   }
@@ -184,6 +216,13 @@ export class SyncOrchestrator {
    */
   get connectionState(): ConnectionState {
     return this.stateMachine.connectionState;
+  }
+
+  /**
+   * Whether a multi-page delta backlog is currently being applied.
+   */
+  get catchingUp(): boolean {
+    return this.stateMachine.catchingUp;
   }
 
   /**
