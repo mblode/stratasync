@@ -128,16 +128,28 @@ const rewriteRootRelativeDocsPaths = (body: string): string =>
  * Both copies are replaced: the rendered `<meta>`, and the one React
  * re-renders from the flight payload on hydration.
  */
-const HOST_SITE_NAME = "Matthew Blode";
-const OG_SITE_NAME_META =
-  /(<meta[^>]*property="og:site_name"[^>]*content=")[^"]*(")/g;
-const OG_SITE_NAME_FLIGHT =
-  /(\\"og:site_name\\",\\"content\\":\\")[^\\"]*(\\")/g;
+export const HOST_SITE_NAME = "Matthew Blode";
 
-const rewriteOgSiteName = (body: string): string =>
+/**
+ * Matched on `og:site_name` alone, then the `content` attribute is replaced
+ * inside whatever matched. An earlier version required `property` before
+ * `content` in one pattern: if the platform ever emits them the other way the
+ * regex matches nothing, rewrites nothing, and the old value ships while any
+ * assertion phrased as "the new value is present" still passes.
+ */
+const OG_SITE_NAME_META = /<meta\b[^>]*\bproperty="og:site_name"[^>]*>/giu;
+const META_CONTENT_ATTR = /\bcontent="[^"]*"/iu;
+const OG_SITE_NAME_FLIGHT = /\{[^{}]*\\"og:site_name\\"[^{}]*\}/gu;
+const FLIGHT_CONTENT_ATTR = /\\"content\\":\\"[^"\\]*\\"/u;
+
+export const rewriteOgSiteName = (body: string): string =>
   body
-    .replace(OG_SITE_NAME_META, `$1${HOST_SITE_NAME}$2`)
-    .replace(OG_SITE_NAME_FLIGHT, `$1${HOST_SITE_NAME}$2`);
+    .replace(OG_SITE_NAME_META, (tag) =>
+      tag.replace(META_CONTENT_ATTR, `content="${HOST_SITE_NAME}"`)
+    )
+    .replace(OG_SITE_NAME_FLIGHT, (node) =>
+      node.replace(FLIGHT_CONTENT_ATTR, `\\"content\\":\\"${HOST_SITE_NAME}\\"`)
+    );
 
 export const rewriteDocsBody = (body: string): string =>
   rewriteOgSiteName(
