@@ -43,6 +43,26 @@ for (const html of OG_SITE_NAME_CASES) {
 const titleHtml = `<meta property="og:title" content="Introduction · ${PRODUCT}"/>`;
 assert.equal(rewriteDocsBody(titleHtml), titleHtml);
 
+// twitter:creator is absent upstream, so it is added rather than rewritten.
+const HEAD_ONLY = "<html><head><title>x</title></head><body></body></html>";
+const withCreator = rewriteDocsBody(HEAD_ONLY);
+assert.match(
+  withCreator,
+  /<meta name="twitter:creator" content="@mattblode"\/>/
+);
+assert.equal(
+  (withCreator.match(/twitter:creator/g) ?? []).length,
+  1,
+  "injected twice"
+);
+// Already present upstream: left alone rather than duplicated.
+const ALREADY =
+  '<html><head><meta name="twitter:creator" content="@mattblode"/></head></html>';
+assert.equal(
+  (rewriteDocsBody(ALREADY).match(/twitter:creator/g) ?? []).length,
+  1
+);
+
 if (process.env.SMOKE_LIVE) {
   const live = await fetch(UPSTREAM_DOCS_URL).then((response) =>
     response.text()
@@ -64,6 +84,11 @@ if (process.env.SMOKE_LIVE) {
     out,
     new RegExp(`property="og:title" content="[^"]*${PRODUCT}[^"]*"`, "u"),
     "og:title stopped naming the product, so the card names nothing"
+  );
+  assert.match(
+    out,
+    /<meta name="twitter:creator" content="@mattblode"\/>/u,
+    "twitter:creator missing from live HTML"
   );
   process.stdout.write(
     `live upstream og:site_name "${upstreamName}" rewritten\n`
