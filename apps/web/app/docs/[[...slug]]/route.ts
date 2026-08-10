@@ -6,6 +6,8 @@ import {
   shouldRewriteDocsBody,
 } from "@/lib/docs-proxy";
 
+export const dynamic = "force-dynamic";
+
 interface RouteContext {
   params: Promise<{ slug?: string[] }>;
 }
@@ -16,6 +18,7 @@ const proxyDocs = async (request: Request, context: RouteContext) => {
   const upstreamUrl = docsUpstreamUrl(slug, requestUrl.search);
 
   const upstream = await fetch(upstreamUrl, {
+    cache: "no-store",
     headers: filterUpstreamRequestHeaders(request.headers),
     method: request.method,
     redirect: "manual",
