@@ -16,6 +16,7 @@ export {
 } from "./hooks/use-model.js";
 export { useQuery, useQueryAll, useQueryCount } from "./hooks/use-query.js";
 export {
+  useSyncCatchingUp,
   useSyncClient,
   useSyncClientInstance,
   useSyncError,

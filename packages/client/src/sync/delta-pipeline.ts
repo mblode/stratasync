@@ -16,6 +16,7 @@ import {
   resolveConflictEffect,
 } from "@stratasync/core";
 
+import type { BatchOperation } from "../types.js";
 import { getModelKey } from "../utils.js";
 import type { SyncContext } from "./context.js";
 import {
@@ -31,6 +32,19 @@ interface DeferredMapOp {
   clientTxId?: string;
 }
 
+/**
+ * In-memory resolution of a delta packet, collapsed per `modelName:modelId`.
+ *
+ * `rows` doubles as a read-through cache (a `null` entry is a cached miss);
+ * `deleted` tracks keys removed within the packet; `writes` is the collapsed
+ * set of storage operations to flush, one per key.
+ */
+interface DeltaStaging {
+  rows: Map<string, Record<string, unknown> | null>;
+  deleted: Set<string>;
+  writes: Map<string, BatchOperation>;
+}
+
 interface BootstrapRequiredError extends Error {
   code: "BOOTSTRAP_REQUIRED";
 }
@@ -41,6 +55,13 @@ const isBootstrapRequiredError = (
   error instanceof Error &&
   "code" in error &&
   error.code === "BOOTSTRAP_REQUIRED";
+
+/**
+ * Upper bound on actions buffered across catch-up pages before flushing.
+ * Sized well above the server's 1000-action page so a typical backlog lands in
+ * one flush, while a badly stale client still can't buffer unboundedly.
+ */
+const COALESCED_CATCH_UP_ACTION_LIMIT = 10_000;
 
 const wait = (ms: number): Promise<void> =>
   // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
@@ -65,6 +86,22 @@ export interface DeltaPipelineDeps {
     actions: SyncAction[],
     nextSyncId: SyncId
   ): Promise<void>;
+  /**
+   * Loads the rows behind a newly granted partial-index coverage key and
+   * records the coverage. Absent until the lazy loader is wired.
+   */
+  loadCoverage?(
+    modelName: string,
+    indexedKey: string,
+    keyValue: string
+  ): Promise<void>;
+}
+
+/** A partial-index coverage key granted by a `"C"` action. */
+interface CoverageKey {
+  modelName: string;
+  indexedKey: string;
+  keyValue: string;
 }
 
 /**
@@ -77,6 +114,8 @@ export interface DeltaPipelineDeps {
 export class DeltaPipeline {
   private readonly ctx: SyncContext;
   private readonly deps: DeltaPipelineDeps;
+  /** Coverage keys awaiting a fetch once the state lock is released. */
+  private readonly pendingCoverageLoads: CoverageKey[] = [];
 
   constructor(ctx: SyncContext, deps: DeltaPipelineDeps) {
     this.ctx = ctx;
@@ -267,6 +306,15 @@ export class DeltaPipeline {
     }
   }
 
+  /**
+   * Fetches deltas page by page and applies them.
+   *
+   * Pages are buffered and applied as one merged packet so a multi-page
+   * backlog lands in a single identity-map batch — one render — instead of
+   * stepping the UI visibly through each page. The buffer is capped so a very
+   * stale client stays memory-bounded; it flushes on the cap, on the last
+   * page, and whenever paging stops.
+   */
   async fetchAndApplyDeltaPages(
     afterSyncId: SyncId,
     options: {
@@ -277,11 +325,27 @@ export class DeltaPipeline {
   ): Promise<void> {
     let nextAfterSyncId = afterSyncId;
     let releaseBarrier: (() => void) | null = null;
+    let buffered: SyncAction[] = [];
+    let bufferedLastSyncId: SyncId | null = null;
+
+    const flush = async (): Promise<void> => {
+      if (bufferedLastSyncId === null) {
+        return;
+      }
+      const merged: DeltaPacket = {
+        actions: buffered,
+        lastSyncId: bufferedLastSyncId,
+      };
+      buffered = [];
+      bufferedLastSyncId = null;
+      await this.enqueueDeltaPacket(merged);
+    };
 
     try {
       while (true) {
         const packet = await this.fetchDeltaPage(nextAfterSyncId, options);
         if (!packet) {
+          await flush();
           return;
         }
 
@@ -289,27 +353,38 @@ export class DeltaPipeline {
           options.runToken !== undefined &&
           !this.ctx.isRunActive(options.runToken)
         ) {
+          // Drop the buffer: the cursor never advanced, so the next run
+          // re-fetches these deltas from the same point.
           return;
         }
 
         if (packet.hasMore && !releaseBarrier) {
           releaseBarrier = this.ctx.deltaReplayGate().hold();
+          this.ctx.setCatchingUp(true);
         }
 
-        await this.enqueueDeltaPacket(packet);
+        buffered.push(...packet.actions);
+        bufferedLastSyncId = packet.lastSyncId;
 
-        if (!packet.hasMore) {
+        if (
+          !packet.hasMore ||
+          !isSyncIdGreaterThan(packet.lastSyncId, nextAfterSyncId)
+        ) {
+          await flush();
           return;
         }
 
-        if (!isSyncIdGreaterThan(packet.lastSyncId, nextAfterSyncId)) {
-          return;
+        if (buffered.length >= COALESCED_CATCH_UP_ACTION_LIMIT) {
+          await flush();
         }
 
         nextAfterSyncId = packet.lastSyncId;
       }
     } finally {
-      releaseBarrier?.();
+      if (releaseBarrier) {
+        releaseBarrier();
+        this.ctx.setCatchingUp(false);
+      }
     }
   }
 
@@ -365,11 +440,14 @@ export class DeltaPipeline {
   private enqueueDeltaPacket(packet: DeltaPacket): Promise<void> {
     // packetQueue serializes packets against each other; the nested state-lock
     // run keeps packet application serialized against mutations too.
-    return this.ctx.packetQueue().run(() => {
+    return this.ctx.packetQueue().run(async () => {
       if (!this.ctx.isRunning()) {
         return;
       }
-      return this.ctx.runWithStateLock(() => this.applyDeltaPacket(packet));
+      await this.ctx.runWithStateLock(() => this.applyDeltaPacket(packet));
+      // Outside the state lock: coverage fetches take it themselves, and it
+      // is not reentrant.
+      await this.drainPendingCoverageLoads();
     });
   }
 
@@ -528,75 +606,121 @@ export class DeltaPipeline {
   }
 
   /**
-   * Creates a delta target that writes to storage immediately but collects
-   * identity map operations for deferred application in a single batch.
+   * Creates a delta target backed by an in-memory staging area rather than by
+   * storage directly.
+   *
+   * Writing straight through would cost two IndexedDB transactions per action
+   * (a `get` then a `put`, each opening its own transaction), so a 1000-action
+   * catch-up page meant ~2000 serialized round trips. Staging lets the whole
+   * packet resolve in memory and land as a single `writeBatch`.
    */
-  private createDeferredDeltaTarget(ops: DeferredMapOp[], action: SyncAction) {
+  private createStagingDeltaTarget(
+    staging: DeltaStaging,
+    ops: DeferredMapOp[],
+    action: SyncAction
+  ) {
+    const read = async (
+      modelName: string,
+      id: string
+    ): Promise<Record<string, unknown> | null> => {
+      const key = getModelKey(modelName, id);
+      if (staging.rows.has(key)) {
+        return staging.rows.get(key) ?? null;
+      }
+      if (staging.deleted.has(key)) {
+        return null;
+      }
+      const existing = await this.ctx.storage.get<Record<string, unknown>>(
+        modelName,
+        id
+      );
+      // Cache the miss too, so repeated actions on the same row in one packet
+      // never re-hit storage.
+      staging.rows.set(key, existing);
+      return existing;
+    };
+
+    const stage = (
+      modelName: string,
+      id: string,
+      row: Record<string, unknown>
+    ): void => {
+      const key = getModelKey(modelName, id);
+      staging.rows.set(key, row);
+      staging.deleted.delete(key);
+      staging.writes.set(key, { data: row, modelName, type: "put" });
+      ops.push({
+        clientTxId: action.clientTxId,
+        data: row,
+        id,
+        modelName,
+        type: "merge",
+      });
+    };
+
     return {
-      delete: async (modelName: string, id: string) => {
-        await this.ctx.storage.delete(modelName, id);
+      delete: (modelName: string, id: string) => {
+        const key = getModelKey(modelName, id);
+        staging.rows.delete(key);
+        staging.deleted.add(key);
+        staging.writes.set(key, { id, modelName, type: "delete" });
         ops.push({
           clientTxId: action.clientTxId,
           id,
           modelName,
           type: "delete",
         });
+        return Promise.resolve();
       },
-      get: (modelName: string, id: string) =>
-        this.ctx.storage.get<Record<string, unknown>>(modelName, id),
+      get: read,
       patch: async (
         modelName: string,
         id: string,
         changes: Record<string, unknown>
       ) => {
-        const existing = await this.ctx.storage.get<Record<string, unknown>>(
+        const existing = await read(modelName, id);
+        const pk = this.ctx.registry.getPrimaryKey(modelName);
+        stage(
           modelName,
-          id
+          id,
+          existing ? { ...existing, ...changes } : { ...changes, [pk]: id }
         );
-        const pk = this.ctx.registry.getPrimaryKey(modelName);
-        const updated = existing
-          ? { ...existing, ...changes }
-          : { ...changes, [pk]: id };
-        await this.ctx.storage.put(modelName, updated);
-        ops.push({
-          clientTxId: action.clientTxId,
-          data: updated,
-          id,
-          modelName,
-          type: "merge",
-        });
       },
-      put: async (
-        modelName: string,
-        id: string,
-        data: Record<string, unknown>
-      ) => {
+      put: (modelName: string, id: string, data: Record<string, unknown>) => {
         const pk = this.ctx.registry.getPrimaryKey(modelName);
-        const row = { ...data, [pk]: id };
-        await this.ctx.storage.put(modelName, row);
-        ops.push({
-          clientTxId: action.clientTxId,
-          data: row,
-          id,
-          modelName,
-          type: "merge",
-        });
+        stage(modelName, id, { ...data, [pk]: id });
+        return Promise.resolve();
       },
     };
   }
 
+  /**
+   * Resolves every action in the packet against an in-memory staging area and
+   * persists the collapsed result in one batch. `ops` still carries one entry
+   * per action so identity-map echo suppression and ordering are unchanged.
+   */
   private async collectDeferredDeltaOps(
     actions: SyncAction[],
     ops: DeferredMapOp[]
   ): Promise<void> {
+    const staging: DeltaStaging = {
+      deleted: new Set(),
+      rows: new Map(),
+      writes: new Map(),
+    };
+
     for (const action of actions) {
-      const deferredTarget = this.createDeferredDeltaTarget(ops, action);
+      const target = this.createStagingDeltaTarget(staging, ops, action);
       await applyDeltas(
         { actions: [action], lastSyncId: action.id },
-        deferredTarget,
+        target,
         this.ctx.registry,
         { mergeUpdates: true }
       );
+    }
+
+    if (staging.writes.size > 0) {
+      await this.ctx.storage.writeBatch([...staging.writes.values()]);
     }
   }
 
@@ -761,19 +885,72 @@ export class DeltaPipeline {
     }
   }
 
+  /**
+   * Processes `"C"` (covering) actions, which grant the client coverage of a
+   * partial index key.
+   *
+   * For a `partial` model the rows behind the key are not in the delta stream,
+   * so recording coverage without fetching them would leave `loadByIndex`
+   * reporting complete coverage over a set it never loaded — and never
+   * self-healing. Those keys are deferred to `pendingCoverageLoads` and fetched
+   * after the packet is applied: the fetch re-enters the state lock, which is
+   * held for the duration of packet application and is not reentrant.
+   *
+   * Non-partial models have no lazy fetch, so their coverage is recorded here.
+   */
   private async handleCoverageActions(actions: SyncAction[]): Promise<void> {
     for (const action of actions) {
       if (action.action !== "C") {
         continue;
       }
-      const { indexedKey } = action.data as Record<string, unknown>;
-      const { keyValue } = action.data as Record<string, unknown>;
-      if (typeof indexedKey === "string" && typeof keyValue === "string") {
-        await this.ctx.storage.setPartialIndex(
-          action.modelName,
+      const { indexedKey, keyValue } = action.data as Record<string, unknown>;
+      if (typeof indexedKey !== "string" || typeof keyValue !== "string") {
+        continue;
+      }
+
+      const isPartial =
+        this.ctx.registry.getModelMetadata(action.modelName)?.loadStrategy ===
+        "partial";
+
+      if (isPartial && this.deps.loadCoverage) {
+        this.pendingCoverageLoads.push({
           indexedKey,
-          keyValue
-        );
+          keyValue,
+          modelName: action.modelName,
+        });
+        continue;
+      }
+
+      await this.ctx.storage.setPartialIndex(
+        action.modelName,
+        indexedKey,
+        keyValue
+      );
+    }
+  }
+
+  /**
+   * Fetches the rows for coverage keys collected during packet application.
+   * Runs outside the state lock; failures are recorded but never abort the
+   * packet, which has already been applied.
+   */
+  private async drainPendingCoverageLoads(): Promise<void> {
+    if (this.pendingCoverageLoads.length === 0) {
+      return;
+    }
+    const keys = this.pendingCoverageLoads.splice(0);
+    const { loadCoverage } = this.deps;
+    if (!loadCoverage) {
+      return;
+    }
+
+    for (const key of keys) {
+      try {
+        await loadCoverage(key.modelName, key.indexedKey, key.keyValue);
+      } catch (error) {
+        if (this.ctx.isRunning()) {
+          this.ctx.recordError(error);
+        }
       }
     }
   }

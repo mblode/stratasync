@@ -80,6 +80,34 @@ sequenceDiagram
 
 4. **Watermark advance**: Advances `lastSyncId` to the packet's watermark, so the next delta fetch starts from the right place.
 
+## Rendering during sync
+
+Delta application is designed so the UI lands on final state instead of visibly
+stepping through changes.
+
+**One flush per packet, not per action.** All identity map mutations for a packet
+run inside a single `batch()`, so observers never see a half-applied packet — server
+data and re-applied pending local changes appear together.
+
+**One flush per backlog, not per page.** When catch-up spans multiple pages, the
+pages are buffered and applied as one merged packet. A client that has been offline
+for a while resumes in one step rather than animating through the queue. Use
+`useSyncCatchingUp()` for a quiet indicator while that happens — the client is
+already `"syncing"` and rendering cached data throughout, so don't gate rendering
+on it.
+
+**One batched write, not two round trips per action.** A packet resolves in memory
+and persists as a single `writeBatch`.
+
+**Queries skip irrelevant changes.** `useQuery` tracks which ids currently satisfy
+its predicate. A delta for a model that is neither in the result set nor newly
+matching is discarded without rescanning.
+
+For per-cell rendering granularity, wrap components that read model properties in
+MobX's `observer()`. Each property is its own observable, so a delta touching 50
+rows re-renders 50 cells rather than the whole list. See the
+[MobX adapter](/packages/mobx).
+
 ## Conflict resolution (rebase)
 
 Field-level LWW rebase resolves conflicts between server deltas and pending local transactions. Each pending transaction stores a `patch` and an `original` snapshot. Non-overlapping changes merge cleanly; overlapping fields use the configured `rebaseStrategy` (`"server-wins"`, `"client-wins"`, or `"merge"`).

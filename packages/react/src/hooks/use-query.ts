@@ -67,6 +67,7 @@ const emptyQueryState = <T>(isLoading: boolean) => ({
   data: [] as T[],
   hasMore: false,
   isLoading,
+  matchedIds: new Set<string>(),
   totalCount: undefined as number | undefined,
 });
 
@@ -92,20 +93,89 @@ const buildSyncQueryOptions = <T>(
 });
 
 /**
+ * Whether an item belongs in this query's result set, ignoring ordering and
+ * the offset/limit window.
+ */
+const matchesQuery = <T extends Record<string, unknown>>(
+  item: T,
+  options: QueryOptions<T>
+): boolean => {
+  if (options.where && !options.where(item)) {
+    return false;
+  }
+  return Boolean(options.includeArchived) || !item.archivedAt;
+};
+
+/**
+ * Ids in the map that satisfy the query, ignoring ordering and the
+ * offset/limit window. One linear pass, no sort.
+ */
+const collectMatchedIds = <T extends Record<string, unknown>>(
+  map: Map<string, T>,
+  options: QueryOptions<T>
+): Set<string> => {
+  const matchedIds = new Set<string>();
+  for (const [id, item] of map) {
+    if (matchesQuery(item, options)) {
+      matchedIds.add(id);
+    }
+  }
+  return matchedIds;
+};
+
+/**
+ * Whether any of `changedIds` can affect this query's result.
+ *
+ * True if an id is already in the matched set (so it may have moved, changed,
+ * or been removed) or if it now satisfies the predicate (so it may have to be
+ * added). An id that is in neither category cannot change the result set or
+ * the relative order of anything in it.
+ */
+const isChangeRelevant = <T extends Record<string, unknown>>(
+  map: Map<string, T>,
+  matchedIds: ReadonlySet<string> | null,
+  changedIds: ReadonlySet<string>,
+  options: QueryOptions<T>
+): boolean => {
+  if (matchedIds === null) {
+    return true;
+  }
+  for (const id of changedIds) {
+    if (matchedIds.has(id)) {
+      return true;
+    }
+    const item = map.get(id);
+    if (item && matchesQuery(item, options)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * Synchronously query from a raw Map (avoids flash of empty state)
+ *
+ * Also returns `matchedIds`: the full set of ids that satisfy the query before
+ * offset/limit is applied. Callers keep it so a later change can be tested for
+ * relevance without rescanning the whole model.
  */
 const querySyncFromMap = <T extends Record<string, unknown>>(
   map: Map<string, T>,
   options: QueryOptions<T> = {}
-): { data: T[]; totalCount: number; hasMore: boolean } => {
-  let results = [...map.values()];
+): {
+  data: T[];
+  totalCount: number;
+  hasMore: boolean;
+  matchedIds: Set<string>;
+} => {
+  let results: T[] = [];
+  const matchedIds = new Set<string>();
 
-  if (options.where) {
-    results = results.filter(options.where);
-  }
-
-  if (!options.includeArchived) {
-    results = results.filter((item) => !item.archivedAt);
+  for (const [id, item] of map) {
+    if (matchesQuery(item, options)) {
+      results.push(item);
+      matchedIds.add(id);
+    }
   }
 
   const totalCount = results.length;
@@ -124,7 +194,7 @@ const querySyncFromMap = <T extends Record<string, unknown>>(
     results = results.slice(0, options.limit);
   }
 
-  return { data: results, hasMore, totalCount };
+  return { data: results, hasMore, matchedIds, totalCount };
 };
 
 /**
@@ -183,6 +253,7 @@ export const useQuery = <T>(
       data: result.data as T[],
       hasMore: result.hasMore,
       isLoading: false,
+      matchedIds: result.matchedIds,
       totalCount: result.totalCount as number | undefined,
     };
   };
@@ -237,6 +308,11 @@ export const useQuery = <T>(
 
   // Track current data for structural equality checks (avoids unnecessary re-renders)
   const dataRef = useRef<T[]>(initial.data);
+  // Every id matching the query before offset/limit. Used to decide whether a
+  // change is relevant at all, so an unrelated model's delta doesn't force a
+  // full rescan and re-sort of the whole model. `null` means "unknown" (e.g.
+  // after an async `executeQuery`), which forces the next change to rescan.
+  const matchedIdsRef = useRef<Set<string> | null>(initial.matchedIds);
   // Snapshot of id+updatedAt per item. Detects in-place identity-map mutations.
   const snapshotsRef = useRef<ItemSnapshot[]>(captureSnapshots(initial.data));
   // Track if we have data to avoid setting loading state when refreshing cached data
@@ -264,6 +340,7 @@ export const useQuery = <T>(
     const nextState = computeState();
     initialRef.current = nextState;
     dataRef.current = nextState.data;
+    matchedIdsRef.current = nextState.matchedIds;
     snapshotsRef.current = captureSnapshots(nextState.data);
     hasDataRef.current = nextState.data.length > 0;
     totalCountRef.current = nextState.totalCount;
@@ -319,6 +396,7 @@ export const useQuery = <T>(
 
   /** Clear data and stop loading (used when query is skipped). */
   const clearSkipped = useCallback(() => {
+    matchedIdsRef.current = null;
     if (dataRef.current.length > 0) {
       dataRef.current = [];
       snapshotsRef.current = [];
@@ -378,6 +456,13 @@ export const useQuery = <T>(
         return;
       }
 
+      // `client.query` returns the windowed result, not the full matched set,
+      // so rebuild it here. One linear pass now buys a free relevance check on
+      // every subsequent change.
+      matchedIdsRef.current = collectMatchedIds(
+        client.getIdentityMap<T & Record<string, unknown>>(modelName),
+        queryOptions as QueryOptions<T & Record<string, unknown>>
+      );
       applyResult(result.data, result.totalCount, result.hasMore, {
         forceDataUpdate: true,
       });
@@ -414,13 +499,32 @@ export const useQuery = <T>(
         clearSkipped();
         return;
       }
-      requestVersionRef.current += 1;
 
       const map = client.getIdentityMap<T & Record<string, unknown>>(modelName);
-      const result = querySyncFromMap(
-        map,
-        buildSyncQueryOptions(optionsRef.current)
-      );
+      const queryOptions = buildSyncQueryOptions(optionsRef.current);
+
+      // A change can only affect this query if the id is already in the
+      // matched set or newly satisfies the predicate. Otherwise there is
+      // nothing to recompute — bail before rescanning and re-sorting the
+      // whole model, which is the dominant cost on large workspaces.
+      if (
+        refreshOptions.changedModelIds !== undefined &&
+        refreshOptions.changedModelId === undefined &&
+        !refreshOptions.forceDataUpdate &&
+        !isChangeRelevant(
+          map,
+          matchedIdsRef.current,
+          refreshOptions.changedModelIds,
+          queryOptions
+        )
+      ) {
+        return;
+      }
+
+      requestVersionRef.current += 1;
+
+      const result = querySyncFromMap(map, queryOptions);
+      matchedIdsRef.current = result.matchedIds;
 
       const forceDataUpdate =
         refreshOptions.forceDataUpdate ||
