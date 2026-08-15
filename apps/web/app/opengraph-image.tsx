@@ -1,4 +1,5 @@
 import { renderZoneOgImage } from "@/app/og-image-shared";
+import { OgLogo } from "@/app/og-logo";
 
 export {
   OG_CONTENT_TYPE as contentType,
@@ -22,11 +23,9 @@ export const alt = "Strata Sync";
  */
 export default function OpengraphImage() {
   return renderZoneOgImage({
-    badge: "SYNC",
-    eyebrow: "blode.co/stratasync",
-    // Shorter than the meta description, which runs long for the SERP. A card
-    // is read in a feed, at a glance.
-    subtitle: "Local-first sync for TypeScript. Instant reads, offline writes.",
+    background: "#387549",
+    color: "#ffffff",
+    logo: <OgLogo />,
     title: "Strata Sync",
   });
 }
