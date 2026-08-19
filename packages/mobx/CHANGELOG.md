@@ -1,5 +1,12 @@
 # @stratasync/mobx
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [4c4fc35]
+  - @stratasync/core@1.0.0
+
 ## 0.6.0
 
 ### Patch Changes
