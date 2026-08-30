@@ -25,11 +25,6 @@ const glideMono = localFont({
   weight: "400",
 });
 
-// "Product: what it does", colon and not a hyphen, under 60 characters so the
-// SERP does not truncate it. Rule 8 of
-// blode-co/apps/web/.claude/knowledge/zone-conventions.md.
-const siteTitle = `${siteConfig.name}: local-first sync engine for TypeScript`;
-
 export const viewport: Viewport = {
   maximumScale: 1,
   width: "device-width",
@@ -55,7 +50,7 @@ export const metadata: Metadata = {
   openGraph: {
     description: siteConfig.description,
     siteName: "Matthew Blode",
-    title: siteTitle,
+    title: siteConfig.title,
     type: "website",
     url: siteConfig.url,
   },
@@ -80,14 +75,14 @@ export const metadata: Metadata = {
     index: true,
   },
   title: {
-    default: siteTitle,
+    default: siteConfig.title,
     template: `%s | ${siteConfig.name}`,
   },
   twitter: {
     card: "summary_large_image",
     creator: "@mattblode",
     description: siteConfig.description,
-    title: siteTitle,
+    title: siteConfig.title,
   },
 };
 

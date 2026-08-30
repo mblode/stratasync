@@ -6,7 +6,7 @@ export {
   OG_SIZE as size,
 } from "@/app/og-image-shared";
 
-export const alt = "Strata Sync";
+export const alt = "Local-first sync engine for TypeScript, Strata Sync";
 
 /**
  * The house card (Rule 12), replacing the static `opengraph-image.png`.
@@ -26,6 +26,6 @@ export default function OpengraphImage() {
     background: "#387549",
     color: "#ffffff",
     logo: <OgLogo />,
-    title: "Strata Sync",
+    title: "Local-first sync engine for TypeScript",
   });
 }

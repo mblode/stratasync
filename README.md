@@ -6,6 +6,8 @@
 
 Every read is instant, every write works offline, and every client converges.
 
+Strata Sync is a developer library for application data sync, not a network-management platform.
+
 <p align="center">
   <a href="https://www.npmjs.com/package/@stratasync/core">
     <img src="https://img.shields.io/npm/v/@stratasync/core?style=flat&colorA=000000&colorB=000000" />

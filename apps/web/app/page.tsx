@@ -108,11 +108,15 @@ const Home = async () => {
             <SiteHeader />
             <section className="py-16 text-center md:py-32">
               <div className="container-wrapper">
-                <h1 className="font-light font-sans text-6xl tracking-tight md:text-7xl">
-                  Apps that just work.
+                <h1 className="mx-auto max-w-5xl text-balance font-light font-sans text-5xl tracking-tight md:text-7xl">
+                  {siteConfig.heading}
                 </h1>
-                <p className="mx-auto mt-4 max-w-xl text-balance text-center font-sans text-xl text-white/75 md:text-2xl">
-                  Inspired by Linear&#8217;s sync engine. Open-source.
+                <p className="mx-auto mt-6 max-w-2xl text-balance text-center font-sans text-lg text-white/85 md:text-xl">
+                  {siteConfig.answer}
+                </p>
+                <p className="mx-auto mt-3 max-w-xl text-balance text-center font-sans text-base text-white/65">
+                  Inspired by Linear&#8217;s sync architecture and built in the
+                  open.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">

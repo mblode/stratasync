@@ -8,7 +8,7 @@
   "metadata": {
     "ogImage": "https://blode.co/stratasync/opengraph-image"
   },
-  "description": "Build instant, offline-capable apps that sync with Strata Sync.",
+  "description": "Build local-first TypeScript, React, and Next.js apps with instant reads, offline writes, and real-time collaboration.",
   "navbar": {
     "links": [
       {
