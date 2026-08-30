@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "check-types": "next typegen && node -e \"const fs=require('node:fs'); fs.mkdirSync('.next/types',{recursive:true}); const path='.next/types/cache-life.d.ts'; if(!fs.existsSync(path)) fs.writeFileSync(path, 'export {};\\n');\" && tsc --noEmit",
+    "smoke:seo": "node --experimental-strip-types scripts/seo-smoke.ts",
     "smoke:docs-proxy": "node --experimental-strip-types scripts/docs-proxy-smoke.ts"
   },
   "dependencies": {

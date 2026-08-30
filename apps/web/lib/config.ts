@@ -1,6 +1,9 @@
 export const siteConfig = {
+  answer:
+    "Strata Sync is an open-source, local-first sync engine for TypeScript, React, and Next.js. It is a developer library for application data sync, not a network-management platform.",
   description:
-    "A local-first sync engine for TypeScript, React, and Next.js. Instant reads, offline writes, and real-time collaboration.",
+    "Build local-first TypeScript, React, and Next.js apps with instant reads, offline writes, real-time collaboration, and field-level conflict resolution.",
+  heading: "Local-first sync engine for TypeScript",
   links: {
     author: "https://blode.co",
     docs: "https://blode.co/stratasync/docs",
@@ -8,6 +11,7 @@ export const siteConfig = {
     projects: "https://blode.co/projects",
   },
   name: "Strata Sync",
+  title: "Local-first sync engine for TypeScript | Strata Sync",
   url: "https://blode.co/stratasync",
 } as const;
 
@@ -63,10 +67,12 @@ export const zoneRootJsonLd = {
       "@type": "WebPage",
       about: { "@id": appId },
       breadcrumb: { "@id": breadcrumbId },
-      description: siteConfig.description,
+      description: siteConfig.answer,
+      headline: siteConfig.heading,
       inLanguage: "en-US",
       isPartOf: { "@id": websiteId },
-      name: siteConfig.name,
+      mainEntity: { "@id": appId },
+      name: siteConfig.title,
       url: siteConfig.url,
     },
     {
@@ -74,7 +80,14 @@ export const zoneRootJsonLd = {
       "@type": "SoftwareSourceCode",
       author: { "@id": personId },
       codeRepository: siteConfig.links.github,
-      description: siteConfig.description,
+      description: siteConfig.answer,
+      isAccessibleForFree: true,
+      keywords: [
+        "local-first sync engine",
+        "offline-first TypeScript",
+        "React data sync",
+        "Next.js data sync",
+      ],
       name: siteConfig.name,
       programmingLanguage: "TypeScript",
       publisher: { "@id": orgId },

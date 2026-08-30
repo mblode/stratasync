@@ -7,11 +7,19 @@ import { siteConfig } from "@/lib/config";
 
 const CACHE_FIVE_MINUTES = "public, max-age=300, stale-while-revalidate=3600";
 
-const MARKDOWN_BODY = `# ${siteConfig.name}
+const MARKDOWN_BODY = `# ${siteConfig.heading}
 
-> Apps that just work. Inspired by Linear's sync engine. Open-source.
+> ${siteConfig.name} by Matthew Blode
 
-${siteConfig.description}
+${siteConfig.answer}
+
+It gives applications instant local reads, offline writes, real-time collaboration, and field-level conflict resolution. It is open source and built for TypeScript developers.
+
+## When to use Strata Sync
+
+- React or Next.js apps that must remain responsive on unreliable networks
+- Collaborative products that need predictable server ordering and Yjs editing
+- TypeScript apps that need offline writes, local persistence, and automatic reconciliation
 
 ## Links
 
