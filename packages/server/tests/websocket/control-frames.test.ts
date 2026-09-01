@@ -7,6 +7,9 @@ import { createDeltaBus } from "../../src/delta/delta-publisher.js";
 import type { DeltaSubscriberLike } from "../../src/delta/delta-publisher.js";
 import type { SyncActionOutput } from "../../src/types.js";
 import { ClientSession } from "../../src/websocket/client-session.js";
+import { GROUP_MEMBERSHIP_CAPABILITY } from "../../src/websocket/messages.js";
+
+const CAPABLE = [GROUP_MEMBERSHIP_CAPABILITY];
 
 // oxlint-disable-next-line prefer-event-target -- ws mock needs EventEmitter
 class MockWebSocket extends EventEmitter {
@@ -48,7 +51,8 @@ const framesOfType = (
 
 const startLiveSession = (
   userId: string,
-  groups: string[]
+  groups: string[],
+  capabilities: string[] = CAPABLE
 ): {
   bus: ReturnType<typeof createDeltaBus>;
   session: ClientSession;
@@ -57,7 +61,7 @@ const startLiveSession = (
   const socket = new MockWebSocket();
   const bus = createDeltaBus();
   const session = new ClientSession(socket as unknown as WebSocket, bus);
-  session.beginReplay(userId, groups, 0n);
+  session.beginReplay(userId, groups, 0n, capabilities);
   session.installDeltaSubscription();
   session.installControlSubscription();
   session.flushBufferedActions();
@@ -167,7 +171,7 @@ describe("control frames: replay interaction", () => {
     const bus = createDeltaBus();
     const session = new ClientSession(socket as unknown as WebSocket, bus);
 
-    session.beginReplay("user-a", ["ws-1"], 0n);
+    session.beginReplay("user-a", ["ws-1"], 0n, CAPABLE);
     session.installDeltaSubscription();
     session.installControlSubscription();
 
@@ -192,7 +196,7 @@ describe("control frames: replay interaction", () => {
     const bus = createDeltaBus();
     const session = new ClientSession(socket as unknown as WebSocket, bus);
 
-    session.beginReplay("user-a", ["ws-1"], 0n);
+    session.beginReplay("user-a", ["ws-1"], 0n, CAPABLE);
     session.installControlSubscription();
 
     for (const type of [
@@ -256,7 +260,7 @@ describe("control frames: lifecycle", () => {
       legacySubscriber
     );
 
-    session.beginReplay("user-a", ["ws-1"], 0n);
+    session.beginReplay("user-a", ["ws-1"], 0n, CAPABLE);
     expect(() => {
       session.installControlSubscription();
     }).not.toThrow();
@@ -280,5 +284,76 @@ describe("control frames: lifecycle", () => {
       });
     }).not.toThrow();
     expect(received).toEqual(["proj-1"]);
+  });
+});
+
+describe("control frames: capability gate", () => {
+  it("sends no frame to a client that did not declare the capability", () => {
+    const { bus, socket } = startLiveSession("user-a", ["ws-1"], []);
+
+    bus.publishControl({
+      groupId: "proj-1",
+      type: "group_joined",
+      userId: "user-a",
+    });
+
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("still stops delivering a left group to an undeclared client", () => {
+    // The membership edit is a security boundary, so it applies regardless of
+    // what the client can parse — only the frame itself is withheld.
+    const { bus, session, socket } = startLiveSession(
+      "user-a",
+      ["ws-1", "proj-1"],
+      []
+    );
+
+    bus.publish(makeAction("1"), ["proj-1"]);
+    expect(framesOfType(socket, "delta")).toHaveLength(1);
+
+    bus.publishControl({
+      groupId: "proj-1",
+      type: "group_left",
+      userId: "user-a",
+    });
+    bus.publish(makeAction("2"), ["proj-1"]);
+
+    expect(session.groups).toEqual(["ws-1"]);
+    expect(framesOfType(socket, "delta")).toHaveLength(1);
+    expect(framesOfType(socket, "group_left")).toHaveLength(0);
+  });
+
+  it("ignores an unrelated capability string", () => {
+    const { bus, socket } = startLiveSession(
+      "user-a",
+      ["ws-1"],
+      ["some-other-capability"]
+    );
+
+    bus.publishControl({
+      groupId: "proj-1",
+      type: "group_joined",
+      userId: "user-a",
+    });
+
+    expect(socket.sent).toHaveLength(0);
+  });
+
+  it("clears the capability on reset, so a re-subscribe must redeclare", () => {
+    const { bus, session, socket } = startLiveSession("user-a", ["ws-1"]);
+
+    session.reset();
+    session.beginReplay("user-a", ["ws-1"], 0n);
+    session.installControlSubscription();
+    session.flushBufferedActions();
+
+    bus.publishControl({
+      groupId: "proj-1",
+      type: "group_joined",
+      userId: "user-a",
+    });
+
+    expect(framesOfType(socket, "group_joined")).toHaveLength(0);
   });
 });

@@ -81,6 +81,7 @@ export class SyncOrchestrator {
 
   private readonly context: SyncContext;
   private readonly syncGroups: SyncGroupManager;
+  private transportGroupMembershipCleanup: (() => void) | null = null;
   private readonly bootstrapRunner: BootstrapRunner;
   private readonly deltaPipeline: DeltaPipeline;
 
@@ -169,6 +170,16 @@ export class SyncOrchestrator {
     if (this.transportConnectionCleanup) {
       return;
     }
+
+    this.transportGroupMembershipCleanup =
+      this.transport.onGroupMembershipChange?.((change) => {
+        // Fire-and-forget: a failure here leaves membership to converge on the
+        // next bootstrap, which already filters on current membership.
+        // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
+        this.syncGroups.handleGroupMembershipChange(change).catch(() => {
+          // Intentionally ignored; bootstrap is the source of truth.
+        });
+      }) ?? null;
 
     this.transportConnectionCleanup = this.transport.onConnectionStateChange(
       (state) => {
@@ -432,6 +443,8 @@ export class SyncOrchestrator {
 
     this.transportConnectionCleanup?.();
     this.transportConnectionCleanup = null;
+    this.transportGroupMembershipCleanup?.();
+    this.transportGroupMembershipCleanup = null;
     await this.transport.close();
     await this.packetQueue.drain();
     // Start fresh queues; a fresh Gate is open (no holds).
