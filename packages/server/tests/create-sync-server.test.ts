@@ -54,6 +54,52 @@ const baseConfig = (
   },
 });
 
+/**
+ * Database double that records whether a write happened inside a transaction.
+ *
+ * That distinction is load-bearing: createSyncAction takes a
+ * `pg_advisory_xact_lock`, which is transaction-scoped, so a caller that skips
+ * the transaction silently loses the insert-order guarantee.
+ */
+const makeDb = (onCreate?: (row: Record<string, unknown>) => void) => {
+  let inTransaction = false;
+  const db = {
+    execute: () => Promise.resolve([]),
+    insert: () => ({
+      values: (data: Record<string, unknown>) => ({
+        returning: () => {
+          db.inserts.push({ inTransaction, row: data });
+          onCreate?.(data);
+          return Promise.resolve([
+            {
+              ...data,
+              createdAt: new Date("2024-06-15T12:00:00.000Z"),
+              id: 1n,
+            },
+          ]);
+        },
+      }),
+    }),
+    inserts: [] as { inTransaction: boolean; row: Record<string, unknown> }[],
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve([{ groupId: "db-group" }]),
+        }),
+      }),
+    }),
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      inTransaction = true;
+      try {
+        return await fn(db);
+      } finally {
+        inTransaction = false;
+      }
+    },
+  };
+  return db;
+};
+
 const syncActionsTable = pgTable("sync_actions", {
   action: text("action"),
   clientId: text("client_id"),
@@ -81,41 +127,24 @@ const groupConfig = (
   redis: unknown,
   logger: ReturnType<typeof makeLogger>,
   onCreate?: (row: Record<string, unknown>) => void
-): SyncServerConfig => ({
-  ...baseConfig(redis, logger),
-  auth: {
-    resolveGroups: vi.fn().mockResolvedValue(["resolved-group"]),
-    verifyToken: vi.fn().mockResolvedValue(null),
-  },
-  db: {
-    execute: () => Promise.resolve([]),
-    insert: () => ({
-      values: (data: Record<string, unknown>) => ({
-        returning: () => {
-          onCreate?.(data);
-          return Promise.resolve([
-            {
-              ...data,
-              createdAt: new Date("2024-06-15T12:00:00.000Z"),
-              id: 1n,
-            },
-          ]);
-        },
-      }),
-    }),
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => Promise.resolve([{ groupId: "db-group" }]),
-        }),
-      }),
-    }),
-  } as never,
-  tables: {
-    syncActions: syncActionsTable,
-    syncGroupMemberships: syncGroupMembershipsTable,
-  },
-});
+) => {
+  const db = makeDb(onCreate);
+  return {
+    config: {
+      ...baseConfig(redis, logger),
+      auth: {
+        resolveGroups: vi.fn().mockResolvedValue(["resolved-group"]),
+        verifyToken: vi.fn().mockResolvedValue(null),
+      },
+      db,
+      tables: {
+        syncActions: syncActionsTable,
+        syncGroupMemberships: syncGroupMembershipsTable,
+      },
+    } as unknown as SyncServerConfig,
+    db,
+  };
+};
 
 const remoteDeltaMessage = (syncId: string) =>
   JSON.stringify({
@@ -167,7 +196,7 @@ describe(createSyncServer, () => {
     const logger = makeLogger();
     const { redis } = makeRedis();
 
-    const server = await createSyncServer(groupConfig(redis, logger));
+    const server = await createSyncServer(groupConfig(redis, logger).config);
     const received: { action: SyncActionOutput; groups: string[] }[] = [];
     server.deltaSubscriber.onDelta((action, groups) =>
       received.push({ action, groups })
@@ -199,7 +228,7 @@ describe(createSyncServer, () => {
     const created: Record<string, unknown>[] = [];
 
     const server = await createSyncServer(
-      groupConfig(redis, logger, (row) => created.push(row))
+      groupConfig(redis, logger, (row) => created.push(row)).config
     );
 
     // No subscriber at all: the point of an in-band action over a frame is
@@ -297,7 +326,7 @@ describe("group change durability", () => {
     const created: Record<string, unknown>[] = [];
 
     const server = await createSyncServer(
-      groupConfig(redis, logger, (row) => created.push(row))
+      groupConfig(redis, logger, (row) => created.push(row)).config
     );
 
     await server.notifyGroupsChanged("user-a");
@@ -321,11 +350,33 @@ describe("group change durability", () => {
     const created: Record<string, unknown>[] = [];
 
     const server = await createSyncServer(
-      groupConfig(redis, logger, (row) => created.push(row))
+      groupConfig(redis, logger, (row) => created.push(row)).config
     );
 
     await expect(server.notifyGroupsChanged("user-a")).resolves.toBeUndefined();
     expect(created).toHaveLength(1);
+
+    await server.shutdown();
+  });
+});
+
+describe("group change insert ordering", () => {
+  it("writes the group action inside a transaction", async () => {
+    // createSyncAction takes a `pg_advisory_xact_lock` to allocate sync ids in
+    // commit order. That lock is transaction-scoped, so writing on the pool
+    // would release it in its own implicit transaction and leave the insert
+    // unprotected: a concurrent mutate could make a higher id visible first,
+    // and a keyset reader (`gt(id, cursor)`) would skip this action for good —
+    // silently losing the membership change it carries.
+    const logger = makeLogger();
+    const { redis } = makeRedis();
+    const { config, db } = groupConfig(redis, logger);
+
+    const server = await createSyncServer(config);
+    await server.notifyGroupsChanged("user-a");
+
+    expect(db.inserts).toHaveLength(1);
+    expect(db.inserts[0]?.inTransaction).toBeTruthy();
 
     await server.shutdown();
   });

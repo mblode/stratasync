@@ -13,6 +13,7 @@ import { noopLogger } from "./config.js";
 import { toSyncActionOutput } from "./core/sync-action.js";
 import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "./core/sync-groups.js";
 import { SyncDao } from "./dao/sync-dao.js";
+import type { SyncDb } from "./db.js";
 import type {
   DeltaPublisherLike,
   RedisDeltaTransport,
@@ -133,15 +134,25 @@ export const createSyncServer = async (
     ]);
     const groups = dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
 
-    const action = await syncDao.createSyncAction({
-      action: SYNC_GROUPS_ACTION,
-      clientId: null,
-      clientTxId: null,
-      data: { subscribedSyncGroups: groups },
-      groupId: userId,
-      model: SYNC_GROUPS_MODEL,
-      modelId: userId,
-    });
+    // Must run in a transaction. createSyncAction takes a
+    // `pg_advisory_xact_lock` to allocate ids in commit order; that lock is
+    // transaction-scoped, so calling it on the pool would release it in its own
+    // implicit transaction and leave the insert unprotected. A concurrent
+    // mutate could then make a higher id visible first and a keyset reader
+    // (`gt(id, cursor)`) would skip this action for good — losing exactly the
+    // membership change this exists to deliver.
+    const action = await (config.db as SyncDb).transaction(
+      async (txDb) =>
+        await syncDao.withDb(txDb).createSyncAction({
+          action: SYNC_GROUPS_ACTION,
+          clientId: null,
+          clientTxId: null,
+          data: { subscribedSyncGroups: groups },
+          groupId: userId,
+          model: SYNC_GROUPS_MODEL,
+          modelId: userId,
+        })
+    );
 
     await deltaPublisher.publish(toSyncActionOutput(action), [userId]);
 
