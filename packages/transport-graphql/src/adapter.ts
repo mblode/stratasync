@@ -23,11 +23,7 @@ import { createBatchLoadStream, createBootstrapStream } from "./bootstrap.js";
 import { fetchDeltas } from "./deltas.js";
 import { sendMutations, sendRestMutations } from "./mutations.js";
 import { joinSyncUrl, normalizeSyncEndpoint } from "./protocol.js";
-import type {
-  GroupMembershipListener,
-  RetryConfig,
-  TransportOptions,
-} from "./types.js";
+import type { RetryConfig, TransportOptions } from "./types.js";
 import { DEFAULT_RETRY_CONFIG } from "./types.js";
 import { WebSocketManager } from "./websocket.js";
 import { YjsTransportAdapter } from "./yjs-transport.js";
@@ -122,11 +118,6 @@ export class GraphQLTransportAdapter implements TransportAdapter {
 
   subscribe(options: SubscribeOptions): DeltaSubscription {
     return this.wsManager.subscribe(options);
-  }
-
-  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
-  onGroupMembershipChange(callback: GroupMembershipListener): () => void {
-    return this.wsManager.onGroupMembershipChange(callback);
   }
 
   getYjsTransport(): YjsTransportAdapter {

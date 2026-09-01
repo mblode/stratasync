@@ -276,20 +276,19 @@ export interface SyncServer {
   syncDao: SyncDao;
   registerRoutes: (server: unknown) => void;
   /**
-   * Tells a user's live sessions they now belong to a group, so they batch-load
-   * it. The group's history sits before their delta cursor, so without this a
-   * newly shared group delivers nothing until the next bootstrap.
+   * Tells a user their sync-group membership changed.
    *
-   * This only emits the frame — writing the membership row is the caller's job
-   * (`syncDao.addGroupMembership`, or whatever model handler does the sharing).
-   * A user with no socket open is a silent no-op.
+   * Writes a `"G"` sync action addressed to the user's own group carrying their
+   * full current group list, then publishes it. Because it is an ordinary sync
+   * action it is durable: it is delivered on the live delta stream if they are
+   * connected, and by replay or catch-up whenever they next are. That is the
+   * point — a membership change must not be lost while a user is offline, or
+   * their cache keeps serving rows from a group they no longer belong to.
+   *
+   * The group list is recomputed here from the same sources `authorizeToken`
+   * uses, so what the client is told matches what it would get on reconnect.
+   * Call this after writing or revoking the membership itself.
    */
-  notifyGroupJoined: (userId: string, groupId: string) => Promise<void>;
-  /**
-   * Tells a user's live sessions they no longer belong to a group, so they drop
-   * its cached rows. Without this the rows simply stop updating and linger.
-   * Emits the frame only; revoking the membership row is the caller's job.
-   */
-  notifyGroupLeft: (userId: string, groupId: string) => Promise<void>;
+  notifyGroupsChanged: (userId: string) => Promise<void>;
   shutdown: () => Promise<void>;
 }
