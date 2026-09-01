@@ -8,7 +8,7 @@ Every synced entity extends `Model`. Decorators register it with the `ModelRegis
 ## Creating a model
 
 ```ts
-import { Model, ClientModel, Property, ManyToOne } from "@stratasync/core";
+import { Model, ClientModel, Property, Reference } from "@stratasync/core";
 
 @ClientModel("Task")
 class Task extends Model {
@@ -21,7 +21,7 @@ class Task extends Model {
   @Property()
   priority = 0;
 
-  @ManyToOne("Project", "tasks")
+  @Reference(() => Project, "tasks")
   project!: Project;
 }
 ```

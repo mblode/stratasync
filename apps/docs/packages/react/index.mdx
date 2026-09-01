@@ -50,12 +50,11 @@ function App() {
 
 ```tsx
 import { useQuery, useModel } from "@stratasync/react";
-import { eq, sortBy } from "@stratasync/client";
 
 function TaskList() {
   const { data: tasks, isLoading } = useQuery<Task>("Task", {
     where: (t) => t.status !== "done",
-    orderBy: sortBy("priority", "desc"),
+    orderBy: (a, b) => b.priority.localeCompare(a.priority),
   });
 
   if (isLoading) {

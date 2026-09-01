@@ -7,7 +7,9 @@ The server assigns a monotonically increasing `syncId` to every committed change
 
 ### Design lineage
 
-Based on the server-sequenced sync architecture Linear described but never open-sourced. Extended with Yjs CRDT integration, undo/redo, and pluggable adapters.
+Strata Sync is an open-source implementation of the sync engine Linear described but never released. The protocol below follows that architecture: a global `syncId`, bootstrap in three modes, partial indexes, a durable transaction queue, delta packets of sync actions, and sync groups as the permission boundary.
+
+[Linear's sync engine, open-sourced](/architecture/linear-sync-engine) maps each part of Linear's published design onto the module that implements it, and lists what Strata Sync adds on top (Yjs collaboration, undo/redo, swappable adapters).
 
 ## The sync log
 
@@ -15,21 +17,28 @@ A monotonic append-only log of **sync actions**. Each action represents a single
 
 | Field       | Description                                                                                          |
 | ----------- | ---------------------------------------------------------------------------------------------------- |
-| `id`        | The `syncId`: a monotonically increasing integer assigned by the server.                             |
+| `syncId`    | A monotonically increasing integer assigned by the server, encoded as a **string** on the wire.      |
 | `modelName` | Which model changed (for example, `"Task"` or `"User"`).                                             |
 | `modelId`   | The primary key of the affected row.                                                                 |
 | `action`    | The change type: `"I"` (insert), `"U"` (update), `"D"` (delete), `"A"` (archive), `"V"` (unarchive). |
 | `data`      | The changed fields (for inserts and updates) or `null` (for deletes).                                |
-| `groups`    | Optional sync group memberships for access control.                                                  |
+| `groupId`   | The sync group the row belongs to, when the model is group-scoped. Used for access control.          |
 
 A **delta packet** bundles sync actions with a `lastSyncId` watermark:
 
 ```ts
 interface DeltaPacket {
-  lastSyncId: number;
+  /** Highest sync ID in this packet. */
+  lastSyncId: SyncId;
   actions: SyncAction[];
+  /** Set when the server has more deltas to send. */
+  hasMore?: boolean;
 }
 ```
+
+`SyncId` is a `string`, not a `number`. The log outgrows `Number.MAX_SAFE_INTEGER`
+in a busy workspace, and a JSON number would silently lose precision at that
+point, so sync IDs are strings end to end and compared as big integers.
 
 The client tracks its own `lastSyncId` and advances it after applying each delta packet. This is the only way confirmed state advances on the client.
 
@@ -94,7 +103,7 @@ Every mutation carries an idempotency key (`clientId + clientTxId`). The server 
 
 ## Schema hash and migrations
 
-`computeSchemaHash()` produces a deterministic 8-character hex hash from all model definitions. If the stored hash doesn't match on startup, the client triggers a full re-bootstrap.
+`computeSchemaHash()` produces a deterministic 16-character hex hash (a 64-bit stable hash) from all model definitions. If the stored hash doesn't match on startup, the client triggers a full re-bootstrap.
 
 ## Wire primitives
 
@@ -110,31 +119,42 @@ Three wire formats:
 
 ```json
 {
-  "id": 42,
+  "syncId": "42",
   "modelName": "Task",
   "modelId": "abc",
   "action": "U",
-  "data": { "status": "closed", "updatedAt": "2025-01-15T00:00:00Z" }
+  "data": { "status": "closed", "updatedAt": 1736899200000 },
+  "groupId": "team_9f2",
+  "clientId": "c_abc123",
+  "clientTxId": "tx_def456"
 }
 ```
+
+`clientId` and `clientTxId` are echoed back so the originating client can
+recognise its own write and suppress the redundant re-render.
 
 **Mutation request** (outbox to server):
 
 ```json
 {
+  "batchId": "batch_7c1",
   "transactions": [
     {
-      "clientTxId": "tx_def456",
+      "action": "UPDATE",
       "clientId": "c_abc123",
+      "clientTxId": "tx_def456",
       "modelName": "Task",
       "modelId": "abc",
-      "action": "update",
-      "data": { "status": "closed" },
-      "original": { "status": "open" }
+      "payload": { "status": "closed" }
     }
   ]
 }
 ```
+
+On the wire an action is spelled out (`INSERT`, `UPDATE`, `DELETE`, `ARCHIVE`,
+`UNARCHIVE`); the single letters in the table above are how the same action is
+written back in the sync log. The changed fields go in `payload`. A batch
+carries at most 100 transactions.
 
 ## Sync groups and partial replication
 

@@ -56,11 +56,11 @@ class Todo extends Model {
 import { createSyncClient } from "@stratasync/client";
 import { createMobXReactivity } from "@stratasync/mobx";
 import { createIndexedDbStorage } from "@stratasync/storage-idb";
-import { GraphQLTransportAdapter } from "@stratasync/transport-graphql";
+import { createGraphQLTransport } from "@stratasync/transport-graphql";
 
 const client = createSyncClient({
   storage: createIndexedDbStorage(),
-  transport: new GraphQLTransportAdapter({
+  transport: createGraphQLTransport({
     endpoint: "/api/graphql",
     syncEndpoint: "/api/sync",
     wsEndpoint: "wss://api.example.com/sync/ws",

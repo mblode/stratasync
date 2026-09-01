@@ -1,13 +1,15 @@
 ---
-title: Local-first sync engine for TypeScript
-description: Build local-first TypeScript, React, and Next.js apps with instant reads, offline writes, and real-time collaboration.
+title: Open-source Linear sync engine for TypeScript
+description: Strata Sync is an open-source implementation of Linear's sync engine for TypeScript, React and Next.js: instant reads, offline writes and real-time collaboration.
 ---
 
-Strata Sync is an open-source, local-first sync engine for TypeScript, React, and Next.js. It is a developer library for application data sync, not a network-management platform.
+Strata Sync is an open-source implementation of the sync engine behind [Linear](https://linear.app), for TypeScript, React and Next.js. It is a developer library for application data sync, not a strata-management or network-management product.
 
-Reads come from a local store, so the UI stays fast. Writes queue offline and sync when you reconnect. A server-sequenced log ensures every client converges.
+Reads come from a local IndexedDB replica, so the UI stays fast. Writes queue offline and drain in order when you reconnect. A server-sequenced log means every client converges on the same state.
 
-Built on the sync architecture [Linear](https://linear.app) described but never open-sourced, extended with Yjs CRDT collaboration, undo/redo, and pluggable adapters.
+Linear's engineers described their architecture but never released it. [Linear's sync engine, open-sourced](/architecture/linear-sync-engine) maps each part of that design onto the module here that implements it, and covers what Strata Sync adds: Yjs CRDT collaboration, undo/redo and swappable adapters. Strata Sync is a clean-room implementation; it contains no Linear code, and Linear is not affiliated with the project.
+
+It runs on your own Postgres and Fastify. There is no hosted service, and every package is MIT licensed.
 
 ## Key features
 
@@ -33,7 +35,7 @@ Strata Sync fits products that need local-first responsiveness with predictable 
 
 ## How it works
 
-1. Define models with decorators (`@ClientModel`, `@Property`, `@ManyToOne`, `@OneToMany`).
+1. Define models with decorators (`@ClientModel`, `@Property`, `@Reference`, `@OneToMany`).
 2. Create a sync client with storage, transport, and reactivity adapters.
 3. Wrap your React tree with `SyncProvider`.
 4. Read data with hooks (`useModel`, `useQuery`) that auto-update.
@@ -41,13 +43,23 @@ Strata Sync fits products that need local-first responsiveness with predictable 
 
 ## How Strata Sync compares
 
-| Feature             | Strata Sync            | ElectricSQL    | Zero                 | InstantDB            | PowerSync            |
-| ------------------- | ---------------------- | -------------- | -------------------- | -------------------- | -------------------- |
-| Local storage       | Built-in (IndexedDB)   | Bring your own | Built-in (IndexedDB) | Built-in (IndexedDB) | Built-in (SQLite)    |
-| Conflict resolution | Automatic, field-level | Bring your own | Server decides       | Server decides       | Customisable         |
-| Real-time editing   | Rich-text with Yjs     | Not included   | Not included         | Not included         | Not included         |
-| Offline writes      | Full offline support   | Bring your own | Not supported        | Basic support        | Full offline support |
-| Undo / redo         | Built-in               | Not included   | Not included         | Not included         | Not included         |
+Every local-first engine makes a different trade. This table describes each
+project's documented default architecture rather than scoring them, because
+"bring your own" is a design choice, not a missing feature.
+
+|                      | Strata Sync                                | ElectricSQL                             | Zero                            | InstantDB                 | PowerSync                                |
+| -------------------- | ------------------------------------------ | --------------------------------------- | ------------------------------- | ------------------------- | ---------------------------------------- |
+| Backend              | Your Postgres, inside your Fastify app     | Your Postgres plus the Electric service | Your Postgres plus `zero-cache` | Instant's hosted database | Your database plus the PowerSync Service |
+| Extra service to run | None. Redis optional, for fan-out          | Self-host or Electric Cloud             | Self-hosted `zero-cache`        | Hosted by default         | Cloud or self-hosted                     |
+| Write path           | Built in: outbox, rebase, idempotency keys | Bring your own write API                | Custom mutators                 | Built in                  | Bring your own upload handler            |
+| Ordering             | Server-sequenced log, one global `syncId`  | Postgres logical replication            | Server-authoritative            | Server-authoritative      | Server-authoritative                     |
+| Conflicts            | Field-level rebase, three strategies       | Bring your own                          | Server decides                  | Server decides            | Customisable                             |
+| Collaborative text   | Yjs CRDT documents and presence            | Bring your own                          | Bring your own                  | Bring your own            | Bring your own                           |
+| Undo / redo          | Built in, from transaction history         | Bring your own                          | Bring your own                  | Bring your own            | Bring your own                           |
+
+Pick Strata Sync when you want the whole client and server pair in your own
+app, on your own database, and you would rather extend a sync engine than
+operate one.
 
 ## Packages
 
