@@ -113,8 +113,11 @@ interface SyncModelConfig {
 ### Per-row group scoping
 
 `groupKey` names a single static column, so a row's audience cannot depend on
-the row. `resolveGroup` takes precedence when present and receives the action,
-the payload, the existing row (for non-inserts), and the caller's context:
+the row. `groupKey` is sugar: it is compiled into a `resolveGroup` at registry time, so
+there is one resolver per model rather than two branches to keep in step. Supply
+`resolveGroup` directly when the group depends on the row. It receives the
+action, the payload, the existing row (for non-inserts), and the caller's
+context:
 
 ```typescript
 Project: {
@@ -152,51 +155,28 @@ is unchanged — you still cannot write to a group you do not belong to.
 Deltas are cursor-based, so a user newly added to a group has no prior actions
 for it and its history sits _before_ their cursor: sharing would deliver
 nothing. Leaving is worse — the rows stop updating and linger in the local
-cache. Two server-initiated frames close both gaps for live sessions:
+cache.
 
 ```typescript
-await server.notifyGroupJoined(userId, groupId); // client batch-loads the group
-await server.notifyGroupLeft(userId, groupId); // client drops its cached rows
+await server.notifyGroupsChanged(userId); // after writing/revoking membership
 ```
 
-Both emit the frame only; writing or revoking the membership row is the
-caller's job (`syncDao.addGroupMembership` / `syncDao.removeGroupMembership`, or
-whatever model handler does the sharing). A user with no socket open is a silent
-no-op, and a client that ignores the frames still converges — just on the next
-bootstrap rather than live, because bootstrap already filters on current
-membership.
+This writes a `"G"` sync action addressed to the user's own group, carrying
+their full current group list (recomputed from the same sources
+`authorizeToken` uses), and publishes it. Because it is an ordinary sync action
+it carries a syncId and lives in `sync_actions`, so it is delivered by the live
+stream, replay, catch-up and bootstrap alike — **a user who is offline when
+their membership changes still receives it.** An out-of-band frame would be
+dropped, leaving that client's cache serving rows from a group it no longer
+belongs to.
 
-### Standard Models
+It emits the action only; writing or revoking the membership row stays the
+caller's job (`syncDao.addGroupMembership` / `removeGroupMembership`).
 
-Most models use `StandardMutateConfig` with an `id` primary key:
-
-```typescript
-mutate: {
-  kind: "standard",
-  actions: new Set(["I", "U", "D", "A", "V"]),
-  insertFields: { title: { type: "string" }, ... },
-  updateFields: new Set(["title", "completedAt"]),
-  onBeforeInsert: async (db, modelId, payload, data) => data,
-  onBeforeUpdate: async (db, modelId, payload, data) => data,
-  onAfterMutation: (ctx) => { /* side effects */ },
-}
-```
-
-### Composite Models
-
-Join tables (e.g., TaskLabel) use `CompositeMutateConfig` with no `id` field:
-
-```typescript
-mutate: {
-  kind: "composite",
-  actions: new Set(["I", "D"]),
-  insertFields: { taskId: { type: "string" }, labelId: { type: "string" } },
-  buildDeleteWhere: (payload) => and(eq(table.taskId, payload.taskId), ...),
-  compositeId: {
-    computeId: (modelName, modelId, payload) => uuidv5(...),
-  },
-}
-```
+The client side is already handled by `@stratasync/client`: `SyncGroupManager`
+partial-bootstraps added groups and drops removed ones. A client that does not
+understand `"G"` actions ignores them (the row-applying path skips actions whose
+model is not in its registry) and converges on its next bootstrap.
 
 ## Auth
 

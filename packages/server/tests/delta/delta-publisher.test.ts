@@ -1,5 +1,3 @@
-import type { ControlFrame } from "../../src/delta/control-frames.js";
-import { parseControlFrame } from "../../src/delta/control-frames.js";
 import {
   createDeltaBus,
   createDeltaPublisher,
@@ -200,10 +198,7 @@ describe(createDeltaPublisher, () => {
 // RedisDeltaTransport
 // ---------------------------------------------------------------------------
 
-// The transport subscribes per channel (deltas and control frames), so the
-// double keys its handlers by channel exactly as redis does.
 const DELTA_CHANNEL = "sync:deltas";
-const CONTROL_CHANNEL = "sync:control";
 
 const setupRedisTransport = () => {
   const channelHandlers = new Map<string, (message: string) => void>();
@@ -223,8 +218,6 @@ const setupRedisTransport = () => {
   };
   return {
     emit: (message: string) => channelHandlers.get(DELTA_CHANNEL)?.(message),
-    emitControl: (message: string) =>
-      channelHandlers.get(CONTROL_CHANNEL)?.(message),
     redis,
     subscriberRedis,
   };
@@ -262,9 +255,8 @@ describe("RedisDeltaTransport", () => {
 
     expect(redis.duplicate).toHaveBeenCalledOnce();
     expect(subscriberRedis.connect).toHaveBeenCalledOnce();
-    // One subscribe/unsubscribe per channel: deltas and control frames.
-    expect(subscriberRedis.subscribe).toHaveBeenCalledTimes(2);
-    expect(subscriberRedis.unsubscribe).toHaveBeenCalledTimes(2);
+    expect(subscriberRedis.subscribe).toHaveBeenCalledOnce();
+    expect(subscriberRedis.unsubscribe).toHaveBeenCalledOnce();
     expect(subscriberRedis.quit).toHaveBeenCalledOnce();
   });
 
@@ -321,120 +313,5 @@ describe("RedisDeltaTransport", () => {
 
     expect(received).toHaveLength(0);
     expect(logger.warn).toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Control frames
-// ---------------------------------------------------------------------------
-
-describe("control frame transport", () => {
-  it("relays inbound control frames into the local bus", async () => {
-    const { emitControl, redis } = setupRedisTransport();
-    const bus = createDeltaBus();
-    const received: ControlFrame[] = [];
-    bus.onControl((frame) => received.push(frame));
-    const transport = createRedisDeltaTransport(
-      redis as never,
-      bus,
-      "source-1"
-    );
-
-    await transport.start();
-    emitControl(
-      JSON.stringify({
-        groupId: "proj-1",
-        sourceId: "other-source",
-        type: "group_left",
-        userId: "user-a",
-      })
-    );
-
-    expect(received).toEqual([
-      { groupId: "proj-1", type: "group_left", userId: "user-a" },
-    ]);
-  });
-
-  it("suppresses its own control loopback", async () => {
-    const { emitControl, redis } = setupRedisTransport();
-    const bus = createDeltaBus();
-    const received: ControlFrame[] = [];
-    bus.onControl((frame) => received.push(frame));
-    const transport = createRedisDeltaTransport(
-      redis as never,
-      bus,
-      "source-1"
-    );
-
-    await transport.start();
-    emitControl(
-      JSON.stringify({
-        groupId: "proj-1",
-        sourceId: "source-1",
-        type: "group_left",
-        userId: "user-a",
-      })
-    );
-
-    expect(received).toHaveLength(0);
-  });
-
-  it("warns and drops a malformed control frame", async () => {
-    const logger = makeLogger();
-    const { emitControl, redis } = setupRedisTransport();
-    const bus = createDeltaBus();
-    const received: ControlFrame[] = [];
-    bus.onControl((frame) => received.push(frame));
-    const transport = createRedisDeltaTransport(
-      redis as never,
-      bus,
-      "source-1",
-      logger
-    );
-
-    await transport.start();
-    emitControl(JSON.stringify({ groupId: "proj-1", type: "nonsense" }));
-
-    expect(received).toHaveLength(0);
-    expect(logger.warn).toHaveBeenCalled();
-  });
-
-  it("unsubscribing stops control delivery", () => {
-    const bus = createDeltaBus();
-    const received: ControlFrame[] = [];
-    const unsub = bus.onControl((frame) => received.push(frame));
-
-    const frame: ControlFrame = {
-      groupId: "proj-1",
-      type: "group_joined",
-      userId: "user-a",
-    };
-    bus.publishControl(frame);
-    expect(received).toHaveLength(1);
-
-    unsub();
-    bus.publishControl(frame);
-    expect(received).toHaveLength(1);
-  });
-});
-
-describe(parseControlFrame, () => {
-  it("accepts a well-formed frame", () => {
-    expect(
-      parseControlFrame({
-        groupId: "proj-1",
-        type: "group_joined",
-        userId: "user-a",
-      })
-    ).toEqual({ groupId: "proj-1", type: "group_joined", userId: "user-a" });
-  });
-
-  it.each([
-    ["a non-object", 42],
-    ["an unknown type", { groupId: "g", type: "group_exploded", userId: "u" }],
-    ["a missing userId", { groupId: "g", type: "group_joined" }],
-    ["an empty groupId", { groupId: "", type: "group_joined", userId: "u" }],
-  ])("rejects %s", (_label, input) => {
-    expect(() => parseControlFrame(input)).toThrow();
   });
 });

@@ -79,19 +79,14 @@ export type { SyncActionInsert, SyncDaoTables } from "./dao/sync-dao.js";
 
 // Delta publisher
 export type {
-  ControlSubscriberCallback,
   DeltaPublisherLike,
   DeltaSubscriberCallback,
   DeltaSubscriberLike,
 } from "./delta/delta-publisher.js";
 
-// Control frames
-export { GROUP_MEMBERSHIP_CAPABILITY } from "./websocket/messages.js";
-export type { ControlFrame, ControlFrameType } from "./delta/control-frames.js";
-export {
-  isControlFrameType,
-  parseControlFrame,
-} from "./delta/control-frames.js";
+// Sync group change actions
+export type { SyncGroupsChangeData } from "./core/sync-groups.js";
+export { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "./core/sync-groups.js";
 export {
   createDeltaBus,
   createDeltaPublisher,
