@@ -16,9 +16,11 @@ import type {
 } from "../types.js";
 import { mapGraphQLAction } from "../types.js";
 import { buildModelRegistry } from "./model-registry.js";
-import type { ModelHandler, ModelLookup } from "./model-registry.js";
-
-const MODEL_ID_GROUP_KEY = "__modelId__";
+import type {
+  GroupResolver,
+  ModelHandler,
+  ModelLookup,
+} from "./model-registry.js";
 
 const SYNC_ACTION_DEDUP_CONSTRAINT =
   "sync_actions_client_id_client_tx_id_unique";
@@ -86,7 +88,7 @@ export class MutateService {
   private readonly db: SyncDb;
   private readonly logger: SyncLogger;
   private readonly modelHandlers: Map<string, ModelHandler>;
-  private readonly modelGroupKeys: Record<string, string>;
+  private readonly groupResolvers: Record<string, GroupResolver>;
   private readonly modelDelegates: Record<string, ModelLookup>;
   private readonly modelConfigs: Record<string, SyncModelConfig>;
 
@@ -102,7 +104,7 @@ export class MutateService {
 
     const registry = buildModelRegistry(models);
     this.modelHandlers = registry.handlers;
-    this.modelGroupKeys = registry.groupKeys;
+    this.groupResolvers = registry.groupResolvers;
     this.modelDelegates = registry.delegates;
     this.modelConfigs = registry.configs;
   }
@@ -125,78 +127,33 @@ export class MutateService {
 
   private async resolveGroupId(
     db: SyncDb,
-    modelName: string,
-    modelId: string,
-    action: ModelAction,
-    payload: Record<string, unknown>,
+    tx: TransactionInput,
+    prepared: PreparedTransaction,
+    record: Record<string, unknown> | null,
     context: SyncUserContext
   ): Promise<string | null> {
-    const resolveGroup = this.modelConfigs[modelName]?.resolveGroup;
-    if (resolveGroup) {
-      // The hook takes precedence over groupKey. The existing row is only
-      // meaningful for non-inserts, so the lookup is skipped for "I".
-      const record =
-        action === "I"
-          ? null
-          : await this.lookupModelRecord(db, modelName, modelId);
-
-      return await resolveGroup({
-        action,
-        context,
-        db,
-        modelId,
-        modelName,
-        payload,
-        record,
-      });
-    }
-
-    const groupKey = this.modelGroupKeys[modelName];
-    if (!groupKey) {
+    const resolver = this.groupResolvers[tx.modelName];
+    if (!resolver) {
       return null;
     }
 
-    if (groupKey === MODEL_ID_GROUP_KEY) {
-      return modelId;
-    }
-
-    if (action === "I") {
-      const payloadValue = payload[groupKey];
-      if (typeof payloadValue === "string" && payloadValue.length > 0) {
-        return payloadValue;
-      }
-
+    try {
+      return await resolver({
+        action: prepared.action,
+        context,
+        db,
+        modelId: prepared.canonicalModelId,
+        modelName: tx.modelName,
+        payload: tx.payload,
+        record,
+      });
+    } catch (error) {
       this.logger.warn(
-        { groupKey, modelName },
-        "Missing group key in insert payload"
+        { error, modelId: prepared.canonicalModelId, modelName: tx.modelName },
+        "Could not resolve group for mutation"
       );
-      throw new Error("Invalid mutation: missing required group identifier");
+      throw error;
     }
-
-    const record = await this.lookupModelRecord(db, modelName, modelId);
-    if (record) {
-      const recordValue = record[groupKey];
-      if (typeof recordValue === "string" && recordValue.length > 0) {
-        return recordValue;
-      }
-
-      this.logger.warn(
-        { groupKey, modelId, modelName },
-        "Missing group key on existing record"
-      );
-      throw new Error("Invalid mutation: missing required group identifier");
-    }
-
-    const payloadValue = payload[groupKey];
-    if (typeof payloadValue === "string" && payloadValue.length > 0) {
-      return payloadValue;
-    }
-
-    this.logger.warn(
-      { groupKey, modelId, modelName },
-      "Cannot resolve group for mutation"
-    );
-    throw new Error("Invalid mutation: record not found");
   }
 
   private static validateGroupAccess(
@@ -259,17 +216,24 @@ export class MutateService {
     };
   }
 
-  private async ensureMutationTargetExists(
+  /**
+   * Loads the row a non-insert mutation targets, asserting it exists.
+   *
+   * The row is returned rather than discarded so group resolution can reuse it:
+   * previously this lookup and the one inside group resolution were two
+   * separate queries for the same row on every update, delete and archive.
+   */
+  private async loadMutationTarget(
     db: SyncDb,
     tx: TransactionInput,
     prepared: PreparedTransaction
-  ): Promise<void> {
+  ): Promise<Record<string, unknown> | null> {
     if (prepared.action === "I") {
-      return;
+      return null;
     }
 
     if (prepared.modelConfig?.mutate.kind !== "standard") {
-      return;
+      return null;
     }
 
     const row = await this.lookupModelRecord(
@@ -280,6 +244,8 @@ export class MutateService {
     if (!row) {
       throw new Error("Invalid mutation: record not found");
     }
+
+    return row;
   }
 
   private async applyModelMutation(
@@ -330,6 +296,8 @@ export class MutateService {
       return false;
     }
 
+    // Guaranteed present: buildModelRegistry rejects insertCreatesGroup
+    // without an explicit groupType at startup.
     const groupType = prepared.modelConfig.groupType ?? tx.modelName;
     await this.dao
       .withDb(db)
@@ -347,14 +315,14 @@ export class MutateService {
     db: SyncDb,
     context: SyncUserContext,
     tx: TransactionInput,
-    prepared: PreparedTransaction
+    prepared: PreparedTransaction,
+    record: Record<string, unknown> | null
   ): Promise<AuthorizedGroup> {
     const groupId = await this.resolveGroupId(
       db,
-      tx.modelName,
-      prepared.canonicalModelId,
-      prepared.action,
-      tx.payload,
+      tx,
+      prepared,
+      record,
       context
     );
 
@@ -470,12 +438,13 @@ export class MutateService {
       const workResult = await this.db.transaction(async (txDb) => {
         const txDao = this.dao.withDb(txDb);
         const prepared = this.prepareTransaction(tx);
-        await this.ensureMutationTargetExists(txDb, tx, prepared);
+        const record = await this.loadMutationTarget(txDb, tx, prepared);
         const { grantedGroupId, groupId } = await this.resolveAuthorizedGroupId(
           txDb,
           context,
           tx,
-          prepared
+          prepared,
+          record
         );
         const data = await this.applyModelMutation(txDb, tx, prepared, context);
         const syncAction = await MutateService.createSyncActionInTransaction(
@@ -494,9 +463,9 @@ export class MutateService {
         } satisfies TransactionWorkResult;
       });
 
-      // Widen the caller's context only once the membership row has actually
-      // committed, so later transactions in the same batch validate against a
-      // group that exists. A rolled-back insert leaves the context untouched.
+      // Widen the batch's working groups only once the membership row has
+      // actually committed, so later transactions in the same batch validate
+      // against a group that exists. A rolled-back insert widens nothing.
       if (
         workResult.grantedGroupId !== null &&
         !context.groups.includes(workResult.grantedGroupId)
@@ -600,8 +569,21 @@ export class MutateService {
     let lastSyncId = 0n;
     let success = true;
 
+    // An insert that opens a group widens the groups this batch may write to.
+    // That widening is scoped to the batch: the caller's context is an input,
+    // not a scratchpad, and mutating it would leak a grant into whatever else
+    // holds a reference to it.
+    const batchContext: SyncUserContext = {
+      ...context,
+      groups: [...context.groups],
+    };
+
     for (const tx of input.transactions) {
-      const processed = await this.processTransaction(context, tx, onAction);
+      const processed = await this.processTransaction(
+        batchContext,
+        tx,
+        onAction
+      );
       results.push(processed.result);
       if (!processed.success) {
         success = false;

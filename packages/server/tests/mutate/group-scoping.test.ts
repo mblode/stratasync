@@ -274,6 +274,25 @@ const selfGroupedProject: SyncModelConfig = {
   table: projects,
 };
 
+/** A task belongs to its project's group — no flag, so it can never open one. */
+const projectScopedTask: SyncModelConfig = {
+  bootstrap: baseBootstrap,
+  groupKey: null,
+  mutate: {
+    actions: new Set(["I", "U", "D", "A", "V"] as const),
+    insertFields: {
+      id: { type: "string" },
+      projectId: { type: "string" },
+      title: { type: "string" },
+    },
+    kind: "standard",
+    updateFields: new Set(["title", "projectId"]),
+  },
+  resolveGroup: ({ payload, record }) =>
+    (payload.projectId ?? record?.projectId ?? null) as string | null,
+  table: tasks,
+};
+
 const makeContext = (userId: string, groups: string[]): SyncUserContext => ({
   groups: [...groups],
   userId,
@@ -530,25 +549,53 @@ describe("group scoping: insertCreatesGroup", () => {
     expect(committed.memberships).toEqual([
       { groupId: "proj-1", groupType: "project", userId: "user-a" },
     ]);
-    // Later transactions in the same batch now validate against the new group.
-    expect(context.groups).toContain("proj-1");
+    // The caller's context is an input, not a scratchpad. The grant is real —
+    // a committed membership row their next authorize picks up — but it does
+    // not reach back into the object they passed in.
+    expect(context.groups).toEqual(["ws-1"]);
   });
 
-  it("defaults the membership groupType to the model name", async () => {
-    const { committed, db } = createDb();
+  it("refuses at startup to guess a groupType", async () => {
+    // groupType lands in a table the consumer owns, so the engine will not
+    // invent one. Failing here beats writing a wrong value at 3am.
+    const { db } = createDb();
     const model: SyncModelConfig = { ...selfGroupedProject };
     delete model.groupType;
-    const service = makeService({ Project: model }, db);
 
-    await run(service, makeContext("user-a", ["ws-1"]), [
+    expect(() => makeService({ Project: model }, db)).toThrow(
+      /insertCreatesGroup but no groupType/
+    );
+    await Promise.resolve();
+  });
+
+  it("lets a later transaction in the same batch write to the opened group", async () => {
+    // The grant has to be visible for the rest of the batch, or the very
+    // common "create a project and put something in it" round trip fails on
+    // its second transaction.
+    const { committed, db } = createDb();
+    const service = makeService(
+      { Project: selfGroupedProject, Task: projectScopedTask },
+      db
+    );
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
       makeTx({
         modelId: "proj-1",
         modelName: "Project",
         payload: { id: "proj-1", name: "Private", workspaceId: "ws-1" },
       }),
+      makeTx({
+        modelId: "task-1",
+        modelName: "Task",
+        payload: { id: "task-1", projectId: "proj-1", title: "In it" },
+      }),
     ]);
 
-    expect(committed.memberships[0]?.groupType).toBe("Project");
+    expect(result.success).toBeTruthy();
+    expect(committed.syncActions.map((row) => row.groupId)).toEqual([
+      "proj-1",
+      "proj-1",
+    ]);
   });
 
   it("does not re-grant a group the creator already holds", async () => {
@@ -692,18 +739,15 @@ describe("group scoping: leak regression", () => {
         modelName: "Project",
         payload: { id: "proj-1", name: "Private", workspaceId: "ws-1" },
       }),
-    ]);
-
-    for (const name of ["Edit 1", "Edit 2", "Edit 3"]) {
-      await run(service, userA, [
+      ...["Edit 1", "Edit 2", "Edit 3"].map((name) =>
         makeTx({
-          action: "UPDATE",
+          action: "UPDATE" as const,
           modelId: "proj-1",
           modelName: "Project",
           payload: { name },
-        }),
-      ]);
-    }
+        })
+      ),
+    ]);
 
     expect(committed.syncActions).toHaveLength(4);
     for (const row of committed.syncActions) {

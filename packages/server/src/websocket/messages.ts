@@ -3,23 +3,11 @@ import type { SyncActionOutput } from "../types.js";
 
 const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 
-/**
- * Capability a client declares to opt into server-initiated control frames.
- *
- * Gating on this is not politeness — a client that predates the frames may
- * treat an unrecognized frame as a protocol error and drop the connection, so
- * emitting one unconditionally would churn already-installed clients that can
- * never be upgraded. Only the outbound frame is gated; the membership edit it
- * describes is still applied server-side.
- */
-export const GROUP_MEMBERSHIP_CAPABILITY = "group-membership";
-
 export interface SubscribeMessage {
   type: "subscribe";
   afterSyncId: string;
   token: string;
   groups?: string[];
-  capabilities?: string[];
 }
 
 const isNonNegativeIntegerString = (value: string): boolean =>
@@ -43,14 +31,6 @@ export const isSubscribeMessage = (msg: unknown): msg is SubscribeMessage => {
     (Array.isArray(groups) &&
       groups.every((group) => typeof group === "string"));
   if (!groupsValid) {
-    return false;
-  }
-  const { capabilities } = record;
-  const capabilitiesValid =
-    capabilities === undefined ||
-    (Array.isArray(capabilities) &&
-      capabilities.every((entry) => typeof entry === "string"));
-  if (!capabilitiesValid) {
     return false;
   }
   return (
@@ -114,24 +94,4 @@ export const buildSubscribedFrame = (
     afterSyncId,
     groups,
     type: "subscribed",
-  });
-
-/**
- * Server-initiated group membership frames. `{groupId, type}` is wire-locked.
- *
- * A client that receives `group_joined` should batch-load that group (the
- * group's history sits before its delta cursor, so a delta fetch will not
- * deliver it); one that receives `group_left` should drop the cached rows for
- * that group. Ignoring either still converges on the next bootstrap.
- */
-export const buildGroupJoinedFrame = (groupId: string): string =>
-  JSON.stringify({
-    groupId,
-    type: "group_joined",
-  });
-
-export const buildGroupLeftFrame = (groupId: string): string =>
-  JSON.stringify({
-    groupId,
-    type: "group_left",
   });

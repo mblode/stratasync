@@ -100,25 +100,3 @@ export type GraphQLMutationBuilder = (
   transaction: Transaction,
   index: number
 ) => GraphQLMutationSpec;
-
-/**
- * Capability string a client declares on its subscribe frame to opt into
- * server-initiated group membership frames. The server withholds those frames
- * from clients that do not declare it.
- */
-export const GROUP_MEMBERSHIP_CAPABILITY = "group-membership";
-
-/**
- * A server-initiated change to this client's group membership.
- *
- * `joined` requires a batch load of that group — deltas are cursor-based, so
- * the group's history sits before this client's cursor and never arrives on the
- * delta stream. `left` means the group's cached rows should be dropped.
- */
-export interface GroupMembershipChange {
-  kind: "joined" | "left";
-  groupId: string;
-}
-
-/** Listener for {@link GroupMembershipChange} notifications. */
-export type GroupMembershipListener = (change: GroupMembershipChange) => void;
