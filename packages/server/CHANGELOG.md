@@ -1,5 +1,25 @@
 # @stratasync/server
 
+## 1.1.0
+
+### Minor Changes
+
+- 6a790bf: Gate group membership control frames on a client-declared capability, and handle them in the web client.
+
+  The server now only sends `group_joined` / `group_left` to a connection whose `subscribe` frame declared the `group-membership` capability. This is a compatibility requirement, not politeness: a client that predates these frames may treat an unrecognized frame as a protocol error and drop the connection, so emitting one unconditionally would churn already-installed clients that cannot be upgraded. Only the outbound frame is gated — the membership change is still applied to the session's delta scope, so a removed member stops receiving that group's live edits regardless of what their client can parse.
+
+  `@stratasync/transport-graphql` declares the capability, parses both frames, and exposes them via `onGroupMembershipChange`. `@stratasync/client` routes them into the existing `SyncGroupManager`, which already partial-bootstraps added groups and drops removed ones — so a newly shared group is loaded immediately rather than waiting for the next bootstrap, and an unshared group's rows are dropped rather than lingering.
+
+  `TransportAdapter.onGroupMembershipChange` is optional, so transports that predate this keep type-checking and simply converge on the next bootstrap.
+
+- 6a790bf: Add per-row group scoping so a model can own a delta group whose membership is the access boundary.
+
+  - `resolveGroup`: an optional per-model hook that takes precedence over `groupKey`, letting a row's audience depend on the row. It receives the action, payload, existing row (non-inserts) and caller context, and returning `null` means ungrouped exactly as `groupKey: null` does.
+  - `insertCreatesGroup` (with `groupType`): an INSERT whose resolved group is absent from the caller's groups grants the creator that membership in the same transaction instead of being denied. This makes a model whose group is its own id insertable at all; every other action is unchanged, and writing to a group you do not belong to is still denied.
+  - `notifyGroupJoined` / `notifyGroupLeft` on the sync server: server-initiated `group_joined` / `group_left` control frames addressed to one user's live sessions, so a newly shared group is batch-loaded and a removed one is dropped rather than lingering. They travel over a new `sync:control` redis channel alongside the delta channel.
+
+  All three are additive and optional: a consumer that sets none behaves exactly as before. Clients that do not handle the new frames still converge on their next bootstrap.
+
 ## 1.0.0
 
 ## 0.6.0
