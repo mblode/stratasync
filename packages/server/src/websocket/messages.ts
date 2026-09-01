@@ -3,11 +3,23 @@ import type { SyncActionOutput } from "../types.js";
 
 const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 
+/**
+ * Capability a client declares to opt into server-initiated control frames.
+ *
+ * Gating on this is not politeness — a client that predates the frames may
+ * treat an unrecognized frame as a protocol error and drop the connection, so
+ * emitting one unconditionally would churn already-installed clients that can
+ * never be upgraded. Only the outbound frame is gated; the membership edit it
+ * describes is still applied server-side.
+ */
+export const GROUP_MEMBERSHIP_CAPABILITY = "group-membership";
+
 export interface SubscribeMessage {
   type: "subscribe";
   afterSyncId: string;
   token: string;
   groups?: string[];
+  capabilities?: string[];
 }
 
 const isNonNegativeIntegerString = (value: string): boolean =>
@@ -31,6 +43,14 @@ export const isSubscribeMessage = (msg: unknown): msg is SubscribeMessage => {
     (Array.isArray(groups) &&
       groups.every((group) => typeof group === "string"));
   if (!groupsValid) {
+    return false;
+  }
+  const { capabilities } = record;
+  const capabilitiesValid =
+    capabilities === undefined ||
+    (Array.isArray(capabilities) &&
+      capabilities.every((entry) => typeof entry === "string"));
+  if (!capabilitiesValid) {
     return false;
   }
   return (

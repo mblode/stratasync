@@ -9,6 +9,7 @@ import {
   buildErrorFrame,
   buildGroupJoinedFrame,
   buildGroupLeftFrame,
+  GROUP_MEMBERSHIP_CAPABILITY,
 } from "./messages.js";
 
 export const MAX_BUFFERED_ACTIONS = 10_000;
@@ -53,6 +54,8 @@ export class ClientSession {
    * group keeps this from growing with frame volume.
    */
   private bufferedControlFrames = new Map<string, ControlFrame>();
+  /** Whether this client opted into server-initiated control frames. */
+  private controlFramesEnabled = false;
 
   constructor(socket: WebSocket, deltaSubscriber?: DeltaSubscriberLike) {
     this.socket = socket;
@@ -75,19 +78,33 @@ export class ClientSession {
     this.afterSyncId = 0n;
     this.bufferedActions = [];
     this.bufferedControlFrames = new Map();
+    this.controlFramesEnabled = false;
   }
 
   /**
    * Begins a subscription: records identity/groups/cursor and enters the
    * replaying phase (live deltas are buffered until flush).
+   *
+   * `capabilities` are the strings the client declared on its subscribe frame.
+   * A client that did not declare {@link GROUP_MEMBERSHIP_CAPABILITY} still has
+   * membership changes applied to its delta scope — it just is not told about
+   * them, because an unrecognized frame may read as a protocol error to it.
    */
-  beginReplay(userId: string, groups: string[], afterSyncId: bigint): void {
+  beginReplay(
+    userId: string,
+    groups: string[],
+    afterSyncId: bigint,
+    capabilities: readonly string[] = []
+  ): void {
     this.userId = userId;
     this.groups = groups;
     this.afterSyncId = afterSyncId;
     this.phase = "replaying";
     this.bufferedActions = [];
     this.bufferedControlFrames = new Map();
+    this.controlFramesEnabled = capabilities.includes(
+      GROUP_MEMBERSHIP_CAPABILITY
+    );
   }
 
   /**
@@ -170,6 +187,14 @@ export class ClientSession {
   }
 
   private sendControlFrame(frame: ControlFrame): void {
+    // The membership edit above always applies — stopping delivery to a removed
+    // member is a security boundary, not an optimisation. Only telling the
+    // client is gated, because a client that predates control frames may treat
+    // an unrecognized frame as a protocol error and drop the connection.
+    if (!this.controlFramesEnabled) {
+      return;
+    }
+
     if (this.socket.readyState !== this.socket.OPEN) {
       return;
     }

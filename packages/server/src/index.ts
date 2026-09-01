@@ -86,6 +86,7 @@ export type {
 } from "./delta/delta-publisher.js";
 
 // Control frames
+export { GROUP_MEMBERSHIP_CAPABILITY } from "./websocket/messages.js";
 export type { ControlFrame, ControlFrameType } from "./delta/control-frames.js";
 export {
   isControlFrameType,

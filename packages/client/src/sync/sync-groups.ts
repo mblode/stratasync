@@ -56,8 +56,48 @@ export class SyncGroupManager {
     }
 
     const nextGroups = groupUpdates.at(-1);
+    if (!nextGroups) {
+      return;
+    }
+
+    await this.applyGroupMembership(nextGroups, nextSyncId);
+  }
+
+  /**
+   * Applies a server-initiated membership change delivered as a control frame
+   * rather than as a delta action.
+   *
+   * Deltas are cursor-based, so a joined group's history sits *before* this
+   * client's cursor and would never arrive on the delta stream — it has to be
+   * partial-bootstrapped. A left group's rows would otherwise linger, silently
+   * frozen. Both paths are already handled by
+   * {@link SyncGroupManager.applyGroupMembership}; this just turns one group
+   * into the next full group set and anchors it at the current cursor.
+   */
+  async handleGroupMembershipChange(change: {
+    kind: "joined" | "left";
+    groupId: string;
+  }): Promise<void> {
     const currentGroups = this.ctx.getGroups();
-    if (!nextGroups || areGroupsEqual(currentGroups, nextGroups)) {
+    let nextGroups: string[];
+
+    if (change.kind === "joined") {
+      nextGroups = currentGroups.includes(change.groupId)
+        ? currentGroups
+        : [...currentGroups, change.groupId];
+    } else {
+      nextGroups = currentGroups.filter((group) => group !== change.groupId);
+    }
+
+    await this.applyGroupMembership(nextGroups, this.ctx.cursor.lastSyncId);
+  }
+
+  private async applyGroupMembership(
+    nextGroups: string[],
+    nextSyncId: SyncId
+  ): Promise<void> {
+    const currentGroups = this.ctx.getGroups();
+    if (areGroupsEqual(currentGroups, nextGroups)) {
       return;
     }
 
