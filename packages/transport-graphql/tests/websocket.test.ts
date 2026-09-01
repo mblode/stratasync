@@ -960,3 +960,142 @@ describe(WebSocketManager, () => {
     await manager.close();
   });
 });
+
+describe("group membership control frames", () => {
+  const connectAndSubscribe = async (manager: WebSocketManager) => {
+    const connectPromise = manager.connect();
+    await flush();
+    const socket = lastSocket();
+    socket.simulateOpen();
+    await connectPromise;
+    const subscription = manager.subscribe({ afterSyncId: "0" });
+    await flush();
+    return { socket, subscription };
+  };
+
+  it("declares the group-membership capability on subscribe", async () => {
+    const manager = createManager();
+    const { socket, subscription } = await connectAndSubscribe(manager);
+
+    const subscribeFrame = socket.sent.find((message) =>
+      message.includes('"type":"subscribe"')
+    );
+    expect(subscribeFrame).toBeDefined();
+    expect(JSON.parse(subscribeFrame ?? "{}").capabilities).toEqual([
+      "group-membership",
+    ]);
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("reports a group_joined frame as a joined change", async () => {
+    const manager = createManager();
+    const changes: { kind: string; groupId: string }[] = [];
+    manager.onGroupMembershipChange((change) => changes.push(change));
+
+    const { socket, subscription } = await connectAndSubscribe(manager);
+    socket.simulateMessage(
+      JSON.stringify({ groupId: "proj-1", type: "group_joined" })
+    );
+    await flush();
+
+    expect(changes).toEqual([{ groupId: "proj-1", kind: "joined" }]);
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("reports a group_left frame as a left change", async () => {
+    const manager = createManager();
+    const changes: { kind: string; groupId: string }[] = [];
+    manager.onGroupMembershipChange((change) => changes.push(change));
+
+    const { socket, subscription } = await connectAndSubscribe(manager);
+    socket.simulateMessage(
+      JSON.stringify({ groupId: "proj-1", type: "group_left" })
+    );
+    await flush();
+
+    expect(changes).toEqual([{ groupId: "proj-1", kind: "left" }]);
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("does not treat a control frame as a delta packet", async () => {
+    const manager = createManager();
+    const { socket, subscription } = await connectAndSubscribe(manager);
+    const iterator = subscription[Symbol.asyncIterator]();
+
+    // A control frame must not enqueue a packet. Sending a real delta straight
+    // after proves it: the first packet the iterator yields is the delta, so
+    // the control frame neither queued nor corrupted anything. Asserting this
+    // way keeps the iterator settled — a pending next() would outlive the test.
+    socket.simulateMessage(
+      JSON.stringify({ groupId: "proj-1", type: "group_joined" })
+    );
+    socket.simulateMessage(
+      JSON.stringify({
+        packet: {
+          actions: [
+            {
+              action: "I",
+              createdAt: "2024-06-15T12:00:00.000Z",
+              data: {},
+              modelId: "task-1",
+              modelName: "Task",
+              syncId: "7",
+            },
+          ],
+          lastSyncId: "7",
+        },
+        type: "delta",
+      })
+    );
+    await flush();
+
+    const first = await iterator.next();
+    expect(first.done).toBeFalsy();
+    expect(first.value?.lastSyncId).toBe("7");
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("ignores a malformed control frame", async () => {
+    const manager = createManager();
+    const changes: unknown[] = [];
+    manager.onGroupMembershipChange((change) => changes.push(change));
+
+    const { socket, subscription } = await connectAndSubscribe(manager);
+    socket.simulateMessage(JSON.stringify({ type: "group_joined" }));
+    socket.simulateMessage(JSON.stringify({ groupId: 42, type: "group_left" }));
+    await flush();
+
+    expect(changes).toHaveLength(0);
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+
+  it("stops reporting after unsubscribe", async () => {
+    const manager = createManager();
+    const changes: unknown[] = [];
+    const unsubscribe = manager.onGroupMembershipChange((change) =>
+      changes.push(change)
+    );
+
+    const { socket, subscription } = await connectAndSubscribe(manager);
+    unsubscribe();
+    socket.simulateMessage(
+      JSON.stringify({ groupId: "proj-1", type: "group_joined" })
+    );
+    await flush();
+
+    expect(changes).toHaveLength(0);
+
+    subscription.unsubscribe();
+    await manager.close();
+  });
+});

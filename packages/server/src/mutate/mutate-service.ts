@@ -60,6 +60,13 @@ type ProcessedTransactionResult =
 interface TransactionWorkResult {
   data: Record<string, unknown>;
   syncAction: RawSyncActionRow;
+  /** Group the creator was granted by this insert, else null. */
+  grantedGroupId: string | null;
+}
+
+interface AuthorizedGroup {
+  groupId: string | null;
+  grantedGroupId: string | null;
 }
 
 type ProcessAction = ReturnType<typeof mapGraphQLAction>;
@@ -120,9 +127,30 @@ export class MutateService {
     db: SyncDb,
     modelName: string,
     modelId: string,
-    action: string,
-    payload: Record<string, unknown>
+    action: ModelAction,
+    payload: Record<string, unknown>,
+    context: SyncUserContext
   ): Promise<string | null> {
+    const resolveGroup = this.modelConfigs[modelName]?.resolveGroup;
+    if (resolveGroup) {
+      // The hook takes precedence over groupKey. The existing row is only
+      // meaningful for non-inserts, so the lookup is skipped for "I".
+      const record =
+        action === "I"
+          ? null
+          : await this.lookupModelRecord(db, modelName, modelId);
+
+      return await resolveGroup({
+        action,
+        context,
+        db,
+        modelId,
+        modelName,
+        payload,
+        record,
+      });
+    }
+
     const groupKey = this.modelGroupKeys[modelName];
     if (!groupKey) {
       return null;
@@ -275,19 +303,64 @@ export class MutateService {
     );
   }
 
+  /**
+   * Grants the creator membership of a group their INSERT is opening.
+   *
+   * Only ever reached for `action === "I"` on a model that opts in with
+   * `insertCreatesGroup`, and only when the resolved group is one the caller
+   * does not already belong to. The membership row is written on `db`, which is
+   * the transaction handle, so it commits or rolls back with the row itself.
+   *
+   * Returns true when membership was granted, which is the signal to skip
+   * `validateGroupAccess` for this one write.
+   */
+  private async grantInsertGroup(
+    db: SyncDb,
+    context: SyncUserContext,
+    tx: TransactionInput,
+    prepared: PreparedTransaction,
+    groupId: string | null
+  ): Promise<boolean> {
+    if (
+      prepared.action !== "I" ||
+      groupId === null ||
+      !prepared.modelConfig?.insertCreatesGroup ||
+      context.groups.includes(groupId)
+    ) {
+      return false;
+    }
+
+    const groupType = prepared.modelConfig.groupType ?? tx.modelName;
+    await this.dao
+      .withDb(db)
+      .addGroupMembership(context.userId, groupId, groupType);
+
+    this.logger.info(
+      { groupId, groupType, modelName: tx.modelName, userId: context.userId },
+      "Insert opened a new sync group"
+    );
+
+    return true;
+  }
+
   private async resolveAuthorizedGroupId(
     db: SyncDb,
     context: SyncUserContext,
     tx: TransactionInput,
     prepared: PreparedTransaction
-  ): Promise<string | null> {
+  ): Promise<AuthorizedGroup> {
     const groupId = await this.resolveGroupId(
       db,
       tx.modelName,
       prepared.canonicalModelId,
       prepared.action,
-      tx.payload
+      tx.payload,
+      context
     );
+
+    if (await this.grantInsertGroup(db, context, tx, prepared, groupId)) {
+      return { grantedGroupId: groupId, groupId };
+    }
 
     MutateService.validateGroupAccess(
       context,
@@ -296,7 +369,7 @@ export class MutateService {
       this.logger
     );
 
-    return groupId;
+    return { grantedGroupId: null, groupId };
   }
 
   private static publishSyncAction(
@@ -398,7 +471,7 @@ export class MutateService {
         const txDao = this.dao.withDb(txDb);
         const prepared = this.prepareTransaction(tx);
         await this.ensureMutationTargetExists(txDb, tx, prepared);
-        const groupId = await this.resolveAuthorizedGroupId(
+        const { grantedGroupId, groupId } = await this.resolveAuthorizedGroupId(
           txDb,
           context,
           tx,
@@ -416,9 +489,20 @@ export class MutateService {
 
         return {
           data,
+          grantedGroupId,
           syncAction,
         } satisfies TransactionWorkResult;
       });
+
+      // Widen the caller's context only once the membership row has actually
+      // committed, so later transactions in the same batch validate against a
+      // group that exists. A rolled-back insert leaves the context untouched.
+      if (
+        workResult.grantedGroupId !== null &&
+        !context.groups.includes(workResult.grantedGroupId)
+      ) {
+        context.groups.push(workResult.grantedGroupId);
+      }
 
       this.logger.debug(
         {

@@ -28,7 +28,10 @@ export { WebSocketManager } from "./websocket.js";
 export { YjsTransportAdapter } from "./yjs-transport.js";
 export {
   DEFAULT_RETRY_CONFIG,
+  GROUP_MEMBERSHIP_CAPABILITY,
   type AuthProvider,
+  type GroupMembershipChange,
+  type GroupMembershipListener,
   type GraphQLError,
   type GraphQLMutationBuilder,
   type GraphQLMutationSpec,

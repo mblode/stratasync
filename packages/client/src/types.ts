@@ -251,6 +251,14 @@ export interface TransportAdapter {
   onConnectionStateChange(
     callback: (state: ConnectionState) => void
   ): () => void;
+  /**
+   * Optional so transports that predate group membership frames still satisfy
+   * this interface. A transport that omits it simply never reports a change,
+   * and membership converges on the next bootstrap.
+   */
+  onGroupMembershipChange?(
+    callback: (change: { kind: "joined" | "left"; groupId: string }) => void
+  ): () => void;
   close(): Promise<void>;
 }
 
