@@ -15,6 +15,12 @@ export interface SyncDb {
   insert(table: AnyPgTable): {
     values(data: Record<string, unknown>): {
       returning(): Promise<Record<string, unknown>[]>;
+      /**
+       * Optional so existing hand-written `SyncDb` doubles keep type-checking.
+       * Real Drizzle always provides it; callers that need conflict tolerance
+       * must handle its absence.
+       */
+      onConflictDoNothing?(): Promise<unknown>;
     };
   };
   delete(table: AnyPgTable): {

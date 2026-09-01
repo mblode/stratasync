@@ -26,6 +26,7 @@ export type {
   FieldType,
   MutationContext,
   RedisClient,
+  ResolveGroupContext,
   StandardMutateConfig,
   SyncAuthConfig,
   SyncAuthPayload,
@@ -78,10 +79,18 @@ export type { SyncActionInsert, SyncDaoTables } from "./dao/sync-dao.js";
 
 // Delta publisher
 export type {
+  ControlSubscriberCallback,
   DeltaPublisherLike,
   DeltaSubscriberCallback,
   DeltaSubscriberLike,
 } from "./delta/delta-publisher.js";
+
+// Control frames
+export type { ControlFrame, ControlFrameType } from "./delta/control-frames.js";
+export {
+  isControlFrameType,
+  parseControlFrame,
+} from "./delta/control-frames.js";
 export {
   createDeltaBus,
   createDeltaPublisher,

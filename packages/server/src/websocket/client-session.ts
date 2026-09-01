@@ -1,9 +1,15 @@
 import type { WebSocket } from "ws";
 
 import { SyncId } from "../core/sync-id.js";
+import type { ControlFrame } from "../delta/control-frames.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
 import type { SyncActionOutput } from "../types.js";
-import { buildDeltaFrame, buildErrorFrame } from "./messages.js";
+import {
+  buildDeltaFrame,
+  buildErrorFrame,
+  buildGroupJoinedFrame,
+  buildGroupLeftFrame,
+} from "./messages.js";
 
 export const MAX_BUFFERED_ACTIONS = 10_000;
 
@@ -39,7 +45,14 @@ export class ClientSession {
   private readonly socket: WebSocket;
   private readonly deltaSubscriber?: DeltaSubscriberLike;
   private unsubscribe: (() => void) | null = null;
+  private controlUnsubscribe: (() => void) | null = null;
   private bufferedActions: BufferedAction[] = [];
+  /**
+   * Control frames held until replay finishes, keyed by group so a group that
+   * churns during replay collapses to its final state. Bounding by distinct
+   * group keeps this from growing with frame volume.
+   */
+  private bufferedControlFrames = new Map<string, ControlFrame>();
 
   constructor(socket: WebSocket, deltaSubscriber?: DeltaSubscriberLike) {
     this.socket = socket;
@@ -61,6 +74,7 @@ export class ClientSession {
     this.groups = [];
     this.afterSyncId = 0n;
     this.bufferedActions = [];
+    this.bufferedControlFrames = new Map();
   }
 
   /**
@@ -73,6 +87,7 @@ export class ClientSession {
     this.afterSyncId = afterSyncId;
     this.phase = "replaying";
     this.bufferedActions = [];
+    this.bufferedControlFrames = new Map();
   }
 
   /**
@@ -97,6 +112,73 @@ export class ClientSession {
     if (this.isClosed) {
       this.detach();
     }
+  }
+
+  /**
+   * Installs the server-initiated control frame subscription. Same close-race
+   * guard as {@link ClientSession.installDeltaSubscription}; a no-op when the
+   * subscriber predates control frames and has no `onControl`.
+   */
+  installControlSubscription(): void {
+    if (!this.deltaSubscriber?.onControl || this.phase === "closed") {
+      return;
+    }
+
+    this.controlUnsubscribe = this.deltaSubscriber.onControl(
+      (frame: ControlFrame) => {
+        this.onControlFrame(frame);
+      }
+    );
+
+    if (this.isClosed) {
+      this.detach();
+    }
+  }
+
+  /**
+   * Applies a control frame addressed to this session's user.
+   *
+   * The membership edit is applied to `groups` without re-authorizing: only the
+   * server publishes these frames, and it does so because it just changed the
+   * membership itself. Joining starts live delivery for the new group
+   * immediately; leaving stops it, which is what keeps a removed member from
+   * seeing subsequent edits without waiting for a reconnect.
+   */
+  private onControlFrame(frame: ControlFrame): void {
+    if (this.phase === "closed" || this.phase === "idle") {
+      return;
+    }
+
+    if (frame.userId !== this.userId) {
+      return;
+    }
+
+    if (frame.type === "group_joined") {
+      if (!this.groups.includes(frame.groupId)) {
+        this.groups.push(frame.groupId);
+      }
+    } else {
+      this.groups = this.groups.filter((group) => group !== frame.groupId);
+    }
+
+    if (this.phase === "replaying") {
+      this.bufferedControlFrames.set(frame.groupId, frame);
+      return;
+    }
+
+    this.sendControlFrame(frame);
+  }
+
+  private sendControlFrame(frame: ControlFrame): void {
+    if (this.socket.readyState !== this.socket.OPEN) {
+      return;
+    }
+
+    this.socket.send(
+      frame.type === "group_joined"
+        ? buildGroupJoinedFrame(frame.groupId)
+        : buildGroupLeftFrame(frame.groupId)
+    );
   }
 
   private onLiveDelta(action: SyncActionOutput, groups: string[]): void {
@@ -190,13 +272,22 @@ export class ClientSession {
     }
 
     this.bufferedActions = [];
+
+    for (const frame of this.bufferedControlFrames.values()) {
+      this.sendControlFrame(frame);
+    }
+    this.bufferedControlFrames = new Map();
   }
 
-  /** Tears down the delta subscription without changing phase. */
+  /** Tears down the delta and control subscriptions without changing phase. */
   private detach(): void {
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
+    }
+    if (this.controlUnsubscribe) {
+      this.controlUnsubscribe();
+      this.controlUnsubscribe = null;
     }
   }
 
