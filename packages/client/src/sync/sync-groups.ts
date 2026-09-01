@@ -72,21 +72,32 @@ export class SyncGroupManager {
       return;
     }
 
+    const runToken = this.ctx.getRunToken();
     const currentSet = new Set(currentGroups);
     const nextSet = new Set(nextGroups);
     const addedGroups = nextGroups.filter((group) => !currentSet.has(group));
     const removedGroups = currentGroups.filter((group) => !nextSet.has(group));
 
     if (addedGroups.length > 0) {
-      await this.bootstrapSyncGroups(
+      const completed = await this.bootstrapSyncGroups(
         addedGroups,
         nextSyncId,
-        this.ctx.getRunToken()
+        runToken
       );
+      // A cancelled partial bootstrap left the added groups half-loaded.
+      // Persisting the new membership now would make the next start believe
+      // the groups are complete and never fetch the rest.
+      if (!completed) {
+        return;
+      }
     }
 
     if (removedGroups.length > 0) {
       await this.removeSyncGroupData(removedGroups);
+    }
+
+    if (!this.ctx.isRunActive(runToken)) {
+      return;
     }
 
     this.ctx.setGroups(nextGroups);
@@ -108,11 +119,17 @@ export class SyncGroupManager {
     }
   }
 
+  /**
+   * Streams a partial bootstrap for newly added groups into storage (and the
+   * identity maps of eagerly hydrated models). Returns false when the run was
+   * cancelled mid-stream, in which case the groups must not be recorded as
+   * subscribed.
+   */
   private async bootstrapSyncGroups(
     groups: string[],
     firstSyncId: SyncId,
     runToken: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     const iterator = this.ctx.transport.bootstrap({
       firstSyncId,
       noSyncPackets: true,
@@ -139,16 +156,16 @@ export class SyncGroupManager {
 
     while (true) {
       if (await cancelIfStale()) {
-        return;
+        return false;
       }
 
       const { value, done } = await iterator.next();
       if (await cancelIfStale()) {
-        return;
+        return false;
       }
 
       if (done) {
-        break;
+        return true;
       }
 
       const row = value;
@@ -159,7 +176,7 @@ export class SyncGroupManager {
       }
       await this.ctx.storage.put(row.modelName, row.data);
       if (await cancelIfStale()) {
-        return;
+        return false;
       }
 
       if (hydrated.has(row.modelName)) {

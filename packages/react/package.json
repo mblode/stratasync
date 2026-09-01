@@ -1,25 +1,56 @@
 {
   "name": "@stratasync/react",
   "version": "2.0.0",
+  "description": "@stratasync/react: React provider and hooks for Strata Sync, an open-source implementation of Linear's sync engine.",
+  "keywords": [
+    "collaborative-editing",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "offline-first",
+    "react",
+    "react-hooks",
+    "realtime",
+    "suspense",
+    "sync",
+    "sync-engine",
+    "typescript",
+    "yjs"
+  ],
+  "homepage": "https://blode.co/stratasync/docs/packages/react",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/react"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -44,5 +75,13 @@
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "yjs": "^13.6.0"
+  },
+  "peerDependenciesMeta": {
+    "yjs": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

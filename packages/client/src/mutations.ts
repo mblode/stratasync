@@ -32,6 +32,14 @@ type DeleteOptions = TransactionCreatedHook & {
 type ArchiveOptions = ArchiveTransactionOptions & TransactionCreatedHook;
 type UnarchiveOptions = UnarchiveTransactionOptions & TransactionCreatedHook;
 
+/**
+ * Narrows `changes` to the fields that actually differ from `existingData`.
+ *
+ * An `undefined` member means "not provided" and is skipped: JSON drops it, so
+ * the server would never see it, and applying it locally would leave the
+ * optimistic state diverged from what the server holds. Clear a field with
+ * `null`.
+ */
 const buildEffectiveUpdate = <T extends Record<string, unknown>>(
   existingData: T,
   changes: Partial<T>
@@ -44,6 +52,9 @@ const buildEffectiveUpdate = <T extends Record<string, unknown>>(
     keyof T,
     T[keyof T],
   ][]) {
+    if (value === undefined) {
+      continue;
+    }
     if (!Object.is(existingData[key as string], value)) {
       effectiveChanges[key] = value;
     }

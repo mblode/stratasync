@@ -395,33 +395,12 @@ export class IdentityMapRegistry {
   }
 
   /**
-   * Checks if a map exists for a model type
-   */
-  hasMap(modelName: string): boolean {
-    return this.maps.has(modelName);
-  }
-
-  /**
    * Clears all identity maps
    */
   clearAll(): void {
     for (const map of this.maps.values()) {
       map.clear();
     }
-  }
-
-  /**
-   * Clears a specific identity map
-   */
-  clear(modelName: string): void {
-    this.maps.get(modelName)?.clear();
-  }
-
-  /**
-   * Gets all model names with identity maps
-   */
-  getModelNames(): string[] {
-    return [...this.maps.keys()];
   }
 
   /**

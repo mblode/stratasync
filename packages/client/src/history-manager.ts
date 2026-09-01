@@ -4,6 +4,7 @@ import {
   createArchivePayload,
   createUnarchivePatch,
   createUnarchivePayload,
+  replaceUndefinedWithNull,
 } from "@stratasync/core";
 
 export interface HistoryOperation {
@@ -176,12 +177,15 @@ export class HistoryManager {
       }
       case "U": {
         if (original) {
+          // A field that had no value before the change must be restored with
+          // an explicit null: `undefined` is dropped from the JSON payload and
+          // skipped by update(), so the undo would leave the new value behind.
           undo = {
             action: "U",
             modelId,
             modelName,
             original: payload,
-            payload: original,
+            payload: replaceUndefinedWithNull(original),
           };
         }
         break;

@@ -1,15 +1,45 @@
 {
   "name": "@stratasync/next",
   "version": "2.0.0",
+  "description": "@stratasync/next: Next.js App Router integration for Strata Sync, an open-source implementation of Linear's sync engine. Server-side bootstrap prefetch and a client provider.",
+  "keywords": [
+    "app-router",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "next",
+    "nextjs",
+    "offline-first",
+    "react",
+    "realtime",
+    "server-components",
+    "ssr",
+    "sync",
+    "sync-engine",
+    "typescript"
+  ],
+  "homepage": "https://blode.co/stratasync/docs/packages/next",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/next"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/client.js",
   "types": "./dist/client.d.ts",
   "exports": {
@@ -20,15 +50,18 @@
     },
     "./client": {
       "types": "./dist/client.d.ts",
-      "import": "./dist/client.js"
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
     },
     "./server": {
       "types": "./dist/server.d.ts",
-      "import": "./dist/server.js"
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -53,5 +86,13 @@
   "peerDependencies": {
     "next": "^14.0.0 || ^15.0.0 || ^16.0.0",
     "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

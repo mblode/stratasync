@@ -63,6 +63,9 @@ const isBootstrapRequiredError = (
  */
 const COALESCED_CATCH_UP_ACTION_LIMIT = 10_000;
 
+/** Delay before resubscribing after the live delta stream fails. */
+const RESUBSCRIBE_DELAY_MS = 5000;
+
 const wait = (ms: number): Promise<void> =>
   // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
   new Promise((resolve) => {
@@ -115,11 +118,40 @@ export class DeltaPipeline {
   private readonly ctx: SyncContext;
   private readonly deps: DeltaPipelineDeps;
   /** Coverage keys awaiting a fetch once the state lock is released. */
-  private readonly pendingCoverageLoads: CoverageKey[] = [];
+  private pendingCoverageLoads: CoverageKey[] = [];
+  /** Pending resubscribe after a stream failure; cleared on reset. */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: SyncContext, deps: DeltaPipelineDeps) {
     this.ctx = ctx;
     this.deps = deps;
+  }
+
+  /**
+   * Drops per-run state: a scheduled resubscribe (which would otherwise fire
+   * into a later run and open a second, leaked subscription) and coverage
+   * keys collected for a packet that no longer belongs to the active run.
+   */
+  reset(): void {
+    this.clearReconnectTimer();
+    this.pendingCoverageLoads = [];
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleResubscribe(runToken: number): void {
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.ctx.isRunActive(runToken) && !this.ctx.getDeltaSubscription()) {
+        this.startDeltaSubscription();
+      }
+    }, RESUBSCRIBE_DELAY_MS);
   }
 
   private getActiveOutboxTransactions(): Promise<Transaction[]> {
@@ -142,9 +174,12 @@ export class DeltaPipeline {
 
     this.ctx.setDeltaSubscription(subscription[Symbol.asyncIterator]());
 
-    // Process deltas in background
-    this.processDeltaStream().catch(() => {
-      /* noop */
+    // Process deltas in background. The loop handles its own stream errors;
+    // anything escaping here came from the error path itself, so surface it.
+    this.processDeltaStream().catch((error: unknown) => {
+      if (this.ctx.isRunning()) {
+        this.ctx.recordError(error);
+      }
     });
   }
 
@@ -161,19 +196,6 @@ export class DeltaPipeline {
     this.startDeltaSubscription(afterSyncId);
   }
 
-  async stopSubscription(): Promise<void> {
-    const subscription = this.ctx.getDeltaSubscription();
-    if (!subscription) {
-      return;
-    }
-    try {
-      await subscription.return?.();
-    } catch {
-      // Best-effort close while resetting.
-    }
-    this.ctx.setDeltaSubscription(null);
-  }
-
   /**
    * Processes the delta stream.
    */
@@ -182,12 +204,10 @@ export class DeltaPipeline {
     if (!subscription) {
       return;
     }
+    const runToken = this.ctx.getRunToken();
 
     try {
-      while (this.ctx.isRunning()) {
-        if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
-          break;
-        }
+      while (this.ctx.isRunActive(runToken)) {
         await this.ctx.deltaReplayGate().whenOpen();
 
         if (this.ctx.getDeltaSubscription() !== subscription) {
@@ -215,17 +235,12 @@ export class DeltaPipeline {
         await this.enqueueDeltaPacket(value);
       }
     } catch (error) {
-      if (this.ctx.isRunning()) {
+      if (this.ctx.isRunActive(runToken)) {
         if (await this.handleBootstrapRequired(error, subscription)) {
           return;
         }
         this.ctx.recordError(error);
-        // Try to reconnect
-        setTimeout(() => {
-          if (this.ctx.isRunning() && !this.ctx.getDeltaSubscription()) {
-            this.startDeltaSubscription();
-          }
-        }, 5000);
+        this.scheduleResubscribe(runToken);
       }
     } finally {
       if (this.ctx.getDeltaSubscription() === subscription) {
@@ -431,9 +446,6 @@ export class DeltaPipeline {
       }
     }
 
-    if (options.suppressFetchErrors) {
-      return null;
-    }
     return null;
   }
 
@@ -839,7 +851,7 @@ export class DeltaPipeline {
     const effect = resolveConflictEffect(conflict);
 
     if (effect.kind === "drop-local") {
-      await this.ctx.storage.removeFromOutbox(tx.clientTxId);
+      await this.discardPendingTransaction(tx.clientTxId);
       // Defer identity map rollback until the batch so it runs in the same
       // runInAction as the server merge.  Firing it here would delete the
       // item from the identity map and emit modelChange(delete) BEFORE the
@@ -862,6 +874,19 @@ export class DeltaPipeline {
       resolution,
       type: "rebaseConflict",
     });
+  }
+
+  /**
+   * Removes a pending transaction the server side-lined. Goes through the
+   * outbox manager when one is attached so its in-memory echo-suppression set
+   * forgets the id too; otherwise straight to storage.
+   */
+  private discardPendingTransaction(clientTxId: string): Promise<void> {
+    const outboxManager = this.ctx.getOutboxManager();
+    if (outboxManager) {
+      return outboxManager.discardTransaction(clientTxId);
+    }
+    return this.ctx.storage.removeFromOutbox(clientTxId);
   }
 
   private async updatePendingOriginals(

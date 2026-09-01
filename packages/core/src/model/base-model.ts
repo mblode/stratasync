@@ -317,7 +317,10 @@ export class Model {
     if (value === undefined) {
       return value;
     }
-    return this.getPropertySerializer(propertyName)?.serialize(value) ?? value;
+    const serializer = this.getPropertySerializer(propertyName);
+    // A serializer may legitimately produce `null` (e.g. an empty value on the
+    // wire), so only the absence of a serializer falls back to the raw value.
+    return serializer ? serializer.serialize(value) : value;
   }
 
   private deserializePropertyValue(
@@ -327,8 +330,7 @@ export class Model {
     if (value === undefined) {
       return value;
     }
-    return (
-      this.getPropertySerializer(propertyName)?.deserialize(value) ?? value
-    );
+    const serializer = this.getPropertySerializer(propertyName);
+    return serializer ? serializer.deserialize(value) : value;
   }
 }

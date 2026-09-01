@@ -311,6 +311,10 @@ export class SyncOrchestrator {
     } catch (error) {
       if (this.isRunActive(activeRunToken)) {
         this.handleSyncError(error);
+        // A failed start must not leave the orchestrator flagged as running,
+        // or the next start() would return early without ever bootstrapping.
+        this.running = false;
+        this.runToken += 1;
       }
       throw error;
     }
@@ -410,17 +414,31 @@ export class SyncOrchestrator {
   }
 
   /**
-   * Stops the sync orchestrator
+   * Stops the sync orchestrator: cancels the run and closes storage.
    */
   async stop(): Promise<void> {
     await this.reset();
-    await this.storage.close();
+    await this.closeStorage();
   }
 
+  /**
+   * Closes the storage adapter. Split from `reset()` so the client can let an
+   * in-flight `start()` observe the cancelled run token before the store it
+   * may still be touching goes away.
+   */
+  closeStorage(): Promise<void> {
+    return this.storage.close();
+  }
+
+  /**
+   * Cancels the active run (subscription, catch-up, timers) and returns every
+   * runtime cursor to its initial state. Storage stays open.
+   */
   async reset(): Promise<void> {
     this.running = false;
     this.runToken += 1;
 
+    this.deltaPipeline.reset();
     if (this.deltaSubscription) {
       try {
         await this.deltaSubscription.return?.();
@@ -443,6 +461,7 @@ export class SyncOrchestrator {
     this.cursor.reset();
     this.groups = this.options.groups ?? [];
     this.stateMachine.clearError();
+    this.stateMachine.setCatchingUp(false);
 
     this.setConnectionState("disconnected");
     this.setState("disconnected");
@@ -543,12 +562,5 @@ export class SyncOrchestrator {
    */
   getRegistry(): ModelRegistry {
     return this.registry;
-  }
-
-  /**
-   * Gets the storage adapter
-   */
-  getStorage(): StorageAdapter {
-    return this.storage;
   }
 }

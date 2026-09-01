@@ -1,25 +1,56 @@
 {
   "name": "@stratasync/mobx",
   "version": "2.0.0",
+  "description": "@stratasync/mobx: MobX reactivity adapter for Strata Sync, an open-source implementation of Linear's sync engine.",
+  "keywords": [
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "mobx",
+    "observable",
+    "offline-first",
+    "reactivity",
+    "realtime",
+    "sync",
+    "sync-engine",
+    "typescript"
+  ],
+  "homepage": "https://blode.co/stratasync/docs/packages/mobx",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/mobx"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": [
+    "./dist/adapter.js"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -35,5 +66,8 @@
   },
   "peerDependencies": {
     "mobx": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

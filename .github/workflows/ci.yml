@@ -6,9 +6,19 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the floor in `engines`; 24 is what the main consumer (Done Bear) runs.
+        node: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -18,7 +28,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install
@@ -27,8 +37,10 @@ jobs:
       # Skipped on the Version Packages PR: that PR consumes the changeset and
       # applies the version bumps, so `changeset status` there always reports
       # "packages changed but no changesets found" and fails by construction.
+      # Runs once (Node 22) — the result does not depend on the Node version.
       - name: Changeset Status
         if: >-
+          matrix.node == 22 &&
           github.event_name == 'pull_request' &&
           github.head_ref != 'changeset-release/main'
         run: npx changeset status --since origin/main

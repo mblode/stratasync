@@ -107,3 +107,4 @@ export type {
   TransactionState,
 } from "./transaction/types.js";
 export { generateUUID, getOrCreateClientId } from "./utils/idempotency.js";
+export { replaceUndefinedWithNull } from "./utils/records.js";

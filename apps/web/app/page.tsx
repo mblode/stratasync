@@ -4,8 +4,11 @@ import { getSingletonHighlighter } from "shiki";
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
 import { LandingComparison } from "@/components/landing/landing-comparison";
+import { LandingFaq } from "@/components/landing/landing-faq";
 import { LandingGap } from "@/components/landing/landing-gap";
 import { LandingHow } from "@/components/landing/landing-how";
+import { LandingLineage } from "@/components/landing/landing-lineage";
+import { LandingProduction } from "@/components/landing/landing-production";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -115,8 +118,8 @@ const Home = async () => {
                   {siteConfig.answer}
                 </p>
                 <p className="mx-auto mt-3 max-w-xl text-balance text-center font-sans text-base text-white/65">
-                  Inspired by Linear&#8217;s sync architecture and built in the
-                  open.
+                  An open-source implementation of Linear&#8217;s sync engine,
+                  on your own Postgres.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -169,8 +172,14 @@ const Home = async () => {
           {/* HOW — mechanism */}
           <LandingHow />
 
+          {/* HOW — Linear lineage */}
+          <LandingLineage />
+
           {/* HOW — Comparison */}
           <LandingComparison />
+
+          {/* PROOF — production use */}
+          <LandingProduction />
 
           {/* WHAT — Interactive showcase */}
           <Showcase />
@@ -273,6 +282,9 @@ const Home = async () => {
               </div>
             </div>
           </section>
+
+          {/* WHAT — FAQ */}
+          <LandingFaq />
 
           {/* Final CTA */}
           <section className="py-16 md:py-32">

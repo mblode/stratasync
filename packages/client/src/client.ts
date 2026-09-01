@@ -47,9 +47,8 @@ const MUTATION_START_REQUIRED_ERROR =
  * Creates a sync client instance.
  *
  * Uses a closure to encapsulate mutable state (identity maps, outbox, history).
- * The `clientRef` / `getClientRef` pattern exists because the client object
- * literal needs to reference itself for history replay operations, but it
- * hasn't been assigned yet at definition time.
+ * Mutations route through the `MutationCoordinator`; the model store and
+ * history replay delegate to it lazily, so no self-reference is needed.
  */
 export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const resolvedOptions: SyncClientOptions = { ...options };
@@ -397,6 +396,52 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const runWithStateLock = <T>(operation: () => Promise<T>): Promise<T> =>
     orchestrator.runWithStateLock(operation);
 
+  /**
+   * Invalidates the current lifecycle so an in-flight `start()` abandons its
+   * run, then executes `teardown` after any teardown already in progress.
+   * `stop()` and `clearAll()` share this so they never interleave with each
+   * other or with the start they are cancelling.
+   */
+  const runLifecycleTeardown = async (
+    teardown: (pendingStart: Promise<void> | null) => Promise<void>
+  ): Promise<void> => {
+    const previousTeardown = stopPromise;
+    const pendingStart = startPromise;
+    lifecycleVersion += 1;
+    startPromise = null;
+    hasStarted = false;
+
+    const teardownPromise = (async () => {
+      await previousTeardown?.catch(() => {
+        /* the earlier teardown reported its own failure */
+      });
+      await teardown(pendingStart);
+    })();
+
+    stopPromise = teardownPromise;
+    try {
+      await teardownPromise;
+    } finally {
+      if (stopPromise === teardownPromise) {
+        stopPromise = null;
+      }
+    }
+  };
+
+  /**
+   * Cancels the orchestrator run and waits for an in-flight `start()` to
+   * observe the cancellation before the caller closes or clears storage, so a
+   * bootstrap that was mid-commit cannot write into a store being torn down.
+   */
+  const cancelActiveRun = async (
+    pendingStart: Promise<void> | null
+  ): Promise<void> => {
+    await orchestrator.reset();
+    await pendingStart?.catch(() => {
+      /* a cancelled start has nothing left to report */
+    });
+  };
+
   const runWithMutationOutbox = async <T>(
     operation: (activeOutboxManager: OutboxManager) => Promise<T>
   ): Promise<T> => {
@@ -539,17 +584,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     },
 
     async clearAll(): Promise<void> {
-      const pendingStart = startPromise;
-      lifecycleVersion += 1;
-      startPromise = null;
-      hasStarted = false;
-
-      const doClear = async () => {
+      const doClear = async (pendingStart: Promise<void> | null) => {
         await waitForInflightSends();
         await outboxManager?.clear();
         clearOutboxManager();
         clearYjsState();
-        await orchestrator.reset();
+        await cancelActiveRun(pendingStart);
         identityMaps.clearAll();
         await options.storage.close();
         await options.storage.open(getStorageOpenOptions());
@@ -561,18 +601,10 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         loader.clear();
         missingModels.clear();
         history.clear();
-        await pendingStart?.catch(() => {
-          /* noop */
-        });
         emitEvent({ pendingCount: 0, type: "outboxChange" });
       };
 
-      stopPromise = doClear();
-      try {
-        await stopPromise;
-      } finally {
-        stopPromise = null;
-      }
+      await runLifecycleTeardown(doClear);
     },
 
     get clientId(): string {
@@ -606,29 +638,8 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       return ensureModelInternal(modelName, id);
     },
 
-    async get<T>(modelName: string, id: string): Promise<T | null> {
-      // Try identity map first
-      const map = identityMaps.getMap<T & Record<string, unknown>>(modelName);
-      const cached = map.get(id);
-      if (cached) {
-        return cached as T;
-      }
-
-      // Fall back to storage
-      const stored = await options.storage.get<T>(modelName, id);
-      if (stored) {
-        // Cache in identity map
-        map.set(id, stored as T & Record<string, unknown>, {
-          serialized: true,
-        });
-        missingModels.delete(getModelKey(modelName, id));
-        return materializeModelResult(
-          modelName,
-          id,
-          stored as T & Record<string, unknown>
-        );
-      }
-      return null;
+    get<T>(modelName: string, id: string): Promise<T | null> {
+      return loader.getLocal<T>(modelName, id);
     },
 
     getAll<T>(modelName: string, queryOptions?: QueryOptions<T>): Promise<T[]> {
@@ -775,26 +786,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     },
 
     async stop(): Promise<void> {
-      const pendingStart = startPromise;
-      lifecycleVersion += 1;
-      startPromise = null;
-      hasStarted = false;
-
-      const doStop = async () => {
+      const doStop = async (pendingStart: Promise<void> | null) => {
         await waitForInflightSends();
         clearOutboxManager();
-        await orchestrator.stop();
-        await pendingStart?.catch(() => {
-          /* noop */
-        });
+        await cancelActiveRun(pendingStart);
+        await orchestrator.closeStorage();
       };
 
-      stopPromise = doStop();
-      try {
-        await stopPromise;
-      } finally {
-        stopPromise = null;
-      }
+      await runLifecycleTeardown(doStop);
     },
 
     async syncNow(): Promise<void> {
