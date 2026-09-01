@@ -1,5 +1,13 @@
 # @stratasync/react
 
+## 2.0.0
+
+### Patch Changes
+
+- Updated dependencies [b8ccaf8]
+  - @stratasync/client@2.0.0
+  - @stratasync/core@2.0.0
+
 ## 1.1.0
 
 ### Patch Changes
