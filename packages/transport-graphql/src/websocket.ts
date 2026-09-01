@@ -9,7 +9,13 @@ import type {
 import { maxSyncId } from "@stratasync/core";
 
 import { parseDeltaPacket } from "./protocol.js";
-import type { AuthProvider, RetryConfig } from "./types.js";
+import type {
+  AuthProvider,
+  GroupMembershipChange,
+  GroupMembershipListener,
+  RetryConfig,
+} from "./types.js";
+import { GROUP_MEMBERSHIP_CAPABILITY } from "./types.js";
 import {
   calculateBackoff,
   createTransportError,
@@ -47,6 +53,9 @@ export class WebSocketManager {
   >();
   private readonly subscriptions = new Set<SubscriptionState>();
   private readonly yjsMessageCallbacks = new Set<(message: unknown) => void>();
+  private readonly groupMembershipCallbacks = new Set<
+    (change: GroupMembershipChange) => void
+  >();
   private readonly pendingMessages: string[] = [];
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -280,6 +289,23 @@ export class WebSocketManager {
   /**
    * Registers a callback for Yjs/live-editing messages.
    */
+  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+  /**
+   * Subscribes to server-initiated group membership changes.
+   *
+   * `joined` means the group's rows must be batch-loaded: deltas are
+   * cursor-based, so the group's history sits before this client's cursor and
+   * will never arrive on the delta stream. `left` means its cached rows should
+   * be dropped — they will simply stop updating otherwise.
+   */
+  // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+  onGroupMembershipChange(callback: GroupMembershipListener): () => void {
+    this.groupMembershipCallbacks.add(callback);
+    return () => {
+      this.groupMembershipCallbacks.delete(callback);
+    };
+  }
+
   // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
   onYjsMessage(callback: (message: unknown) => void): () => void {
     this.yjsMessageCallbacks.add(callback);
@@ -566,6 +592,11 @@ export class WebSocketManager {
 
     const message = {
       afterSyncId,
+      // Opts this connection into server-initiated group membership frames.
+      // The server withholds them from clients that do not declare it, so
+      // older clients that would treat an unknown frame as a protocol error
+      // never receive one.
+      capabilities: [GROUP_MEMBERSHIP_CAPABILITY],
       groups: subscription.options.groups,
       token,
       type: "subscribe",
@@ -625,6 +656,12 @@ export class WebSocketManager {
       return;
     }
 
+    const membershipChange = WebSocketManager.parseGroupMembershipFrame(parsed);
+    if (membershipChange) {
+      this.emitGroupMembershipChange(membershipChange);
+      return;
+    }
+
     const packet = parseDeltaPacket(parsed);
     if (!packet) {
       return;
@@ -646,6 +683,37 @@ export class WebSocketManager {
         subscription.queue.push(packet);
       }
     }
+  }
+
+  private emitGroupMembershipChange(change: GroupMembershipChange): void {
+    for (const callback of this.groupMembershipCallbacks) {
+      // oxlint-disable-next-line prefer-await-to-callbacks -- event listener registration
+      callback(change);
+    }
+  }
+
+  private static parseGroupMembershipFrame(
+    message: unknown
+  ): GroupMembershipChange | null {
+    if (typeof message !== "object" || message === null) {
+      return null;
+    }
+
+    const record = message as Record<string, unknown>;
+    let kind: GroupMembershipChange["kind"];
+    if (record.type === "group_joined") {
+      kind = "joined";
+    } else if (record.type === "group_left") {
+      kind = "left";
+    } else {
+      return null;
+    }
+
+    if (typeof record.groupId !== "string") {
+      return null;
+    }
+
+    return { groupId: record.groupId, kind };
   }
 
   private emitYjsMessage(message: unknown): void {

@@ -84,7 +84,7 @@ Client                          Server (@stratasync/server)
 
 ### Key Concepts
 
-**Sync Groups**: Every model declares a `groupKey` (e.g., `"workspaceId"`) that determines which sync group it belongs to. Users can only see models in their groups. The special value `"__modelId__"` means the model's own ID is its group (used for User/Workspace models). `null` means globally visible.
+**Sync Groups**: Every model declares a `groupKey` (e.g., `"workspaceId"`) that determines which sync group it belongs to. Users can only see models in their groups. The special value `"__modelId__"` means the model's own ID is its group (used for User/Workspace models). `null` means globally visible. For a group that depends on the row rather than on one static column, use `resolveGroup` (see [Per-row group scoping](#per-row-group-scoping)).
 
 **Field Codecs**: Field types (`string`, `stringNull`, `number`, `date`, `dateNow`, `dateOnly`) control how payload values are coerced on insert/update and serialized for sync. `dateOnly` fields use day-aligned UTC epochs (multiples of 86400000ms). `date`/`dateNow` fields use millisecond epochs.
 
@@ -100,10 +100,71 @@ Each model needs both `bootstrap` (how to stream it) and `mutate` (how to proces
 interface SyncModelConfig {
   table: AnyPgTable; // Drizzle table reference
   groupKey: string | "__modelId__" | null; // Sync group field
+  resolveGroup?: (
+    ctx: ResolveGroupContext
+  ) => string | null | Promise<string | null>;
+  groupType?: string; // Type recorded on memberships this model creates
+  insertCreatesGroup?: boolean; // Let an insert open its own group
   bootstrap: BootstrapModelConfig;
   mutate: StandardMutateConfig | CompositeMutateConfig;
 }
 ```
+
+### Per-row group scoping
+
+`groupKey` names a single static column, so a row's audience cannot depend on
+the row. `resolveGroup` takes precedence when present and receives the action,
+the payload, the existing row (for non-inserts), and the caller's context:
+
+```typescript
+Project: {
+  groupKey: null,
+  groupType: "project",
+  insertCreatesGroup: true,
+  resolveGroup: ({ modelId }) => modelId, // a project is its own group
+  ...
+},
+
+Task: {
+  groupKey: null,
+  resolveGroup: async ({ context, payload, record }) =>
+    (payload.projectId ?? record?.projectId ?? context.userId) as string | null,
+  ...
+},
+```
+
+Returning `null` means ungrouped, exactly as `groupKey: null` does.
+
+`insertCreatesGroup` exists because group resolution runs _before_ the model
+mutation: a model whose group is its own id would otherwise be uninsertable,
+since the group does not exist yet and the creator is not a member. With the
+flag set, an INSERT whose resolved group is absent from `context.groups` writes
+the membership row **in the same transaction** and proceeds. Every other action
+is unchanged — you still cannot write to a group you do not belong to.
+
+> **Only set `insertCreatesGroup` on a model whose resolved group is unforgeable
+> by the caller** — in practice, the row's own id. On a model that resolves to
+> some _other_ row's group (a task resolving to its project, say) the flag would
+> hand a non-member membership of that group simply by inserting into it.
+
+### Group membership notifications
+
+Deltas are cursor-based, so a user newly added to a group has no prior actions
+for it and its history sits _before_ their cursor: sharing would deliver
+nothing. Leaving is worse — the rows stop updating and linger in the local
+cache. Two server-initiated frames close both gaps for live sessions:
+
+```typescript
+await server.notifyGroupJoined(userId, groupId); // client batch-loads the group
+await server.notifyGroupLeft(userId, groupId); // client drops its cached rows
+```
+
+Both emit the frame only; writing or revoking the membership row is the
+caller's job (`syncDao.addGroupMembership` / `syncDao.removeGroupMembership`, or
+whatever model handler does the sharing). A user with no socket open is a silent
+no-op, and a client that ignores the frames still converges — just on the next
+bootstrap rather than live, because bootstrap already filters on current
+membership.
 
 ### Standard Models
 

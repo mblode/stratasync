@@ -191,7 +191,12 @@ export const registerSyncWebsocket = (
         }
 
         const requestedAfterSyncId = SyncId.parse(msg.afterSyncId ?? "0");
-        session.beginReplay(user.userId, groups, requestedAfterSyncId);
+        session.beginReplay(
+          user.userId,
+          groups,
+          requestedAfterSyncId,
+          msg.capabilities ?? []
+        );
 
         const earliestSyncId = await syncDao.getEarliestSyncId();
         if (session.isClosed) {
@@ -208,6 +213,7 @@ export const registerSyncWebsocket = (
         }
 
         session.installDeltaSubscription();
+        session.installControlSubscription();
 
         try {
           await replaySyncActions(syncDao, socket, session);
