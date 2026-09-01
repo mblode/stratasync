@@ -208,6 +208,7 @@ export const registerSyncWebsocket = (
         }
 
         session.installDeltaSubscription();
+        session.installControlSubscription();
 
         try {
           await replaySyncActions(syncDao, socket, session);

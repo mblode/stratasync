@@ -15,12 +15,15 @@ import {
   serializeSyncActionOutput,
 } from "../core/sync-action.js";
 import type { SerializedSyncActionOutput, SyncActionOutput } from "../types.js";
+import type { ControlFrame } from "./control-frames.js";
+import { parseControlFrame } from "./control-frames.js";
 
 export { safeJsonStringify };
 
 type RedisClient = RedisClientType<RedisModules, RedisFunctions, RedisScripts>;
 
 const SYNC_DELTA_CHANNEL = "sync:deltas";
+const SYNC_CONTROL_CHANNEL = "sync:control";
 
 interface DeltaMessage {
   action: SerializedSyncActionOutput;
@@ -71,6 +74,11 @@ const formatError = (error: unknown) => {
 export interface DeltaPublisherLike {
   publish(action: SyncActionOutput, groups: string[]): Promise<void>;
   publishMany(actions: SyncActionOutput[], groups: string[]): Promise<void>;
+  /**
+   * Optional so pre-existing implementations of this interface keep
+   * type-checking. `createDeltaPublisher` always provides it.
+   */
+  publishControl?(frame: ControlFrame): Promise<void>;
 }
 
 export type DeltaSubscriberCallback = (
@@ -78,10 +86,17 @@ export type DeltaSubscriberCallback = (
   groups: string[]
 ) => void;
 
+export type ControlSubscriberCallback = (frame: ControlFrame) => void;
+
 export interface DeltaSubscriberLike {
   start(): Promise<void>;
   stop(): Promise<void>;
   onDelta(callback: DeltaSubscriberCallback): () => void;
+  /**
+   * Optional so pre-existing implementations of this interface keep
+   * type-checking. `DeltaBus` always provides it.
+   */
+  onControl?(callback: ControlSubscriberCallback): () => void;
 }
 
 /**
@@ -91,6 +106,7 @@ export interface DeltaSubscriberLike {
  */
 export class DeltaBus implements DeltaSubscriberLike {
   private readonly callbacks = new Set<DeltaSubscriberCallback>();
+  private readonly controlCallbacks = new Set<ControlSubscriberCallback>();
   private readonly logger: SyncLogger;
 
   constructor(logger: SyncLogger = noopLogger) {
@@ -132,6 +148,32 @@ export class DeltaBus implements DeltaSubscriberLike {
     this.callbacks.add(callback);
     return () => {
       this.callbacks.delete(callback);
+    };
+  }
+
+  /**
+   * Fans a control frame out to every subscriber. Isolated per callback and
+   * never throws, exactly like {@link DeltaBus.publish}.
+   */
+  publishControl(frame: ControlFrame): void {
+    for (const callback of this.controlCallbacks) {
+      try {
+        // oxlint-disable-next-line prefer-await-to-callbacks -- subscriber fan-out
+        callback(frame);
+      } catch (error) {
+        this.logger.warn(
+          { error: formatError(error) },
+          "Control subscriber callback threw"
+        );
+      }
+    }
+  }
+
+  // oxlint-disable-next-line prefer-await-to-callbacks -- subscription registration
+  onControl(callback: ControlSubscriberCallback): () => void {
+    this.controlCallbacks.add(callback);
+    return () => {
+      this.controlCallbacks.delete(callback);
     };
   }
 }
@@ -181,6 +223,36 @@ export class RedisDeltaTransport implements DeltaPublisherLike {
     }
   }
 
+  async publishControl(frame: ControlFrame): Promise<void> {
+    await this.redis.publish(
+      SYNC_CONTROL_CHANNEL,
+      safeJsonStringify({ ...frame, sourceId: this.sourceId })
+    );
+  }
+
+  private handleRedisControlMessage(message: string): void {
+    let frame: ControlFrame;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(message);
+      frame = parseControlFrame(parsed);
+    } catch (error) {
+      this.logger.warn(
+        { error: formatError(error) },
+        "Dropped malformed redis control message"
+      );
+      return;
+    }
+
+    // sourceId loopback suppression: drop messages this process published.
+    const { sourceId } = parsed as { sourceId?: unknown };
+    if (sourceId === this.sourceId) {
+      return;
+    }
+
+    this.bus.publishControl(frame);
+  }
+
   private handleRedisMessage(message: string): void {
     let delta: ReturnType<typeof parseDeltaMessage>;
     try {
@@ -218,6 +290,12 @@ export class RedisDeltaTransport implements DeltaPublisherLike {
         await this.subscriberRedis?.subscribe(SYNC_DELTA_CHANNEL, (message) => {
           this.handleRedisMessage(message);
         });
+        await this.subscriberRedis?.subscribe(
+          SYNC_CONTROL_CHANNEL,
+          (message) => {
+            this.handleRedisControlMessage(message);
+          }
+        );
         this.subscribed = true;
       } finally {
         this.subscribePromise = null;
@@ -267,6 +345,7 @@ export class RedisDeltaTransport implements DeltaPublisherLike {
         await this.subscribePromise;
       }
       await this.subscriberRedis.unsubscribe(SYNC_DELTA_CHANNEL);
+      await this.subscriberRedis.unsubscribe(SYNC_CONTROL_CHANNEL);
       await this.subscriberRedis.quit();
       this.subscriberRedis = null;
     }
@@ -318,6 +397,31 @@ class DeltaPublisher implements DeltaPublisherLike {
   ): Promise<void> {
     for (const action of actions) {
       await this.publish(action, groups);
+    }
+  }
+
+  /**
+   * Local-first, same contract as {@link DeltaPublisher.publish}: the bus
+   * always receives the frame, redis is best-effort, and this never throws.
+   * A frame for a user with no live session anywhere is simply dropped — the
+   * next bootstrap is already correct.
+   */
+  async publishControl(frame: ControlFrame): Promise<void> {
+    this.bus.publishControl(frame);
+
+    if (this.redis) {
+      try {
+        await this.redis.publishControl(frame);
+      } catch (error) {
+        this.logger.warn(
+          {
+            error: formatError(error),
+            event: "sync.control.publish_partial_failure",
+            frameType: frame.type,
+          },
+          "Control frame publish failed for one or more backends"
+        );
+      }
     }
   }
 }

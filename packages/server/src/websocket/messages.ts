@@ -95,3 +95,23 @@ export const buildSubscribedFrame = (
     groups,
     type: "subscribed",
   });
+
+/**
+ * Server-initiated group membership frames. `{groupId, type}` is wire-locked.
+ *
+ * A client that receives `group_joined` should batch-load that group (the
+ * group's history sits before its delta cursor, so a delta fetch will not
+ * deliver it); one that receives `group_left` should drop the cached rows for
+ * that group. Ignoring either still converges on the next bootstrap.
+ */
+export const buildGroupJoinedFrame = (groupId: string): string =>
+  JSON.stringify({
+    groupId,
+    type: "group_joined",
+  });
+
+export const buildGroupLeftFrame = (groupId: string): string =>
+  JSON.stringify({
+    groupId,
+    type: "group_left",
+  });

@@ -16,6 +16,8 @@ Generic server-side sync SDK for the stratasync protocol. Provides bootstrap str
 - The DAO accepts Drizzle table references (not hardcoded schema imports). Tables must have the expected column names (`id`, `model`, `modelId`, `action`, `data`, `groupId`, `clientId`, `clientTxId`, `createdAt` for syncActions; `id`, `userId`, `groupId`, `groupType`, `createdAt` for syncGroupMemberships).
 - Date handling: `dateOnly` fields use day-aligned UTC epochs (multiples of 86400000ms), `instant` fields use millisecond epochs. Mixing them corrupts sync data.
 - Field codecs: update payloads are filtered through `updateFields` in model config. Fields not in the set are silently dropped.
+- Group resolution: `resolveGroup` takes precedence over `groupKey` when present. `insertCreatesGroup` is the only way a write may target a group the caller does not yet hold, and only for `action === "I"` — the membership row is written inside the same transaction, so a failed insert rolls it back. Set it only on models whose resolved group is the row's own id; on a model resolving to another row's group it would grant membership to any inserter.
+- `notifyGroupJoined` / `notifyGroupLeft` emit control frames to one user's live sessions and nothing else — they do not write or revoke the membership row. They are a live-session optimisation; bootstrap filters on current membership, so a client that ignores them still converges.
 - Auth is pluggable via `SyncAuthConfig`. The package does NOT know about Supabase, API keys, or any specific auth provider.
 - Logger is injected via `SyncLogger` interface. There is no pino dependency; a noop logger is used when none is provided.
 - Redis is optional. The package falls back to in-memory delta bus for single-server / dev mode.

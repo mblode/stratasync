@@ -110,6 +110,28 @@ export const createSyncServer = async (
     );
   };
 
+  const notifyGroupJoined = async (
+    userId: string,
+    groupId: string
+  ): Promise<void> => {
+    await deltaPublisher.publishControl?.({
+      groupId,
+      type: "group_joined",
+      userId,
+    });
+  };
+
+  const notifyGroupLeft = async (
+    userId: string,
+    groupId: string
+  ): Promise<void> => {
+    await deltaPublisher.publishControl?.({
+      groupId,
+      type: "group_left",
+      userId,
+    });
+  };
+
   // Shutdown
   const shutdown = async (): Promise<void> => {
     if (redisTransport) {
@@ -125,6 +147,8 @@ export const createSyncServer = async (
     deltaService,
     deltaSubscriber: bus,
     mutateService,
+    notifyGroupJoined,
+    notifyGroupLeft,
     registerRoutes,
     shutdown,
     syncDao,

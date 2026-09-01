@@ -1,5 +1,6 @@
 import type { SyncServerConfig } from "../src/config.js";
 import { createSyncServer } from "../src/create-sync-server.js";
+import type { ControlFrame } from "../src/delta/control-frames.js";
 import type { SyncActionOutput } from "../src/types.js";
 
 const makeLogger = () => ({
@@ -9,14 +10,19 @@ const makeLogger = () => ({
   warn: vi.fn(),
 });
 
+// The transport subscribes per channel (deltas and control frames), so the
+// double keys its handlers by channel exactly as redis does.
+const DELTA_CHANNEL = "sync:deltas";
+const CONTROL_CHANNEL = "sync:control";
+
 const makeRedis = (publishImpl?: () => Promise<void>) => {
-  let channelHandler: ((message: string) => void) | null = null;
+  const channelHandlers = new Map<string, (message: string) => void>();
   const subscriberRedis = {
     connect: vi.fn().mockResolvedValue(true),
     on: vi.fn(),
     quit: vi.fn().mockResolvedValue(true),
-    subscribe: vi.fn((_channel: string, handler: (m: string) => void) => {
-      channelHandler = handler;
+    subscribe: vi.fn((channel: string, handler: (m: string) => void) => {
+      channelHandlers.set(channel, handler);
       return Promise.resolve();
     }),
     unsubscribe: vi.fn().mockResolvedValue(true),
@@ -26,7 +32,9 @@ const makeRedis = (publishImpl?: () => Promise<void>) => {
     publish: vi.fn(publishImpl ?? (() => Promise.resolve())),
   };
   return {
-    emit: (message: string) => channelHandler?.(message),
+    emit: (message: string) => channelHandlers.get(DELTA_CHANNEL)?.(message),
+    emitControl: (message: string) =>
+      channelHandlers.get(CONTROL_CHANNEL)?.(message),
     redis,
     subscriberRedis,
   };
@@ -73,10 +81,11 @@ describe(createSyncServer, () => {
 
     expect(redis.duplicate).toHaveBeenCalledOnce();
     expect(subscriberRedis.connect).toHaveBeenCalledOnce();
-    expect(subscriberRedis.subscribe).toHaveBeenCalledOnce();
+    // One subscribe per channel: deltas and control frames.
+    expect(subscriberRedis.subscribe).toHaveBeenCalledTimes(2);
 
     await server.shutdown();
-    expect(subscriberRedis.unsubscribe).toHaveBeenCalledOnce();
+    expect(subscriberRedis.unsubscribe).toHaveBeenCalledTimes(2);
     expect(subscriberRedis.quit).toHaveBeenCalledOnce();
   });
 
@@ -92,6 +101,68 @@ describe(createSyncServer, () => {
 
     expect(received).toHaveLength(1);
     expect(received[0]?.syncId).toBe("9");
+
+    await server.shutdown();
+  });
+
+  it("notifyGroupJoined reaches the local subscriber and redis", async () => {
+    const logger = makeLogger();
+    const { redis } = makeRedis();
+
+    const server = await createSyncServer(baseConfig(redis, logger));
+    const received: ControlFrame[] = [];
+    server.deltaSubscriber.onControl?.((frame) => received.push(frame));
+
+    await server.notifyGroupJoined("user-a", "proj-1");
+
+    expect(received).toEqual([
+      { groupId: "proj-1", type: "group_joined", userId: "user-a" },
+    ]);
+    expect(redis.publish).toHaveBeenCalledWith(
+      "sync:control",
+      expect.stringContaining("group_joined")
+    );
+
+    await server.shutdown();
+  });
+
+  it("notifyGroupLeft reaches the local subscriber", async () => {
+    const logger = makeLogger();
+    const { redis } = makeRedis();
+
+    const server = await createSyncServer(baseConfig(redis, logger));
+    const received: ControlFrame[] = [];
+    server.deltaSubscriber.onControl?.((frame) => received.push(frame));
+
+    await server.notifyGroupLeft("user-a", "proj-1");
+
+    expect(received).toEqual([
+      { groupId: "proj-1", type: "group_left", userId: "user-a" },
+    ]);
+
+    await server.shutdown();
+  });
+
+  it("relays inbound redis control frames into the local subscriber", async () => {
+    const logger = makeLogger();
+    const { emitControl, redis } = makeRedis();
+
+    const server = await createSyncServer(baseConfig(redis, logger));
+    const received: ControlFrame[] = [];
+    server.deltaSubscriber.onControl?.((frame) => received.push(frame));
+
+    emitControl(
+      JSON.stringify({
+        groupId: "proj-1",
+        sourceId: "another-process",
+        type: "group_joined",
+        userId: "user-a",
+      })
+    );
+
+    expect(received).toEqual([
+      { groupId: "proj-1", type: "group_joined", userId: "user-a" },
+    ]);
 
     await server.shutdown();
   });

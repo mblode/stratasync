@@ -31,6 +31,13 @@ export interface SyncActionInsert {
   clientId: string | null;
 }
 
+const UNIQUE_VIOLATION = "23505";
+
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { code?: unknown }).code === UNIQUE_VIOLATION;
+
 const ensureBigint = (value: bigint | string): bigint => {
   if (typeof value === "bigint") {
     return value;
@@ -229,6 +236,49 @@ export class SyncDao {
     return rows.map(
       (membership: Record<string, unknown>) => membership.groupId as string
     );
+  }
+
+  /**
+   * Grants a user membership of a group, ignoring an existing membership.
+   *
+   * Prefers `onConflictDoNothing`; a `SyncDb` implementation that omits it (a
+   * hand-written test double — real Drizzle always has it) falls back to a
+   * plain insert whose unique violation is swallowed, so the method is
+   * idempotent either way.
+   */
+  async addGroupMembership(
+    userId: string,
+    groupId: string,
+    groupType: string
+  ): Promise<void> {
+    const builder = this.db
+      .insert(this.tables.syncGroupMemberships)
+      .values({ groupId, groupType, userId });
+
+    if (typeof builder.onConflictDoNothing === "function") {
+      await builder.onConflictDoNothing();
+      return;
+    }
+
+    try {
+      await builder.returning();
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Revokes a user's membership of a group. A no-op when absent.
+   */
+  async removeGroupMembership(userId: string, groupId: string): Promise<void> {
+    const userIdCol = getColumn(this.tables.syncGroupMemberships, "userId");
+    const groupIdCol = getColumn(this.tables.syncGroupMemberships, "groupId");
+
+    await this.db
+      .delete(this.tables.syncGroupMemberships)
+      .where(and(eq(userIdCol, userId), eq(groupIdCol, groupId)));
   }
 
   /**
