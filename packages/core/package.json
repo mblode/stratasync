@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/core",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "@stratasync/core: model runtime, schema decorators, transactions and the sync protocol of Strata Sync, an open-source implementation of Linear's sync engine.",
   "keywords": [
     "decorators",
