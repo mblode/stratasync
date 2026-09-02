@@ -19,13 +19,12 @@ Import all public APIs from the package entry point:
 import {
   // Models
   Model,
-  Collection,
+  LazyCollection,
 
   // Decorators
   ClientModel,
   Property,
   Reference,
-  ManyToOne,
   OneToMany,
   BackReference,
 
@@ -38,17 +37,13 @@ import {
   createUpdateTransaction,
   createDeleteTransaction,
   createUndoTransaction,
-  serializeTransaction,
-  deserializeTransaction,
 
   // Sync
   applyDeltas,
-  createBatchedApplier,
   rebaseTransactions,
 
   // Utils
   generateUUID,
-  generateModelId,
   getOrCreateClientId,
 } from "@stratasync/core";
 ```

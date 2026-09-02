@@ -129,28 +129,6 @@ class Event extends Model {
 }
 ```
 
-## @EphemeralProperty
-
-Observable but **not persisted** to the server. Use for reactive local UI state.
-
-```ts
-@ClientModel("Task")
-class Task extends Model {
-  @Property()
-  title = "";
-
-  @EphemeralProperty()
-  isExpanded = false;
-
-  @EphemeralProperty()
-  localDraft = "";
-}
-```
-
-**Signature:** `EphemeralProperty(options?: PropertyOptions)`
-
-Same [common options](#common-options) as `@Property`. Participates in MobX observability but excluded from transactions and deltas.
-
 ## @Reference
 
 Creates a foreign-key reference to another model with a lazy-resolved accessor.
@@ -192,25 +170,6 @@ class Task extends Model {
 }
 ```
 
-## @ManyToOne
-
-Alias for `@Reference`. Accepts a model name string or factory function.
-
-```ts
-@ClientModel("Task")
-class Task extends Model {
-  @ManyToOne("Project", "tasks")
-  project!: Project;
-
-  @ManyToOne(() => User)
-  assignee!: User;
-}
-```
-
-**Signature:** `ManyToOne(modelNameOrFactory: string | (() => ModelConstructor), inverseProperty?: string, options?: ReferenceOptions)`
-
-Options are the same as [`@Reference`](#referenceoptions).
-
 ## @OneToMany
 
 Defines the parent side of a one-to-many relationship. Returns a `LazyCollection` of child models.
@@ -240,7 +199,7 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 
 ### Inverse side pairing
 
-`@ManyToOne` on the child creates the foreign key; `@OneToMany` on the parent creates the collection.
+`@Reference` on the child creates the foreign key; `@OneToMany` on the parent creates the collection.
 
 ```ts
 @ClientModel("Project")
@@ -257,9 +216,9 @@ class Task extends Model {
   @Property()
   title = "";
 
-  @ManyToOne("Project", "tasks")
+  @Reference(() => Project, "tasks")
   project!: Project;
-  // Creates projectId foreign key, which @OneToMany uses
+  // Creates the projectId foreign key, which @OneToMany reads back
 }
 ```
 
@@ -313,22 +272,17 @@ Supports [common options](#common-options) (`lazy`, `serializer`), plus:
 | --------- | -------- | ------- | ------------------------------------------------------- |
 | `through` | `string` | -       | Join/through model name for many-to-many relationships. |
 
-## @ReferenceCollection
-
-Alias for `@OneToMany`. Use whichever name reads better in your domain model. See [`@OneToMany`](#onetomany) for options and usage.
-
 ## Complete example
 
 Every decorator in a minimal project management domain:
 
 ```ts
 import {
-  Model,
   ClientModel,
-  Property,
-  EphemeralProperty,
-  ManyToOne,
+  Model,
   OneToMany,
+  Property,
+  Reference,
   ReferenceArray,
 } from "@stratasync/core";
 import type { LazyCollection } from "@stratasync/core";
@@ -350,13 +304,10 @@ class Task extends Model {
   @Property({ serializer: dateSerializer })
   dueDate: Date | null = null;
 
-  @ManyToOne("Project", "tasks")
+  @Reference(() => Project, "tasks")
   project!: Project;
 
   @ReferenceArray({ through: "TaskTag" })
   tags!: Tag[];
-
-  @EphemeralProperty()
-  isSelected = false;
 }
 ```

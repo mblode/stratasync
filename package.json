@@ -2,8 +2,27 @@
   "name": "stratasync",
   "version": "0.0.1",
   "private": true,
-  "description": "Local-first, server-sequenced sync engine for TypeScript, React, and Next.js",
-  "keywords": [],
+  "description": "Strata Sync: an open-source implementation of Linear's sync engine, for TypeScript, React and Next.js. Local-first, server-sequenced, offline-first.",
+  "keywords": [
+    "crdt",
+    "drizzle",
+    "fastify",
+    "graphql",
+    "indexeddb",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "mobx",
+    "nextjs",
+    "offline-first",
+    "react",
+    "realtime",
+    "sync",
+    "sync-engine",
+    "typescript",
+    "yjs"
+  ],
   "homepage": "https://github.com/mblode/stratasync#readme",
   "bugs": {
     "url": "https://github.com/mblode/stratasync/issues"
@@ -12,7 +31,7 @@
   "author": "Matthew Blode",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync"
+    "url": "git+https://github.com/mblode/stratasync.git"
   },
   "workspaces": [
     "apps/*",
@@ -25,8 +44,8 @@
     "dev": "turbo run dev",
     "typecheck": "turbo run check-types",
     "test": "turbo run test",
-    "lint": "oxfmt --check . && oxlint $(git ls-files '*.ts' '*.tsx' '*.js' '*.jsx')",
-    "lint:fix": "oxfmt --write . && oxlint --fix $(git ls-files '*.ts' '*.tsx' '*.js' '*.jsx')",
+    "lint": "oxfmt --check . && oxlint $(git ls-files --cached --others --exclude-standard '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs')",
+    "lint:fix": "oxfmt --write . && oxlint --fix $(git ls-files --cached --others --exclude-standard '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs')",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "check-types": "turbo run check-types",

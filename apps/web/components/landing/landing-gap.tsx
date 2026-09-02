@@ -129,7 +129,7 @@ export const LandingGap = () => {
             animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }}
             transition={{ duration: dur(500), ease: EASE_ENTER }}
           >
-            Most apps don&#8217;t just work
+            Most apps stop working when the network does
           </motion.h2>
 
           <motion.div

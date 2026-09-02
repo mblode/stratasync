@@ -1,5 +1,6 @@
 import type { SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
+import { isSyncCursorStale } from "../core/errors.js";
 import { toSyncActionOutput } from "../core/sync-action.js";
 import { serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
@@ -17,13 +18,16 @@ export class DeltaService {
     this.logger = logger;
   }
 
+  /**
+   * Whether `afterSyncId` has fallen behind the earliest retained action, in
+   * which case the caller must re-bootstrap. See {@link isSyncCursorStale}.
+   */
   async isCursorStale(afterSyncId: bigint): Promise<boolean> {
     if (afterSyncId <= 0n) {
       return false;
     }
 
-    const earliestSyncId = await this.dao.getEarliestSyncId();
-    return earliestSyncId > 0n && afterSyncId < earliestSyncId;
+    return isSyncCursorStale(afterSyncId, await this.dao.getEarliestSyncId());
   }
 
   async fetchDeltas(

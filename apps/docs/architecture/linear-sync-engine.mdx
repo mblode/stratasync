@@ -1,0 +1,86 @@
+---
+title: Linear's sync engine, open-sourced
+description: How Strata Sync implements Linear's sync engine architecture in TypeScript, mapped chapter by chapter onto the modules that implement it.
+---
+
+Strata Sync is an open-source implementation of the sync engine behind [Linear](https://linear.app). Linear's engineers described the architecture in talks and posts but never released the code; the [reverse-engineering notes](https://github.com/wzhudev/reverse-linear-sync-engine) wrote it down chapter by chapter, and this page maps each chapter onto the module here that implements it.
+
+Strata Sync is a clean-room implementation of that published architecture. It contains no Linear code, and Linear is not affiliated with or endorsing this project.
+
+## Why this architecture
+
+Most local-first engines reach for CRDTs, which converge without a coordinator but carry per-value metadata and get awkward once you need partial replication and per-row permissions. Linear went the other way: one server, one monotonic counter, and a total order every client replays.
+
+That trade buys three things this engine depends on. Ordering is decided in one place, so there is no merge function to reason about for records. Permissions fall out of the same mechanism as replication, because a client only ever receives the groups it subscribes to. And a client that has been offline for a week catches up by asking for everything after a single integer.
+
+Text is the exception, and Strata Sync uses Yjs CRDTs for it. Two people typing in one paragraph is exactly the case a server-ordered log handles badly.
+
+## The mapping
+
+### Models and metadata
+
+| Linear                                                                                                               | Strata Sync                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A `ModelRegistry` holding every model's properties, references and load strategy, populated by decorators at startup | `ModelRegistry` in `@stratasync/core`, populated by `@ClientModel`, `@Property`, `@Reference`, `@BackReference`, `@OneToMany` and `@ReferenceArray` at import time |
+| Load strategies deciding when a model hydrates                                                                       | `loadStrategy` on `@ClientModel`: `instant`, `lazy`, `partial`, `explicitlyRequested` or `local`                                                                   |
+| Properties split into an id and a resolved model (`assigneeId` plus `assignee`)                                      | `@Reference` stores the foreign key; `@OneToMany` and `@ReferenceArray` expose lazy collections that hydrate on access                                             |
+| A schema hash that triggers an IndexedDB migration                                                                   | `computeSchemaHash()`; a mismatch on startup forces a full re-bootstrap                                                                                            |
+
+Registration happens at import time, which is why a model file has to be imported for its models to exist. See [Models](/packages/core/models) and [Schema](/packages/core/schema).
+
+### The object pool
+
+Linear keeps one object per UUID in a `modelLookup` map, so every reference to an issue is the same instance and a change notifies every observer at once. Strata Sync calls this the identity map. It is bounded by `identityMapMaxSize`, and eviction emits a `modelChange` so hooks re-render and re-hydrate on next access rather than reading a stale object.
+
+### Bootstrap and the global sync id
+
+| Linear                                                           | Strata Sync                                                                                                   |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `lastSyncId`, a monotonic integer that orders every change       | `SyncId`, a **string** on the wire so the counter can pass `Number.MAX_SAFE_INTEGER` without losing precision |
+| Full, partial and local bootstrapping                            | `bootstrapMode: "auto" \| "full" \| "local"`; `auto` picks full or local from what is already stored          |
+| Bootstrap streamed as newline-delimited JSON, ending in metadata | NDJSON from `/sync/bootstrap`, ending in `BootstrapMetadata` with `lastSyncId` and `subscribedSyncGroups`     |
+| Only `instant` models load during the initial bootstrap          | Same; everything else waits for first access                                                                  |
+
+### Lazy loading and partial indexes
+
+Linear identifies a subset of a model by an index key and value (`issueId-<uuid>`), records in a `_partial` store which of those it has already fetched, and coalesces requests through a batch loader so the same subset is never fetched twice.
+
+Strata Sync keeps this shape: `hasPartialIndex` and `setPartialIndex` on the storage adapter record coverage, `/sync/batch` serves the fetch through `createBatchLoadStream`, and in-flight requests for the same key are de-duplicated in the client's lazy loader. Coverage is only recorded once the fetch succeeds, so a cancelled load does not convince the next read that the data is already local.
+
+See [Load strategies](/guides/load-strategies).
+
+### The transaction queue
+
+| Linear                                                                                                                  | Strata Sync                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Five transaction types: create, update, delete, archive, unarchive                                                      | The same five, as actions `I`, `U`, `D`, `A`, `V`                                                                    |
+| In-memory model updates immediately; the transaction exists for sync and undo, not for local state                      | Optimistic updates land in the identity map first; the outbox entry is what reaches the server                       |
+| Queue states from created through executing to "completed but unsynced", waiting for the delta that carries its sync id | `queued → sent → awaitingSync → completed`. A mutate result with no sync id completes immediately instead of parking |
+| Transactions persisted so a restart replays them                                                                        | A durable outbox (`getOutbox`, `addToOutbox`) surviving reload and full re-bootstrap                                 |
+| Idempotency is a caveat                                                                                                 | `clientId + clientTxId` is the idempotency key; the server deduplicates, so a retry after a crash cannot apply twice |
+
+One deliberate difference: in Linear the client never writes model tables from its own mutations, and local tables only advance when the delta arrives. Strata Sync writes optimistic state to the identity map but not to storage, so a reload before confirmation replays the outbox rather than reading an unconfirmed row.
+
+### Delta packets
+
+Sync actions arrive as `I`, `U`, `D`, `A`, `V`, plus `C` for coverage and `G` for a group change. Applying a packet means, in order: handle group changes, write the rows, cancel any in-flight creation transaction whose model just arrived, rebase what is left of the outbox, and only then advance `lastSyncId`.
+
+Rebase is field-level by default (`fieldLevelConflicts`), so two clients editing different fields of one row do not conflict. `rebaseStrategy` picks what happens when they do edit the same field: `server-wins` (the default) rolls the local change back, `client-wins` and `merge` update the baseline instead.
+
+See [Conflict resolution](/guides/conflict-resolution).
+
+### Sync groups
+
+Groups are the permission boundary. A client receives deltas only for the groups it subscribes to, and `auth.resolveGroups` on the server decides what those are per request.
+
+Membership changes ship as durable `"G"` sync actions rather than control frames, so a user who is offline when they are added to a team still learns about it on their next catch-up. A group action holds the cursor and forces a full re-bootstrap, which the server filters on current membership, so it converges whether a group was added (its history sits before the cursor and would never arrive as deltas) or removed (its rows would otherwise stay cached). The re-bootstrap is latched in local metadata until one completes, so a client stopped mid-way still owes it on the next start.
+
+### Undo and redo
+
+Every mutation records its inverse. `client.undo()` sends that inverse as an ordinary transaction, so it syncs and other clients see a normal update, delete or insert. `runAsUndoGroup()` collapses several mutations into one undoable step, and a server rejection drops the entry from both stacks rather than leaving an undo that would replay a write the server refused.
+
+## What Strata Sync adds
+
+- **Collaborative text.** Yjs CRDT documents and presence in `@stratasync/y-doc`, with `useYjsDocument` and `useYjsPresence`. See [Collaborative editing](/guides/collaborative-editing).
+- **Swappable adapters.** Storage, transport and reactivity are separate packages behind one interface each, so the core runs in Node with no browser or network.
+- **A server you own.** `@stratasync/server` registers the bootstrap, batch, delta, mutate and WebSocket routes on your own Fastify app and stores the log in your own Postgres through Drizzle. Redis is optional, for fanning deltas across processes.

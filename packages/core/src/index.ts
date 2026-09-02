@@ -1,4 +1,6 @@
 export { Model } from "./model/base-model.js";
+export { LazyCollection } from "./model/collection.js";
+export type { Hydrated, LazyReference } from "./model/hydration.js";
 export {
   makeObservableProperty,
   makeReferenceModelProperty,
@@ -38,6 +40,7 @@ export {
 } from "./schema/codec.js";
 export { computeSchemaHash } from "./schema/hash.js";
 export { ModelRegistry } from "./schema/registry.js";
+export type { PropertySerializer } from "./schema/types.js";
 export type {
   ModelMetadata,
   ModelRegistrySnapshot,
@@ -107,3 +110,4 @@ export type {
   TransactionState,
 } from "./transaction/types.js";
 export { generateUUID, getOrCreateClientId } from "./utils/idempotency.js";
+export { replaceUndefinedWithNull } from "./utils/records.js";

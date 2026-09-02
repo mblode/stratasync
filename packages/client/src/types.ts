@@ -221,6 +221,14 @@ export interface StorageMeta {
   subscribedSyncGroups?: string[];
   clientId?: string;
   bootstrapComplete?: boolean;
+  /**
+   * Set when a sync-group membership change ("G"/"S" action) has been seen
+   * but the full re-bootstrap it requires has not yet succeeded. While set,
+   * delta packets are held rather than applied so the cursor cannot move past
+   * the action, and the next start forces a bootstrap. Cleared only by a
+   * completed full bootstrap.
+   */
+  groupChangePending?: boolean;
   lastSyncAt?: number;
   databaseVersion?: number;
   updatedAt?: number;
@@ -240,7 +248,19 @@ export interface TransportAdapter {
     options: BootstrapOptions
   ): AsyncGenerator<ModelRow, BootstrapMetadata, unknown>;
   batchLoad(options: BatchLoadOptions): AsyncIterable<ModelRow>;
+  /**
+   * Sends a batch of transactions. Each transaction's `clientTxId` is the
+   * idempotency key: the client may resend a batch after a transport failure,
+   * so the server must treat a repeated `clientTxId` as already applied.
+   */
   mutate(batch: TransactionBatch): Promise<MutateResult>;
+  /**
+   * Opens the live delta stream. The stream must deliver every action after
+   * `afterSyncId` for the subscribed groups, in sync-id order, before live
+   * actions: the client relies on this replay (not on `fetchDeltas`) to close
+   * the gap between its cursor and the present. `fetchDeltas` catch-up is a
+   * best-effort accelerator and may fail without losing data.
+   */
   subscribe(options: SubscribeOptions): DeltaSubscription;
   fetchDeltas(
     after: SyncId,

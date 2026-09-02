@@ -1,25 +1,57 @@
 {
   "name": "@stratasync/client",
   "version": "2.0.0",
+  "description": "@stratasync/client: the sync client of Strata Sync, an open-source implementation of Linear's sync engine. Identity maps, outbox, delta reconciliation, rebase, undo/redo and queries.",
+  "keywords": [
+    "identity-map",
+    "indexeddb",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "offline-first",
+    "optimistic-updates",
+    "outbox",
+    "realtime",
+    "sync",
+    "sync-engine",
+    "typescript",
+    "undo-redo",
+    "yjs"
+  ],
+  "homepage": "https://blode.co/stratasync/docs/packages/client",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/client"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -32,5 +64,16 @@
   },
   "devDependencies": {
     "@stratasync/y-doc": "*"
+  },
+  "peerDependencies": {
+    "@stratasync/y-doc": "*"
+  },
+  "peerDependenciesMeta": {
+    "@stratasync/y-doc": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

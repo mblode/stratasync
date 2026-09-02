@@ -1,34 +1,34 @@
 ---
 title: Client utilities
-description: Client-side Next.js provider, bootstrap decoding, and re-exported React hooks.
+description: The Next.js App Router provider, and which entry point each export comes from.
 ---
 
-`NextSyncProvider`, bootstrap decoding utilities, and re-exported React hooks with `"use client"`.
+The package has two entry points. The default entry is client-side and carries
+the provider; the bootstrap helpers live on `/server`.
 
 ```ts
+// Client entry: the provider and its props type.
+import { NextSyncProvider } from "@stratasync/next";
+
+// Server entry: prefetching, serializing and seeding a bootstrap snapshot.
 import {
-  NextSyncProvider,
   decodeBootstrapSnapshot,
   deserializeBootstrapSnapshot,
+  encodeBootstrapSnapshot,
   isBootstrapSnapshotStale,
+  prefetchBootstrap,
   seedStorageFromBootstrap,
-  isPrefetchStale,
-  // All @stratasync/react hooks:
-  useModel,
-  useModelSuspense,
-  useQuery,
-  useQueryAll,
-  useQueryCount,
-  useConnectionState,
-  useIsOffline,
-  usePendingCount,
-  useSync,
-  useSyncClient,
-  useSyncClientInstance,
-  useSyncReady,
-  useSyncState,
-} from "@stratasync/next";
+  serializeBootstrapSnapshot,
+} from "@stratasync/next/server";
+
+// Hooks come from the React package, not this one.
+import { useModel, useQuery, useSyncClient } from "@stratasync/react";
 ```
+
+<Note>
+  `@stratasync/next` does not re-export the React hooks. Import them from
+  `@stratasync/react`, which this package depends on.
+</Note>
 
 ## NextSyncProvider
 
@@ -110,7 +110,7 @@ Decode snapshots serialized on the server. See [Server utilities](/packages/next
 Decodes a JSON-encoded bootstrap snapshot string.
 
 ```ts
-import { decodeBootstrapSnapshot } from "@stratasync/next";
+import { decodeBootstrapSnapshot } from "@stratasync/next/server";
 
 const snapshot = await decodeBootstrapSnapshot(encodedString);
 ```
@@ -122,7 +122,7 @@ const snapshot = await decodeBootstrapSnapshot(encodedString);
 Deserializes a `BootstrapSnapshotPayload` object. Handles both JSON and gzip-base64 encodings.
 
 ```ts
-import { deserializeBootstrapSnapshot } from "@stratasync/next";
+import { deserializeBootstrapSnapshot } from "@stratasync/next/server";
 
 const snapshot = await deserializeBootstrapSnapshot(payload);
 ```
@@ -134,7 +134,7 @@ const snapshot = await deserializeBootstrapSnapshot(payload);
 Checks if a bootstrap snapshot is too old to use. Default `maxAge` is 30,000ms (30 seconds).
 
 ```ts
-import { isBootstrapSnapshotStale } from "@stratasync/next";
+import { isBootstrapSnapshotStale } from "@stratasync/next/server";
 
 const isStale = isBootstrapSnapshotStale(snapshot, 30_000);
 ```
@@ -146,7 +146,7 @@ const isStale = isBootstrapSnapshotStale(snapshot, 30_000);
 Pre-populates IndexedDB from a bootstrap snapshot so the client can skip network bootstrap.
 
 ```ts
-import { seedStorageFromBootstrap } from "@stratasync/next";
+import { seedStorageFromBootstrap } from "@stratasync/next/server";
 import { createIndexedDbStorage } from "@stratasync/storage-idb";
 
 const result = await seedStorageFromBootstrap({
@@ -187,32 +187,13 @@ if (result.applied) {
 | `rowCount` | `number`                         | Number of rows seeded.        |
 | `reason`   | `"schema_mismatch" \| undefined` | Reason if not applied.        |
 
-## Prefetch utilities
+## Hooks
 
-### isPrefetchStale
-
-Checks if prefetched data is too old to use.
-
-```ts
-import { isPrefetchStale } from "@stratasync/next";
-
-const isStale = isPrefetchStale(prefetchedData, 30_000);
-```
-
-**Signature:** `isPrefetchStale(prefetched: PrefetchedData, maxAge?: number): boolean`
-
-## Re-exported hooks
-
-Import hooks directly from `@stratasync/next` in client components:
+Hooks are not re-exported here. Import them from `@stratasync/react` in your
+client components:
 
 ```tsx
 "use client";
 
-import { useModel, useQuery, useConnectionState } from "@stratasync/next";
+import { useConnectionState, useModel, useQuery } from "@stratasync/react";
 ```
-
-> **Note:** `useModelState` is **not** re-exported from `@stratasync/next`. Import it directly from `@stratasync/react` if you need it:
->
-> ```tsx
-> import { useModelState } from "@stratasync/react";
-> ```

@@ -485,7 +485,7 @@ describe(WebSocketManager, () => {
     await manager.close();
   });
 
-  it("fails active subscriptions when reconnect retries are exhausted", async () => {
+  it("fails active subscriptions when the socket never opens", async () => {
     const manager = createManager();
     const subscription = manager.subscribe({ afterSyncId: "0" });
     const iterator = subscription[Symbol.asyncIterator]();
@@ -494,11 +494,19 @@ describe(WebSocketManager, () => {
 
     // Close the socket before it opens so "open" never resets reconnectAttempts,
     // exhausting the reconnect budget after maxRetries schedules.
+    //
+    // Wait maxDelay, not baseDelay: reconnect backoff is
+    // `min(baseDelay * 2 ** attempt, maxDelay)`, so with this config the
+    // schedules are 10, 20, 40 and 80ms. Waiting baseDelay + 5 covered only
+    // the first one, and from the second iteration on the loop raced the
+    // pending reconnect — the budget was not always spent by the assertion
+    // below, which then read "reconnecting" instead of "error". maxDelay + 5
+    // covers every schedule, which is what the sibling test above already did.
     for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt += 1) {
       lastSocket().simulateClose();
       // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
       await new Promise((resolve) => {
-        setTimeout(resolve, retryConfig.baseDelay + 5);
+        setTimeout(resolve, retryConfig.maxDelay + 5);
       });
       await flush();
     }
