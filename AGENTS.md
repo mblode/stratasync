@@ -34,7 +34,19 @@ apps/
   docs/               # MDX docs content (docs.json); deployed via Blode.md — no package.json
   docs-worker/        # Cloudflare Worker routing stratasync.dev → docs + landing
   web/                # Next.js demo app
+examples/
+  api/                # Runnable Fastify + Postgres sync server
+  web/                # Runnable client against it
+skills/
+  scaffold-stratasync/  # Agent skill: create a new app
+  stratasync/           # Agent skill: work in an app that already syncs
 ```
+
+`skills/<name>/SKILL.md` at the repo root is the layout `npx skills add
+mblode/stratasync` discovers, which is the command the README and the landing
+page advertise. Keep skills there rather than under `.claude/`, and keep the
+frontmatter to `name` and `description` only — other keys are ignored by the
+spec, and trigger phrases belong inside the description.
 
 ## Build Order
 

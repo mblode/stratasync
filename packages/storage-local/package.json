@@ -1,25 +1,54 @@
 {
   "name": "@stratasync/storage-local",
   "version": "2.0.0",
+  "description": "@stratasync/storage-local: localStorage storage adapter for Strata Sync, an open-source implementation of Linear's sync engine. For demos, tests and lightweight apps.",
+  "keywords": [
+    "browser",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "localstorage",
+    "offline-first",
+    "realtime",
+    "storage",
+    "sync",
+    "sync-engine",
+    "typescript"
+  ],
+  "homepage": "https://blode.co/stratasync/docs",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/storage-local"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -31,5 +60,7 @@
     "@stratasync/client": "*",
     "@stratasync/core": "*"
   },
-  "devDependencies": {}
+  "engines": {
+    "node": ">=22"
+  }
 }

@@ -49,33 +49,9 @@ interface Transaction {
 
 ## Creating transactions
 
-### createTransaction
-
-General-purpose factory; all other helpers delegate to it.
-
-```ts
-import { createTransaction } from "@stratasync/core";
-
-const tx = createTransaction({
-  clientId: "client-abc",
-  modelName: "Task",
-  modelId: "task-123",
-  action: "U",
-  payload: { title: "Updated title" },
-  original: { title: "Original title" },
-});
-```
-
-**CreateTransactionOptions:**
-
-| Field       | Type                      | Required | Description                 |
-| ----------- | ------------------------- | -------- | --------------------------- |
-| `clientId`  | `string`                  | Yes      | Client instance ID.         |
-| `modelName` | `string`                  | Yes      | Registered model name.      |
-| `modelId`   | `string`                  | Yes      | Model instance ID.          |
-| `action`    | `TransactionAction`       | Yes      | Mutation type.              |
-| `payload`   | `Record<string, unknown>` | Yes      | Changed data.               |
-| `original`  | `Record<string, unknown>` | No       | Original data for rollback. |
+Five factories, one per action. Each stamps a fresh `clientTxId`, which is
+half of the idempotency key the server deduplicates on, so always go through
+them rather than building a `Transaction` object by hand.
 
 ### createInsertTransaction
 
@@ -219,65 +195,13 @@ interface TransactionBatch {
 
 ## Serialization
 
-Serialize transactions to a compact format for storage or transport.
+Transactions are serialized by the transport, not by hand: the outbox stores
+them through the storage adapter and `@stratasync/transport-graphql` puts them
+on the wire. `@stratasync/core` exports no serialization helpers for them, so
+there is nothing to call here.
 
-### Single transactions
-
-```ts
-import {
-  serializeTransaction,
-  deserializeTransaction,
-  transactionToJson,
-  transactionFromJson,
-} from "@stratasync/core";
-
-// To compact object
-const serialized = serializeTransaction(tx);
-const restored = deserializeTransaction(serialized);
-
-// To/from JSON string
-const json = transactionToJson(tx);
-const parsed = transactionFromJson(json);
-```
-
-### Batches
-
-```ts
-import {
-  serializeBatch,
-  deserializeBatch,
-  batchToJson,
-  batchFromJson,
-} from "@stratasync/core";
-
-// To compact object
-const serialized = serializeBatch(batch);
-const restored = deserializeBatch(serialized);
-
-// To/from JSON string
-const json = batchToJson(batch);
-const parsed = batchFromJson(json);
-```
-
-### Serialized format
-
-Short keys minimize payload size.
-
-| Transaction field           | Serialized key |
-| --------------------------- | -------------- |
-| `clientTxId`                | `cid`          |
-| `clientId`                  | `cli`          |
-| `modelName`                 | `m`            |
-| `modelId`                   | `mid`          |
-| `action`                    | `a`            |
-| `payload`                   | `p`            |
-| `original`                  | `o`            |
-| `state`                     | `s`            |
-| `createdAt`                 | `t`            |
-| `retryCount`                | `r`            |
-| `lastError`                 | `e`            |
-| `syncIdNeededForCompletion` | `s2`           |
-| `batchIndex`                | `b`            |
+The wire shape a transaction takes in a mutate request is documented in
+[Sync protocol](/architecture/sync-protocol#wire-primitives).
 
 ## Server result types
 

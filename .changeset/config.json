@@ -20,5 +20,10 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["stratasync-docs-worker", "web"]
+  "ignore": [
+    "stratasync-docs-worker",
+    "web",
+    "@stratasync/example-api",
+    "@stratasync/example-web"
+  ]
 }

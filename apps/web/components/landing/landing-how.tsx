@@ -8,19 +8,19 @@ const EASE_ENTER = [0.22, 1, 0.36, 1] as const;
 
 const howPillars = [
   {
-    body: "Your data lives on the device, ready the moment you open the app.",
+    body: "Every query reads a local IndexedDB replica. No spinners, no round-trips, no loading states to design.",
     icon: BoltIcon,
-    title: "No more spinners",
+    title: "Reads from the device",
   },
   {
-    body: "Edits apply immediately and sync to the server when you reconnect.",
+    body: "Edits apply in memory at once and wait in a durable outbox until the server confirms them, however long that takes.",
     icon: OfflineIcon,
-    title: "Works offline",
+    title: "Writes queue offline",
   },
   {
-    body: "Real-time updates across every device and tab. No refresh banners, no stale data.",
+    body: "The server gives every change a syncId. Each tab, device and client replays the same ordered log and lands on the same state.",
     icon: ArrowMergeRightIcon,
-    title: "Always in sync",
+    title: "One ordered log",
   },
 ];
 
@@ -42,7 +42,7 @@ export const LandingHow = () => {
             animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }}
             transition={{ duration: dur(500), ease: EASE_ENTER }}
           >
-            Strata Sync changes that
+            Strata Sync keeps the app working
           </motion.p>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

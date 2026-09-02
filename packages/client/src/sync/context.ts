@@ -48,6 +48,9 @@ export interface SyncContext {
   /** The active subscribed sync groups (mutable). */
   getGroups(): string[];
   setGroups(groups: string[]): void;
+  /** Whether a group-change re-bootstrap is owed. See StorageMeta. */
+  isGroupChangePending(): boolean;
+  setGroupChangePending(pending: boolean): void;
 
   /** The orchestrator's observed connection state (from the state machine). */
   getConnectionState(): ConnectionState;

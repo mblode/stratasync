@@ -1,18 +1,16 @@
 ---
 name: scaffold-stratasync
-description: Scaffold a complete StrataSync app with Next.js client and Fastify server (models, sync, IndexedDB, WebSocket, PostgreSQL)
-triggers:
-  - scaffold stratasync
-  - create stratasync app
-  - new stratasync project
-  - stratasync starter
-  - setup stratasync
-  - scaffold sync app
+description: Scaffolds a complete Strata Sync app: a Next.js client and a Fastify + PostgreSQL sync server, with models, IndexedDB persistence, WebSocket deltas and the bootstrap/mutate routes wired up. Strata Sync is an open-source implementation of Linear's sync engine, so the vocabulary is Linear's (bootstrap, lastSyncId, delta packets, sync actions, sync groups, the transaction outbox). Use when asked to "scaffold stratasync", "create a stratasync app", "new stratasync project", "set up stratasync", "scaffold a sync app", "build an app like Linear", or "open source linear sync engine". For adding models, fields or sync groups to an app that already runs Strata Sync, use the stratasync skill instead.
 ---
 
-# Scaffold StrataSync App
+# Scaffold a Strata Sync App
 
-Scaffolds a complete local-first, server-sequenced sync app using StrataSync. Produces a Next.js client and a standalone Fastify API server with PostgreSQL, ready to run in minutes.
+Generates a runnable local-first app: a Next.js client and a standalone Fastify API with PostgreSQL, converging over a server-sequenced log.
+
+- **IS:** creating a new Strata Sync project from nothing, or adding the full client and server sync layer to an existing Next.js app.
+- **IS NOT:** changing an app that already syncs (use the `stratasync` skill), general Next.js scaffolding (use `scaffold-nextjs`), or deployment.
+
+Strata Sync is a clean-room implementation of the architecture Linear published; it contains no Linear code. The [reverse-engineering notes](https://github.com/wzhudev/reverse-linear-sync-engine) are the reference for the concepts named here.
 
 ## Reference files
 

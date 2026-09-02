@@ -1,4 +1,5 @@
 import { generateClientTxId } from "../utils/idempotency.js";
+import { replaceUndefinedWithNull } from "../utils/records.js";
 import type {
   ArchiveTransactionOptions,
   UnarchiveTransactionOptions,
@@ -142,6 +143,10 @@ export const createUnarchiveTransaction = (
 
 /**
  * Creates an undo transaction for a given transaction.
+ *
+ * Undoing an update restores the `original` snapshot; fields that had no value
+ * before the change are sent as an explicit `null` so the server clears them
+ * (an `undefined` member would be dropped from the JSON payload).
  */
 export const createUndoTransaction = (
   tx: Transaction,
@@ -175,7 +180,7 @@ export const createUndoTransaction = (
         clientId,
         tx.modelName,
         tx.modelId,
-        tx.original,
+        replaceUndefinedWithNull(tx.original),
         tx.payload
       );
     }

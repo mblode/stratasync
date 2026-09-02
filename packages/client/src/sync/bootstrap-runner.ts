@@ -27,7 +27,13 @@ export class BootstrapRunner {
       return;
     }
 
-    const needsBootstrap = await this.shouldBootstrap(meta);
+    // A group-change re-bootstrap still owed from a previous run (the client
+    // was stopped before it landed, or the attempt failed) is a bootstrap
+    // this start has to make. Hydrating instead would leave the apply gate
+    // closed against every packet, including the redelivered group action,
+    // with nothing scheduled to open it.
+    const needsBootstrap =
+      meta.groupChangePending === true || (await this.shouldBootstrap(meta));
     if (!needsBootstrap) {
       await this.hydrateIdentityMaps(runToken);
       return;
@@ -104,10 +110,15 @@ export class BootstrapRunner {
       return;
     }
 
+    // The bootstrap is what reconciles membership, so it is what clears the
+    // latch: it filtered on the server's current view of this user's groups
+    // and replaced the local snapshot with the result.
+    this.ctx.setGroupChangePending(false);
     await this.ctx.storage.setMeta({
       bootstrapComplete: true,
       databaseVersion,
       firstSyncId: this.ctx.cursor.firstSyncId,
+      groupChangePending: false,
       lastSyncAt: Date.now(),
       lastSyncId: this.ctx.cursor.lastSyncId,
       schemaHash: this.ctx.schemaHash,

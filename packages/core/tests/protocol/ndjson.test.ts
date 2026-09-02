@@ -89,4 +89,61 @@ describe(readNdjsonLines, () => {
       "Stream read timed out after 10ms"
     );
   });
+
+  it("cancels the underlying stream when the read times out", async () => {
+    let cancelled = false;
+    const stalled = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      pull() {
+        // never enqueues or closes
+      },
+    });
+
+    await expect(collect(stalled, 10)).rejects.toThrow("timed out");
+    expect(cancelled).toBeTruthy();
+    // The lock was released after cancelling, so the stream is re-lockable.
+    expect(stalled.locked).toBeFalsy();
+  });
+
+  it("cancels the underlying stream when the consumer stops early", async () => {
+    let cancelled = false;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      pull(controller) {
+        controller.enqueue(encoder.encode("a\nb\nc\n"));
+      },
+    });
+
+    const lines: string[] = [];
+    for await (const line of readNdjsonLines(stream)) {
+      lines.push(line);
+      break;
+    }
+
+    expect(lines).toEqual(["a"]);
+    expect(cancelled).toBeTruthy();
+    expect(stream.locked).toBeFalsy();
+  });
+
+  it("does not cancel a stream that was fully drained", async () => {
+    let cancelled = false;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      start(controller) {
+        controller.enqueue(encoder.encode("a\n"));
+        controller.close();
+      },
+    });
+
+    expect(await collect(stream)).toEqual(["a"]);
+    expect(cancelled).toBeFalsy();
+  });
 });

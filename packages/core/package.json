@@ -1,25 +1,56 @@
 {
   "name": "@stratasync/core",
   "version": "2.0.0",
+  "description": "@stratasync/core: model runtime, schema decorators, transactions and the sync protocol of Strata Sync, an open-source implementation of Linear's sync engine.",
+  "keywords": [
+    "decorators",
+    "delta-sync",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "model-registry",
+    "offline-first",
+    "optimistic-updates",
+    "realtime",
+    "sync",
+    "sync-engine",
+    "transactions",
+    "typescript"
+  ],
+  "homepage": "https://blode.co/stratasync/docs/packages/core",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/core"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -27,5 +58,7 @@
     "check-types": "tsc --noEmit",
     "test": "vitest run"
   },
-  "devDependencies": {}
+  "engines": {
+    "node": ">=22"
+  }
 }

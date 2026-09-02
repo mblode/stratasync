@@ -1,29 +1,64 @@
 {
   "name": "@stratasync/server",
   "version": "2.0.0",
+  "description": "@stratasync/server: the sync server of Strata Sync, an open-source implementation of Linear's sync engine. Bootstrap streaming, mutations, delta publishing and WebSocket sync on Fastify + Drizzle.",
+  "keywords": [
+    "drizzle",
+    "drizzle-orm",
+    "fastify",
+    "graphql",
+    "linear",
+    "linear sync engine",
+    "linear-sync-engine",
+    "local-first",
+    "offline-first",
+    "postgres",
+    "realtime",
+    "redis",
+    "server",
+    "sync",
+    "sync-engine",
+    "typescript",
+    "websocket"
+  ],
+  "homepage": "https://blode.co/stratasync/docs",
+  "bugs": {
+    "url": "https://github.com/mblode/stratasync/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Matthew Blode",
+    "url": "https://blode.co"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mblode/stratasync",
+    "url": "git+https://github.com/mblode/stratasync.git",
     "directory": "packages/server"
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.*"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./fastify": {
       "types": "./dist/fastify/index.d.ts",
-      "import": "./dist/fastify/index.js"
+      "import": "./dist/fastify/index.js",
+      "default": "./dist/fastify/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -32,12 +67,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "uuid": "^14.0.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "@types/ws": "^8.18.1",
     "fastify": "^5.12.1",
     "redis": "^5.11.0",
     "ws": "^8.21.3"
@@ -61,5 +96,8 @@
     "drizzle-orm": {
       "optional": false
     }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

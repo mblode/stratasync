@@ -1,12 +1,15 @@
 pre-commit:
   parallel: true
   jobs:
+    # Same file set `oxfmt --check .` covers in CI: JSON is included because
+    # oxfmt sorts package.json (experimentalSortPackageJson), so a manifest edit
+    # that skips the hook fails `npm run lint` on CI.
     - name: oxfmt
-      glob: "*.{js,jsx,ts,tsx,css,scss,md,mdx}"
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs,css,scss,md,mdx,json,jsonc}"
       run: npx oxfmt --write {staged_files}
       stage_fixed: true
     - name: oxlint
-      glob: "*.{js,jsx,ts,tsx}"
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs}"
       run: npx oxlint --fix {staged_files}
       stage_fixed: true
       fail_text: "Lint errors found that could not be auto-fixed."

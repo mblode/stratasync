@@ -7,14 +7,14 @@ Define foreign keys, inverse collections, and ordered lists with six relationshi
 
 ## Relationship decorators at a glance
 
-| Decorator              | Direction            | Cardinality  | Creates foreign key?      |
-| ---------------------- | -------------------- | ------------ | ------------------------- |
-| `@Reference`           | Model A -> Model B   | One-to-one   | Yes (on A)                |
-| `@ManyToOne`           | Model A -> Model B   | Many-to-one  | Yes (on A)                |
-| `@OneToMany`           | Model B -> Model A[] | One-to-many  | No (uses A's foreign key) |
-| `@BackReference`       | Computed inverse     | Varies       | No                        |
-| `@ReferenceArray`      | Model A -> Model B[] | Ordered list | Yes (array field on A)    |
-| `@ReferenceCollection` | Alias for @OneToMany | One-to-many  | No                        |
+| Decorator         | Direction            | Cardinality  | Creates foreign key?      |
+| ----------------- | -------------------- | ------------ | ------------------------- |
+| `@Reference`      | Model A -> Model B   | One-to-one   | Yes (on A)                |
+| `@Reference`      | Model A -> Model B   | Many-to-one  | Yes (on A)                |
+| `@OneToMany`      | Model B -> Model A[] | One-to-many  | No (uses A's foreign key) |
+| `@BackReference`  | Computed inverse     | Varies       | No                        |
+| `@ReferenceArray` | Model A -> Model B[] | Ordered list | Yes (array field on A)    |
+| `@OneToMany`      | Alias for @OneToMany | One-to-many  | No                        |
 
 ## @Reference: belongs to
 
@@ -62,12 +62,12 @@ declare creatorId: string | null;
 
 See [Decorators](/packages/core/decorators) for the full API reference.
 
-## @ManyToOne: explicit many-to-one
+## @Reference: explicit many-to-one
 
 Like `@Reference` but accepts a model name string.
 
 ```ts
-import { Model, ClientModel, Property, ManyToOne } from "@stratasync/core";
+import { Model, ClientModel, Property, Reference } from "@stratasync/core";
 
 @ClientModel("Comment", { loadStrategy: "lazy" })
 export class Comment extends Model {
@@ -78,14 +78,14 @@ export class Comment extends Model {
   declare body: string;
 
   // String-based model name (no factory function needed)
-  @ManyToOne("Task", "comments", { foreignKey: "taskId" })
+  @Reference("Task", "comments", { foreignKey: "taskId" })
   declare task: unknown;
 
   @Property()
   declare taskId: string;
 
   // Also supports factory functions
-  @ManyToOne(() => User, "comments", { foreignKey: "authorId" })
+  @Reference(() => User, "comments", { foreignKey: "authorId" })
   declare author: unknown;
 
   @Property()
@@ -93,7 +93,7 @@ export class Comment extends Model {
 }
 ```
 
-Use `@ManyToOne` for string-based references, `@Reference` for factory functions (helps with circular imports). Both produce identical metadata.
+Use `@Reference` for string-based references, `@Reference` for factory functions (helps with circular imports). Both produce identical metadata.
 
 See [Decorators](/packages/core/decorators) for the full API reference.
 
@@ -200,17 +200,12 @@ declare members: unknown[];
 
 See [Decorators](/packages/core/decorators) for the full API reference.
 
-## @ReferenceCollection: unordered set
+## @OneToMany: unordered set
 
 Alias for `@OneToMany`. Use when the collection is unordered.
 
 ```ts
-import {
-  Model,
-  ClientModel,
-  Property,
-  ReferenceCollection,
-} from "@stratasync/core";
+import { Model, ClientModel, Property, OneToMany } from "@stratasync/core";
 
 @ClientModel("Team", { loadStrategy: "instant" })
 export class Team extends Model {
@@ -221,7 +216,7 @@ export class Team extends Model {
   declare name: string;
 
   // Unordered set of team members
-  @ReferenceCollection({ foreignKey: "teamId" })
+  @OneToMany({ foreignKey: "teamId" })
   declare members: unknown[];
 }
 ```

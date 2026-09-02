@@ -65,201 +65,63 @@ const result = await client.query<Task>("Task", {
 });
 ```
 
-## Filter operators
+## Filtering
 
-Composable filter functions that return predicates for `where`.
-
-### eq: equality
-
-Matches items where a field equals a value.
+`where` is a plain predicate, so filtering is ordinary JavaScript rather than a
+DSL. There are no operator helpers to import.
 
 ```ts
-import { eq } from "@stratasync/client";
+// Equality
+const open = await client.query("Task", {
+  where: (t) => t.status === "open",
+});
 
-const result = await client.query<Task>("Task", {
-  where: eq("status", "todo"),
+// Comparison
+const overdue = await client.query("Task", {
+  where: (t) => t.dueAt !== null && t.dueAt < Date.now(),
+});
+
+// Set membership
+const mine = await client.query("Task", {
+  where: (t) => ["p_1", "p_2"].includes(t.projectId),
+});
+
+// Substring, case-insensitive
+const matching = await client.query("Task", {
+  where: (t) => t.title.toLowerCase().includes("bug"),
 });
 ```
 
-**Signature:** `eq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
-
-### neq: not equal
-
-Matches items where a field doesn't equal a value.
+Combine conditions with `&&`, `||` and `!`:
 
 ```ts
-import { neq } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: neq("status", "done"),
+const urgent = await client.query("Task", {
+  where: (t) =>
+    t.status === "open" && (t.priority === "high" || t.dueAt < Date.now()),
 });
 ```
 
-**Signature:** `neq<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
+Because the predicate is a closure, keep it stable across renders when passing
+it to `useQuery` — an inline arrow that closes over changing values is fine,
+but one that is rebuilt from unrelated state re-runs the query needlessly.
 
-### Comparison operators
+## Sorting
 
-Work with numeric fields. Return `false` for non-numeric values.
-
-#### gt: greater than
-
-```ts
-import { gt } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: gt("priority", 5),
-});
-```
-
-**Signature:** `gt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
-
-#### lt: less than
+`orderBy` is an `Array.prototype.sort` comparator. There are no sort helpers to
+import either.
 
 ```ts
-import { lt } from "@stratasync/client";
+// Single field, descending
+const recent = await client.query("Task", {
+  orderBy: (a, b) => b.createdAt - a.createdAt,
+});
 
-const result = await client.query<Task>("Task", {
-  where: lt("priority", 3),
+// Several fields: fall through to the next when the first ties
+const ordered = await client.query("Task", {
+  orderBy: (a, b) =>
+    a.priority.localeCompare(b.priority) || b.createdAt - a.createdAt,
 });
 ```
-
-**Signature:** `lt<T, K extends keyof T>(field: K, value: T[K]): (item: T) => boolean`
-
-### isIn: set membership
-
-Matches items where a field's value is in the given array. Uses a `Set` for O(1) lookups.
-
-```ts
-import { isIn } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: isIn("status", ["todo", "in_progress"]),
-});
-```
-
-**Signature:** `isIn<T, K extends keyof T>(field: K, values: T[K][]): (item: T) => boolean`
-
-### contains: substring match
-
-Checks if a string field includes a substring.
-
-```ts
-import { contains } from "@stratasync/client";
-
-// Case-insensitive (default)
-const result = await client.query<Task>("Task", {
-  where: contains("title", "bug"),
-});
-
-// Case-sensitive
-const result = await client.query<Task>("Task", {
-  where: contains("title", "Bug", true),
-});
-```
-
-**Signature:** `contains<T>(field: keyof T, substring: string, caseSensitive?: boolean): (item: T) => boolean`
-
-### matches: regex match
-
-Tests a string field against a regular expression.
-
-```ts
-import { matches } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: matches("title", /^URGENT:/i),
-});
-```
-
-**Signature:** `matches<T>(field: keyof T, pattern: RegExp): (item: T) => boolean`
-
-## Logical combinators
-
-Build compound predicates with `and`, `or`, and `not`.
-
-### and: combine with AND
-
-```ts
-import { and, eq, gt } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: and(eq("status", "todo"), gt("priority", 3)),
-});
-```
-
-**Signature:** `and<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
-
-### or: combine with OR
-
-```ts
-import { or, eq } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: or(eq("status", "todo"), eq("status", "in_progress")),
-});
-```
-
-**Signature:** `or<T>(...filters: Array<(item: T) => boolean>): (item: T) => boolean`
-
-### not: negate a filter
-
-```ts
-import { not, eq } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: not(eq("status", "done")),
-});
-```
-
-**Signature:** `not<T>(filter: (item: T) => boolean): (item: T) => boolean`
-
-## Composing complex queries
-
-Nest combinators freely:
-
-```ts
-import { and, or, eq, gt, contains, not } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  where: and(
-    eq("projectId", "proj-123"),
-    not(eq("status", "done")),
-    or(gt("priority", 5), contains("title", "urgent"))
-  ),
-  orderBy: (a, b) => b.priority - a.priority,
-  limit: 50,
-});
-```
-
-## Sort utilities
-
-### sortBy
-
-Comparator for a single field. Supports string, number, and Date. Sorts null/undefined last.
-
-```ts
-import { sortBy } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  orderBy: sortBy("priority", "desc"),
-});
-```
-
-**Signature:** `sortBy<T>(field: keyof T, direction?: "asc" | "desc"): (a: T, b: T) => number`
-
-### combineSorts
-
-Chains comparators. First defines the primary sort; subsequent ones break ties.
-
-```ts
-import { sortBy, combineSorts } from "@stratasync/client";
-
-const result = await client.query<Task>("Task", {
-  orderBy: combineSorts(sortBy("priority", "desc"), sortBy("title", "asc")),
-});
-```
-
-**Signature:** `combineSorts<T>(...sorts: Array<(a: T, b: T) => number>): (a: T, b: T) => number`
 
 ## Archived items
 

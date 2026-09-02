@@ -89,7 +89,12 @@ export class LazyLoader {
     });
   }
 
-  async ensureModel<T>(modelName: string, id: string): Promise<T | null> {
+  /**
+   * Resolves a model from the identity map, then from storage (caching it in
+   * the map). Never touches the network; returns null when the row is not held
+   * locally.
+   */
+  async getLocal<T>(modelName: string, id: string): Promise<T | null> {
     const map = this.deps.identityMaps.getMap<T & Record<string, unknown>>(
       modelName
     );
@@ -99,15 +104,23 @@ export class LazyLoader {
     }
 
     const stored = await this.deps.storage.get<T>(modelName, id);
-    if (stored) {
-      map.set(id, stored as T & Record<string, unknown>, { serialized: true });
-      const key = getModelKey(modelName, id);
-      this.deps.missingModels.delete(key);
-      return this.deps.materialize(
-        modelName,
-        id,
-        stored as T & Record<string, unknown>
-      );
+    if (!stored) {
+      return null;
+    }
+
+    map.set(id, stored as T & Record<string, unknown>, { serialized: true });
+    this.deps.missingModels.delete(getModelKey(modelName, id));
+    return this.deps.materialize(
+      modelName,
+      id,
+      stored as T & Record<string, unknown>
+    );
+  }
+
+  async ensureModel<T>(modelName: string, id: string): Promise<T | null> {
+    const local = await this.getLocal<T>(modelName, id);
+    if (local) {
+      return local;
     }
 
     const model = this.deps.orchestrator

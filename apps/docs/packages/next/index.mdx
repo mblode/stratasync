@@ -17,7 +17,6 @@ Server-side bootstrap prefetching for fast page loads, a client-side `NextSyncPr
 **Server-side (`@stratasync/next/server`):**
 
 - `prefetchBootstrap`: fetch initial data on the server
-- `prefetchModels`: selective model prefetching
 - `serializeBootstrapSnapshot` / `encodeBootstrapSnapshot`: serialize for transfer to client
 
 ## Installation
@@ -39,7 +38,10 @@ Separate entry points for server and client:
 
 ```ts
 // Client-side (default) -- includes "use client" directive
-import { NextSyncProvider, useModel, useQuery } from "@stratasync/next";
+import { NextSyncProvider } from "@stratasync/next";
+
+// Hooks live in the React package; this one does not re-export them
+import { useModel, useQuery } from "@stratasync/react";
 
 // Explicit client import
 import { NextSyncProvider } from "@stratasync/next/client";
@@ -86,7 +88,7 @@ Use hooks in client components:
 // app/tasks/page.tsx
 "use client";
 
-import { useQuery } from "@stratasync/next";
+import { useQuery } from "@stratasync/react";
 
 export default function TasksPage() {
   const { data: tasks, isLoading } = useQuery<Task>("Task");

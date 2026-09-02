@@ -60,7 +60,8 @@ export interface ApplyOptions {
 }
 
 /**
- * Applies a delta packet to the local data store
+ * The subset of the model registry the applier needs: whether a model name is
+ * known to the schema.
  */
 interface RegistryLike {
   hasModel(modelName: string): boolean;
@@ -187,6 +188,13 @@ const markSkipped = (result: ApplyResult, actionSyncId: SyncId): void => {
   result.lastSyncId = maxSyncId(result.lastSyncId, actionSyncId);
 };
 
+/**
+ * Applies a delta packet to the local data store.
+ *
+ * Actions from `options.clientId` and actions for models absent from the
+ * registry are counted as skipped but still advance `lastSyncId`, so the cursor
+ * never stalls on an action the client has no use for.
+ */
 export const applyDeltas = async (
   packet: DeltaPacket,
   target: DeltaTarget,

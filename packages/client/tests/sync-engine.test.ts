@@ -1112,6 +1112,60 @@ const waitForOutboxSize = async (
   }, "Timed out waiting for outbox size");
 };
 
+/**
+ * The server's snapshot after the user's team changed from team-1 to team-2.
+ * @yields the rows now in the user's membership
+ */
+// oxlint-disable-next-line func-style -- generators require function declaration
+async function* reconciledToTeam2(): AsyncGenerator<
+  ModelRow,
+  BootstrapMetadata,
+  unknown
+> {
+  await Promise.resolve();
+  yield {
+    data: { id: "task-9", teamId: "team-2", title: "Shared later" },
+    modelName: "Task",
+  };
+  return { lastSyncId: "70", subscribedSyncGroups: ["team-2"] };
+}
+
+/**
+ * The server's snapshot when the group change altered no rows.
+ * @yields the unchanged rows
+ */
+// oxlint-disable-next-line func-style -- generators require function declaration
+async function* reconciledUnchanged(): AsyncGenerator<
+  ModelRow,
+  BootstrapMetadata,
+  unknown
+> {
+  await Promise.resolve();
+  yield { data: { id: "team-1", name: "Core" }, modelName: "Team" };
+  return { lastSyncId: "70", subscribedSyncGroups: ["team-1"] };
+}
+
+const readGroupChangePending = async (
+  storage: InMemoryStorage
+): Promise<boolean | undefined> => {
+  const meta = await storage.getMeta();
+  return meta.groupChangePending;
+};
+
+/** A durable group-membership action carrying the user's current groups. */
+const groupActionPacket = (id: string): DeltaPacket => ({
+  actions: [
+    {
+      action: "G",
+      data: { subscribedSyncGroups: ["team-1"] },
+      id,
+      modelId: "sync-groups",
+      modelName: "SyncGroup",
+    },
+  ],
+  lastSyncId: id,
+});
+
 const waitForSubscribeCount = async (
   transport: { subscribeCalls: unknown[] },
   expectedCount: number
@@ -3410,25 +3464,36 @@ describe("reverse-done alignment", () => {
     }
   });
 
-  it("applies empty sync-group updates and clears the previous group scope", async () => {
+  it("a sync-group action forces a full re-bootstrap that drops rows outside the new membership", async () => {
     const storage = new InMemoryStorage();
-    const rows: ModelRow[] = [
-      {
-        data: { id: "task-1", teamId: "team-1", title: "Seed" },
-        modelName: "Task",
-      },
-      {
-        data: { id: "team-1", name: "Core" },
-        modelName: "Team",
-      },
-    ];
     const transport = new TestTransport({
-      fullMetadata: {
-        lastSyncId: "10",
-        subscribedSyncGroups: ["team-1"],
-      },
-      fullRows: rows,
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Seed" },
+          modelName: "Task",
+        },
+        { data: { id: "team-1", name: "Core" }, modelName: "Team" },
+      ],
     });
+
+    // The second full bootstrap is the server's view after the membership
+    // change: team-1 is gone, team-2 has arrived. Nothing else can carry a
+    // row *out* of the replica, which is why a group action re-bootstraps
+    // rather than diffing.
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return reconciledToTeam2();
+    }) as TestTransport["bootstrap"];
 
     const client = createSyncClient({
       reactivity: noopReactivityAdapter,
@@ -3444,7 +3509,7 @@ describe("reverse-done alignment", () => {
         actions: [
           {
             action: "S",
-            data: { subscribedSyncGroups: [] },
+            data: { subscribedSyncGroups: ["team-2"] },
             id: "60",
             modelId: "sync-groups",
             modelName: "SyncGroup",
@@ -3452,21 +3517,26 @@ describe("reverse-done alignment", () => {
         ],
         lastSyncId: "60",
       });
-      await waitForSubscribeCount(transport, 2);
-      await sleep(SYNC_SETTLE_DELAY_MS);
+      await waitForSync(client, "70");
 
-      const meta = (await storage.getMeta()) as {
-        firstSyncId?: string;
-        subscribedSyncGroups?: string[];
-      };
-      expect(meta.firstSyncId).toBe("60");
-      expect(meta.subscribedSyncGroups).toEqual([]);
-      expect(transport.subscribeCalls).toHaveLength(2);
-      expect(transport.subscribeCalls.at(-1)?.groups).toEqual([]);
+      expect(fullCalls).toBe(2);
+      expect(
+        transport.bootstrapCalls.filter((call) => call.type === "partial")
+      ).toHaveLength(0);
 
       const taskMap = client.getIdentityMap<Record<string, unknown>>("Task");
       expect(taskMap.get("task-1")).toBeUndefined();
       expect(await storage.get("Task", "task-1")).toBeNull();
+      expect(taskMap.get("task-9")).toMatchObject({ teamId: "team-2" });
+
+      const meta = await storage.getMeta();
+      expect(meta.groupChangePending).toBeFalsy();
+      expect(meta.subscribedSyncGroups).toEqual(["team-2"]);
+      expect(meta.lastSyncId).toBe("70");
+
+      const latestSubscribe = transport.subscribeCalls.at(-1);
+      expect(latestSubscribe?.groups).toEqual(["team-2"]);
+      expect(latestSubscribe?.afterSyncId).toBe("70");
     } finally {
       await client.stop();
     }
@@ -3590,47 +3660,67 @@ describe("reverse-done alignment", () => {
     }
   });
 
-  it("cancels partial sync-group bootstrap when stopped mid-stream", async () => {
-    const storage = new InMemoryStorage();
-    const rows: ModelRow[] = [
-      {
-        data: { id: "task-1", teamId: "team-1", title: "Seed" },
-        modelName: "Task",
-      },
-      {
-        data: { id: "team-1", name: "Core" },
-        modelName: "Team",
-      },
-    ];
+  /**
+   * A transport whose second full bootstrap blocks until released, so a test
+   * can observe the client while the group-change re-bootstrap is outstanding.
+   */
+  const createBlockingReconcileTransport = () => {
     const transport = new TestTransport({
-      fullMetadata: {
-        lastSyncId: "10",
-        subscribedSyncGroups: ["team-1"],
-      },
-      fullRows: rows,
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Seed" },
+          modelName: "Task",
+        },
+        { data: { id: "team-1", name: "Core" }, modelName: "Team" },
+      ],
     });
-    const resumePartial = createDeferred<undefined>();
-    const partialReady = createDeferred<undefined>();
+    const bootstrapStarted = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    let fullCalls = 0;
     const originalBootstrap = transport.bootstrap.bind(transport);
     transport.bootstrap = ((options: BootstrapOptions) => {
-      if (options.type !== "partial") {
+      if (options.type !== "full") {
         return originalBootstrap(options);
       }
-
+      fullCalls += 1;
+      if (fullCalls !== 2) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
       return (async function* generate() {
-        yield {
-          data: { id: "task-2", teamId: "team-2", title: "Team 2" },
-          modelName: "Task",
-        };
-        partialReady.resolve();
-        await resumePartial.promise;
-        yield {
-          data: { id: "task-3", teamId: "team-2", title: "Team 2 later" },
-          modelName: "Task",
-        };
+        bootstrapStarted.resolve();
+        await release.promise;
+        yield { data: { id: "team-1", name: "Core" }, modelName: "Team" };
+        return { lastSyncId: "70", subscribedSyncGroups: ["team-1"] };
       })();
     }) as TestTransport["bootstrap"];
 
+    return {
+      bootstrapStarted,
+      fullCalls: () => fullCalls,
+      release,
+      transport,
+    };
+  };
+
+  const groupChangePacket: DeltaPacket = {
+    actions: [
+      {
+        action: "G",
+        data: { subscribedSyncGroups: ["team-1"] },
+        id: "60",
+        modelId: "sync-groups",
+        modelName: "SyncGroup",
+      },
+    ],
+    lastSyncId: "60",
+  };
+
+  it("holds the cursor while a group-change re-bootstrap is outstanding", async () => {
+    const storage = new InMemoryStorage();
+    const { bootstrapStarted, release, transport } =
+      createBlockingReconcileTransport();
     const client = createSyncClient({
       reactivity: noopReactivityAdapter,
       schema,
@@ -3640,31 +3730,70 @@ describe("reverse-done alignment", () => {
 
     try {
       await client.start();
+      transport.emitDelta(groupChangePacket);
+      await bootstrapStarted.promise;
 
+      // A later packet must not advance the cursor past the group action: if
+      // the bootstrap then failed, recovery would resume from beyond it and
+      // the membership change would never be redelivered.
       transport.emitDelta({
         actions: [
           {
-            action: "S",
-            data: { subscribedSyncGroups: ["team-1", "team-2"] },
-            id: "60",
-            modelId: "sync-groups",
-            modelName: "SyncGroup",
+            action: "U",
+            data: { id: "task-1", title: "Applied too early" },
+            id: "61",
+            modelId: "task-1",
+            modelName: "Task",
           },
         ],
-        lastSyncId: "60",
+        lastSyncId: "61",
       });
+      await sleep(SYNC_SETTLE_DELAY_MS);
 
-      await partialReady.promise;
+      expect(client.lastSyncId).toBe("10");
+      expect(await storage.get("Task", "task-1")).toMatchObject({
+        title: "Seed",
+      });
+      expect(await readGroupChangePending(storage)).toBeTruthy();
+
+      release.resolve();
+      await waitForSync(client, "70");
+      expect(await readGroupChangePending(storage)).toBeFalsy();
+    } finally {
+      release.resolve();
+      await client.stop();
+    }
+  });
+
+  it("stopping during a group-change re-bootstrap leaves the reconcile owed, and the next start pays it", async () => {
+    const storage = new InMemoryStorage();
+    const { bootstrapStarted, fullCalls, release, transport } =
+      createBlockingReconcileTransport();
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      transport.emitDelta(groupChangePacket);
+      await bootstrapStarted.promise;
+
       const stopPromise = client.stop();
-      resumePartial.resolve();
+      release.resolve();
       await stopPromise;
 
-      expect(await storage.get("Task", "task-2")).toMatchObject({
-        id: "task-2",
-        teamId: "team-2",
-        title: "Team 2",
-      });
-      expect(await storage.get("Task", "task-3")).toBeNull();
+      // stop() deliberately leaves the persisted latch alone.
+      expect(await readGroupChangePending(storage)).toBeTruthy();
+      expect(fullCalls()).toBe(2);
+
+      // A start that merely hydrated would sit behind a closed apply gate
+      // forever, dropping every packet including the redelivered action.
+      await client.start();
+      expect(fullCalls()).toBe(3);
+      expect(await readGroupChangePending(storage)).toBeFalsy();
     } finally {
       await client.stop();
     }
@@ -3885,37 +4014,25 @@ describe("reverse-done alignment", () => {
     }
   });
 
-  it("sync-group deltas trigger partial bootstrap for new groups", async () => {
+  it("ignores a group action redelivered from before the re-bootstrap cursor", async () => {
     const storage = new InMemoryStorage();
-    const rows: ModelRow[] = [
-      {
-        data: { id: "task-1", teamId: "team-1", title: "Seed" },
-        modelName: "Task",
-      },
-      {
-        data: { id: "team-1", name: "Core" },
-        modelName: "Team",
-      },
-    ];
-    const partialRows = new Map<string, ModelRow[]>([
-      [
-        "team-2",
-        [
-          {
-            data: { id: "task-2", teamId: "team-2", title: "Team 2" },
-            modelName: "Task",
-          },
-        ],
-      ],
-    ]);
     const transport = new TestTransport({
-      fullMetadata: {
-        lastSyncId: "10",
-        subscribedSyncGroups: ["team-1"],
-      },
-      fullRows: rows,
-      partialRowsByGroup: partialRows,
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [{ data: { id: "team-1", name: "Core" }, modelName: "Team" }],
     });
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return reconciledUnchanged();
+    }) as TestTransport["bootstrap"];
 
     const client = createSyncClient({
       reactivity: noopReactivityAdapter,
@@ -3926,155 +4043,24 @@ describe("reverse-done alignment", () => {
 
     try {
       await client.start();
+      transport.emitDelta(groupActionPacket("60"));
+      await waitForSync(client, "70");
+      expect(fullCalls).toBe(2);
 
-      const delta: DeltaPacket = {
-        actions: [
-          {
-            action: "S",
-            data: { subscribedSyncGroups: ["team-1", "team-2"] },
-            id: "60",
-            modelId: "sync-groups",
-            modelName: "SyncGroup",
-          },
-        ],
-        lastSyncId: "60",
-      };
+      // The bootstrap moved the cursor to 70. A redelivery of the same action
+      // is older than that and must not cost another bootstrap ...
+      transport.emitDelta(groupActionPacket("60"));
+      await sleep(SYNC_SETTLE_DELAY_MS * 2);
+      expect(fullCalls).toBe(2);
 
-      const syncWaiter = waitForSync(client, "60");
-      transport.emitDelta(delta);
-      await syncWaiter;
-
-      const meta = (await storage.getMeta()) as {
-        firstSyncId?: string;
-        subscribedSyncGroups?: string[];
-      };
-      expect(meta.firstSyncId).toBe("60");
-      expect(meta.subscribedSyncGroups).toEqual(["team-1", "team-2"]);
-
-      const taskMap = client.getIdentityMap<Record<string, unknown>>("Task");
-      expect(taskMap.get("task-2")).toMatchObject({
-        id: "task-2",
-        teamId: "team-2",
-      });
-
-      const partialCall = transport.bootstrapCalls.find(
-        (call) => call.type === "partial"
+      // ... while a genuinely new change still does.
+      transport.emitDelta(groupActionPacket("80"));
+      await waitUntil(
+        () => fullCalls === 3,
+        "Timed out waiting for re-bootstrap"
       );
-      expect(partialCall?.syncGroups).toEqual(["team-2"]);
-      expect(transport.subscribeCalls.length).toBeGreaterThanOrEqual(2);
-      const latestSubscribe = transport.subscribeCalls.at(-1);
-      expect(latestSubscribe?.groups).toEqual(["team-1", "team-2"]);
-      expect(latestSubscribe?.afterSyncId).toBe("60");
     } finally {
       await client.stop();
-    }
-  });
-
-  it("sync-group partial bootstrap eagerly hydrates full-priority partial models only", async () => {
-    const fullPriorityStorage = new InMemoryStorage();
-    const fullPriorityTransport = new TestTransport({
-      fullMetadata: {
-        lastSyncId: "10",
-        subscribedSyncGroups: [],
-      },
-      fullRows: [],
-      partialRowsByGroup: new Map([
-        [
-          "team-2",
-          [
-            {
-              data: {
-                body: "Team 2 comment",
-                id: "comment-1",
-                taskId: "task-2",
-              },
-              modelName: "Comment",
-            },
-          ],
-        ],
-      ]),
-    });
-    const fullPriorityClient = createSyncClient({
-      reactivity: noopReactivityAdapter,
-      schema: eagerPartialSchema,
-      storage: fullPriorityStorage,
-      transport: fullPriorityTransport,
-    });
-
-    const regularStorage = new InMemoryStorage();
-    const regularTransport = new TestTransport({
-      fullMetadata: {
-        lastSyncId: "10",
-        subscribedSyncGroups: [],
-      },
-      fullRows: [],
-      partialRowsByGroup: new Map([
-        [
-          "team-2",
-          [
-            {
-              data: {
-                body: "Team 2 comment",
-                id: "comment-1",
-                taskId: "task-2",
-              },
-              modelName: "Comment",
-            },
-          ],
-        ],
-      ]),
-    });
-    const regularClient = createSyncClient({
-      reactivity: noopReactivityAdapter,
-      schema: regularPartialSchema,
-      storage: regularStorage,
-      transport: regularTransport,
-    });
-
-    try {
-      await fullPriorityClient.start();
-      await regularClient.start();
-
-      const delta: DeltaPacket = {
-        actions: [
-          {
-            action: "S",
-            data: { subscribedSyncGroups: ["team-2"] },
-            id: "60",
-            modelId: "sync-groups",
-            modelName: "SyncGroup",
-          },
-        ],
-        lastSyncId: "60",
-      };
-
-      fullPriorityTransport.emitDelta(delta);
-      regularTransport.emitDelta(delta);
-
-      await Promise.all([
-        waitForSync(fullPriorityClient, "60"),
-        waitForSync(regularClient, "60"),
-      ]);
-
-      expect(
-        fullPriorityClient.getCached<Record<string, unknown>>(
-          "Comment",
-          "comment-1"
-        )
-      ).toMatchObject({
-        body: "Team 2 comment",
-        id: "comment-1",
-      });
-      expect(
-        regularClient.getCached<Record<string, unknown>>("Comment", "comment-1")
-      ).toBeNull();
-      expect(await regularStorage.get("Comment", "comment-1")).toMatchObject({
-        body: "Team 2 comment",
-        id: "comment-1",
-      });
-    } finally {
-      await fullPriorityClient.stop();
-      await regularClient.stop();
     }
   });
 

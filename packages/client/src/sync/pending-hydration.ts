@@ -84,16 +84,14 @@ export const applyPendingTransactionsToIdentityMaps = (
   }
 };
 
-/** Compares two group lists as sets (order-insensitive, dedupe-aware). */
+/** Compares two group lists as sets (order-insensitive, duplicates ignored). */
 export const areGroupsEqual = (a: string[], b: string[]): boolean => {
-  if (a.length !== b.length) {
-    return false;
-  }
   const setA = new Set(a);
-  if (setA.size !== b.length) {
+  const setB = new Set(b);
+  if (setA.size !== setB.size) {
     return false;
   }
-  for (const value of b) {
+  for (const value of setB) {
     if (!setA.has(value)) {
       return false;
     }

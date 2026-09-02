@@ -20,7 +20,6 @@ import {
   areGroupsEqual,
 } from "./sync/pending-hydration.js";
 import { SyncStateMachine } from "./sync/state.js";
-import { SyncGroupManager } from "./sync/sync-groups.js";
 import type {
   StorageAdapter,
   StorageMeta,
@@ -73,6 +72,11 @@ export class SyncOrchestrator {
   private stateQueue = new AsyncQueue();
   private running = false;
   private runToken = 0;
+  /**
+   * A group-change re-bootstrap is owed. Mirrors StorageMeta.groupChangePending
+   * so the delta pipeline can gate without a storage read per packet.
+   */
+  private groupChangePending = false;
   private readonly emitEvent?: (event: SyncClientEvent) => void;
   private onTransactionConflict?: (tx: Transaction) => void;
 
@@ -80,7 +84,6 @@ export class SyncOrchestrator {
   private deferredConflictTxs: Transaction[] = [];
 
   private readonly context: SyncContext;
-  private readonly syncGroups: SyncGroupManager;
   private readonly bootstrapRunner: BootstrapRunner;
   private readonly deltaPipeline: DeltaPipeline;
 
@@ -103,15 +106,10 @@ export class SyncOrchestrator {
     this.cursor = new SyncCursor(this.storage);
 
     this.context = this.buildContext();
-    this.syncGroups = new SyncGroupManager(this.context, (afterSyncId) =>
-      this.restartDeltaSubscription(afterSyncId)
-    );
     this.bootstrapRunner = new BootstrapRunner(this.context);
     this.deltaPipeline = new DeltaPipeline(this.context, {
       applyPendingOutboxTransactions: () =>
         this.applyPendingOutboxTransactions(),
-      handleSyncGroupActions: (actions, nextSyncId) =>
-        this.syncGroups.handleSyncGroupActions(actions, nextSyncId),
       // Without a lazy loader attached there is nothing to fetch, so fall back
       // to recording the coverage as before.
       loadCoverage: (modelName, indexedKey, keyValue) =>
@@ -139,6 +137,7 @@ export class SyncOrchestrator {
       getOutboxManager: () => this.outboxManager,
       getRunToken: () => this.runToken,
       identityMaps: this.identityMaps,
+      isGroupChangePending: () => this.groupChangePending,
       isRunActive: (runToken) => this.isRunActive(runToken),
       isRunning: () => this.running,
       options: this.options,
@@ -154,6 +153,9 @@ export class SyncOrchestrator {
       },
       setDeltaSubscription: (subscription) => {
         this.deltaSubscription = subscription;
+      },
+      setGroupChangePending: (pending) => {
+        this.groupChangePending = pending;
       },
       setGroups: (groups) => {
         this.groups = groups;
@@ -311,6 +313,10 @@ export class SyncOrchestrator {
     } catch (error) {
       if (this.isRunActive(activeRunToken)) {
         this.handleSyncError(error);
+        // A failed start must not leave the orchestrator flagged as running,
+        // or the next start() would return early without ever bootstrapping.
+        this.running = false;
+        this.runToken += 1;
       }
       throw error;
     }
@@ -328,6 +334,7 @@ export class SyncOrchestrator {
 
   private async loadMetadata(): Promise<StorageMeta> {
     const meta = await this.storage.getMeta();
+    this.groupChangePending = meta.groupChangePending === true;
     this.clientId =
       meta.clientId ??
       getOrCreateClientId(`${this.options.dbName ?? "sync-db"}_client_id`);
@@ -401,26 +408,36 @@ export class SyncOrchestrator {
     this.stateMachine.recordError(error);
   }
 
-  private restartDeltaSubscription(afterSyncId: SyncId): Promise<void> {
-    return this.deltaPipeline.restartDeltaSubscription(afterSyncId);
-  }
-
   private isRunActive(runToken: number): boolean {
     return this.running && this.runToken === runToken;
   }
 
   /**
-   * Stops the sync orchestrator
+   * Stops the sync orchestrator: cancels the run and closes storage.
    */
   async stop(): Promise<void> {
     await this.reset();
-    await this.storage.close();
+    await this.closeStorage();
   }
 
+  /**
+   * Closes the storage adapter. Split from `reset()` so the client can let an
+   * in-flight `start()` observe the cancelled run token before the store it
+   * may still be touching goes away.
+   */
+  closeStorage(): Promise<void> {
+    return this.storage.close();
+  }
+
+  /**
+   * Cancels the active run (subscription, catch-up, timers) and returns every
+   * runtime cursor to its initial state. Storage stays open.
+   */
   async reset(): Promise<void> {
     this.running = false;
     this.runToken += 1;
 
+    this.deltaPipeline.reset();
     if (this.deltaSubscription) {
       try {
         await this.deltaSubscription.return?.();
@@ -442,7 +459,11 @@ export class SyncOrchestrator {
     this.clientId = "";
     this.cursor.reset();
     this.groups = this.options.groups ?? [];
+    // In-memory only: the persisted latch is what the next start reads, so a
+    // stop() across an owed re-bootstrap still forces one on resume.
+    this.groupChangePending = false;
     this.stateMachine.clearError();
+    this.stateMachine.setCatchingUp(false);
 
     this.setConnectionState("disconnected");
     this.setState("disconnected");
@@ -543,12 +564,5 @@ export class SyncOrchestrator {
    */
   getRegistry(): ModelRegistry {
     return this.registry;
-  }
-
-  /**
-   * Gets the storage adapter
-   */
-  getStorage(): StorageAdapter {
-    return this.storage;
   }
 }

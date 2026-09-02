@@ -7,10 +7,13 @@ Prefetch sync data on the server and pass it to client components, eliminating t
 
 ```ts
 import {
-  prefetchBootstrap,
-  prefetchModels,
-  serializeBootstrapSnapshot,
+  decodeBootstrapSnapshot,
+  deserializeBootstrapSnapshot,
   encodeBootstrapSnapshot,
+  isBootstrapSnapshotStale,
+  prefetchBootstrap,
+  seedStorageFromBootstrap,
+  serializeBootstrapSnapshot,
 } from "@stratasync/next/server";
 ```
 
@@ -109,56 +112,6 @@ const encoded = await encodeBootstrapSnapshot(snapshot);
 ```
 
 **Signature:** `encodeBootstrapSnapshot(snapshot: BootstrapSnapshot, options?: SerializeBootstrapOptions): Promise<string>`
-
-## prefetchModels
-
-Prefetch a subset of models for a specific page.
-
-```tsx
-// app/dashboard/page.tsx (Server Component)
-import { prefetchModels } from "@stratasync/next/server";
-
-export default async function DashboardPage() {
-  const result = await prefetchModels({
-    endpoint: process.env.API_URL + "/sync/prefetch",
-    authorization: `Bearer ${await getServerToken()}`,
-    models: [
-      { name: "Project", limit: 10 },
-      { name: "Task", filter: { status: "active" }, limit: 50 },
-    ],
-    timeout: 5000,
-  });
-
-  return <DashboardClient prefetchedData={result} />;
-}
-```
-
-**Signature:** `prefetchModels(options: PrefetchOptions): Promise<PrefetchResult>`
-
-### PrefetchOptions
-
-| Option          | Type                               | Default  | Description                               |
-| --------------- | ---------------------------------- | -------- | ----------------------------------------- |
-| `endpoint`      | `string`                           | Required | Prefetch API endpoint.                    |
-| `authorization` | `string`                           | -        | Authorization header.                     |
-| `models`        | `Array<{ name, filter?, limit? }>` | Required | Models to prefetch with optional filters. |
-| `timeout`       | `number`                           | `5000`   | Request timeout in milliseconds.          |
-
-### PrefetchResult
-
-Pass directly through the Server Component boundary as props:
-
-```ts
-interface PrefetchResult {
-  data: Record<string, PrefetchedData>;
-}
-
-interface PrefetchedData {
-  modelName: string;
-  data: Record<string, unknown>[];
-  fetchedAt: number;
-}
-```
 
 ## Complete SSR example
 

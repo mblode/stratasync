@@ -30,56 +30,84 @@ const competitorKeys = [
   { key: "powersync", name: "PowerSync" },
 ];
 
+/**
+ * Rows state what Strata Sync does; the other columns describe each
+ * project's documented default architecture, worded so they stay true as
+ * those projects add features. "Bring your own" is a design choice, not a
+ * gap, so it gets the neutral mark rather than a cross.
+ */
 const rows: ComparisonRow[] = [
   {
     competitors: {
-      electricsql: { icon: "neutral", text: "Bring your own" },
-      instantdb: { icon: "check", text: "Built-in (IndexedDB)" },
-      powersync: { icon: "check", text: "Built-in (SQLite)" },
-      zero: { icon: "check", text: "Built-in (IndexedDB)" },
+      electricsql: {
+        icon: "neutral",
+        text: "Your Postgres + Electric service",
+      },
+      instantdb: { icon: "neutral", text: "Instant's hosted database" },
+      powersync: { icon: "neutral", text: "Your database + PowerSync Service" },
+      zero: { icon: "neutral", text: "Your Postgres + zero-cache" },
     },
-    feature: "Local storage",
-    strataSync: { icon: "check", text: "Built-in (IndexedDB)" },
+    feature: "Backend",
+    strataSync: {
+      icon: "check",
+      text: "Your Postgres, inside your Fastify app",
+    },
+  },
+  {
+    competitors: {
+      electricsql: { icon: "neutral", text: "Self-host or Electric Cloud" },
+      instantdb: { icon: "neutral", text: "Hosted by default" },
+      powersync: { icon: "neutral", text: "Cloud or self-hosted" },
+      zero: { icon: "neutral", text: "Self-hosted zero-cache" },
+    },
+    feature: "Extra service to run",
+    strataSync: { icon: "check", text: "None. Optional Redis for fan-out" },
+  },
+  {
+    competitors: {
+      electricsql: { icon: "neutral", text: "Bring your own write API" },
+      instantdb: { icon: "check", text: "Built in" },
+      powersync: { icon: "neutral", text: "Bring your own upload handler" },
+      zero: { icon: "neutral", text: "Custom mutators" },
+    },
+    feature: "Write path",
+    strataSync: {
+      icon: "check",
+      text: "Built in: durable outbox, /sync/mutate",
+    },
+  },
+  {
+    competitors: {
+      electricsql: { icon: "neutral", text: "Postgres replication stream" },
+      instantdb: { icon: "neutral", text: "Server-authoritative" },
+      powersync: { icon: "neutral", text: "Replication checkpoints" },
+      zero: { icon: "neutral", text: "Server-authoritative, rebased" },
+    },
+    feature: "Ordering and conflicts",
+    strataSync: {
+      icon: "check",
+      text: "Server-sequenced log, field-level rebase",
+    },
+  },
+  {
+    competitors: {
+      electricsql: { icon: "neutral", text: "Bring your own CRDT" },
+      instantdb: { icon: "neutral", text: "Bring your own CRDT" },
+      powersync: { icon: "neutral", text: "Bring your own CRDT" },
+      zero: { icon: "neutral", text: "Bring your own CRDT" },
+    },
+    feature: "Collaborative text",
+    strataSync: { icon: "check", text: "Yjs, built in" },
   },
   {
     competitors: {
       electricsql: { icon: "neutral", text: "Bring your own" },
-      instantdb: { icon: "neutral", text: "Server decides" },
-      powersync: { icon: "check", text: "Customisable" },
-      zero: { icon: "neutral", text: "Server decides" },
-    },
-    feature: "Conflict resolution",
-    strataSync: { icon: "check", text: "Automatic, field-level" },
-  },
-  {
-    competitors: {
-      electricsql: { icon: "cross", text: "Not included" },
-      instantdb: { icon: "cross", text: "Not included" },
-      powersync: { icon: "cross", text: "Not included" },
-      zero: { icon: "cross", text: "Not included" },
-    },
-    feature: "Real-time editing",
-    strataSync: { icon: "check", text: "Rich-text with Yjs" },
-  },
-  {
-    competitors: {
-      electricsql: { icon: "neutral", text: "Bring your own" },
-      instantdb: { icon: "neutral", text: "Basic support" },
-      powersync: { icon: "check", text: "Full offline support" },
-      zero: { icon: "cross", text: "Not supported" },
-    },
-    feature: "Offline writes",
-    strataSync: { icon: "check", text: "Full offline support" },
-  },
-  {
-    competitors: {
-      electricsql: { icon: "cross", text: "Not included" },
-      instantdb: { icon: "cross", text: "Not included" },
-      powersync: { icon: "cross", text: "Not included" },
-      zero: { icon: "cross", text: "Not included" },
+      instantdb: { icon: "neutral", text: "Bring your own" },
+      powersync: { icon: "neutral", text: "Bring your own" },
+      zero: { icon: "neutral", text: "Bring your own" },
     },
     feature: "Undo and redo",
-    strataSync: { icon: "check", text: "Built-in" },
+    strataSync: { icon: "check", text: "Built in, from transaction history" },
   },
 ];
 
@@ -274,6 +302,12 @@ export const LandingComparison = () => {
               );
             })}
           </div>
+
+          <p className="mx-auto max-w-2xl text-center text-muted-foreground text-xs">
+            Other columns summarise each project&#8217;s documented default
+            architecture as of September 2026. If one has moved on, open a pull
+            request and it will be corrected.
+          </p>
         </div>
       </div>
     </section>

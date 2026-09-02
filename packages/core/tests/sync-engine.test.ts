@@ -447,6 +447,31 @@ test("observable properties track changes and serialize persisted values", () =>
   assert.equal(snapshot.changes.count, "ser:3");
 });
 
+test("serializers that produce null are not overridden by the raw value", () => {
+  resetModelRegistry();
+
+  // An empty string is stored as `null` on the wire and comes back as "".
+  const serializer = {
+    deserialize: (value: unknown) => (value === null ? "" : String(value)),
+    serialize: (value: unknown) => (value === "" ? null : String(value)),
+  };
+
+  class Task extends Model {}
+
+  Property({ serializer })(Task.prototype, "note");
+  ClientModel("Task")(Task);
+
+  const task = new Task();
+  task.id = "task-1";
+  task.note = "";
+
+  assert.equal(task.toJSON().note, null);
+  assert.equal(task.changeSnapshot().changes.note, null);
+
+  task._applyUpdate({ note: null });
+  assert.equal(task.note, "");
+});
+
 test("no-op and reverted assignments do not emit update snapshots", () => {
   resetModelRegistry();
 

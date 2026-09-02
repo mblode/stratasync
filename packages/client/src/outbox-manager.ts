@@ -103,6 +103,12 @@ export class OutboxManager {
    * `update X` in one tick could replay in the wrong order after a reload.
    */
   private nextBatchIndex = 0;
+  /**
+   * Seeds `nextBatchIndex` from whatever is already persisted before the first
+   * transaction is stamped, so a fresh runtime never re-issues an index below
+   * one another tab (or a previous session) already used.
+   */
+  private batchIndexSeeded: Promise<void> | null = null;
 
   constructor(options: OutboxManagerOptions) {
     this.storage = options.storage;
@@ -206,6 +212,7 @@ export class OutboxManager {
    * Queues a transaction for sending
    */
   private async queueTransaction(tx: Transaction): Promise<void> {
+    await this.ensureBatchIndexSeeded();
     this.localClientTxIds.add(tx.clientTxId);
     tx.batchIndex = this.nextBatchIndex;
     this.nextBatchIndex += 1;
@@ -218,6 +225,27 @@ export class OutboxManager {
       this.scheduleBatchSend();
     } else {
       await this.dispatchBatch([tx]);
+    }
+  }
+
+  private ensureBatchIndexSeeded(): Promise<void> {
+    if (!this.batchIndexSeeded) {
+      this.batchIndexSeeded = (async () => {
+        this.seedBatchIndex(await this.storage.getOutbox());
+      })();
+    }
+    return this.batchIndexSeeded;
+  }
+
+  /**
+   * Keeps the sequence above anything already persisted (by this runtime or
+   * another tab) so newly queued transactions never sort before replayed ones.
+   */
+  private seedBatchIndex(persisted: Transaction[]): void {
+    for (const tx of persisted) {
+      if (tx.batchIndex !== undefined && tx.batchIndex >= this.nextBatchIndex) {
+        this.nextBatchIndex = tx.batchIndex + 1;
+      }
     }
   }
 
@@ -420,9 +448,18 @@ export class OutboxManager {
     }
   }
 
-  private async removeRejectedTransaction(tx: Transaction): Promise<void> {
-    await this.storage.removeFromOutbox(tx.clientTxId);
-    this.localClientTxIds.delete(tx.clientTxId);
+  private removeRejectedTransaction(tx: Transaction): Promise<void> {
+    return this.discardTransaction(tx.clientTxId);
+  }
+
+  /**
+   * Drops a transaction from the outbox without completing it (the server
+   * rejected it, or a rebase conflict resolved against it). Also forgets the
+   * id in the in-memory echo-suppression set so that set stays bounded.
+   */
+  async discardTransaction(clientTxId: string): Promise<void> {
+    await this.storage.removeFromOutbox(clientTxId);
+    this.localClientTxIds.delete(clientTxId);
   }
 
   /**
@@ -441,6 +478,7 @@ export class OutboxManager {
       }
     }
 
+    const unresolved = new Map(txMap);
     for (const txResult of result.results) {
       if (!this.isLifecycleCurrent(version)) {
         return;
@@ -449,6 +487,7 @@ export class OutboxManager {
       if (!tx) {
         continue;
       }
+      unresolved.delete(tx.clientTxId);
 
       if (txResult.success) {
         const syncIdNeededForCompletion =
@@ -486,6 +525,16 @@ export class OutboxManager {
       }
       this.onTransactionStateChange?.(tx);
     }
+
+    // A transaction the server did not report on would otherwise sit in
+    // "sent" until the next reconnect. Requeue it so the next drain retries.
+    if (unresolved.size > 0) {
+      await this.handleTransportFailure(
+        [...unresolved.values()],
+        new Error("Mutation result did not include the transaction"),
+        version
+      );
+    }
   }
 
   /**
@@ -513,14 +562,7 @@ export class OutboxManager {
     await this.waitForInflightSends();
 
     const pending = await this.storage.getOutbox();
-
-    // Keep the sequence above anything already persisted (by this runtime or
-    // another tab) so newly queued transactions never sort before replayed ones.
-    for (const tx of pending) {
-      if (tx.batchIndex !== undefined && tx.batchIndex >= this.nextBatchIndex) {
-        this.nextBatchIndex = tx.batchIndex + 1;
-      }
-    }
+    this.seedBatchIndex(pending);
 
     // Reset unconfirmed transport states back to queued so they can retry.
     for (const tx of pending) {
@@ -634,10 +676,8 @@ export class OutboxManager {
     clientTxId: string,
     confirmed: Set<string>
   ): Promise<void> {
-    await this.storage.removeFromOutbox(clientTxId);
-    // Fixes the leak: confirmed ids must also leave the in-memory set so it
-    // does not grow unbounded across the session.
-    this.localClientTxIds.delete(clientTxId);
+    // Confirmed ids must also leave the in-memory set so it stays bounded.
+    await this.discardTransaction(clientTxId);
     confirmed.add(clientTxId);
   }
 
@@ -683,8 +723,7 @@ export class OutboxManager {
    * the mutate-result path (when no sync id is owed) and completeUpToSyncId.
    */
   private async completeTransactionNow(tx: Transaction): Promise<void> {
-    await this.storage.removeFromOutbox(tx.clientTxId);
-    this.localClientTxIds.delete(tx.clientTxId);
+    await this.discardTransaction(tx.clientTxId);
     tx.state = "completed";
   }
 

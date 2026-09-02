@@ -218,81 +218,36 @@ When the schema changes (via `computeSchemaHash`), the adapter increments the In
 
 ## Multi-workspace support
 
-Deterministic database naming supports multiple users and versions.
+The adapter derives a deterministic database name from the `userId`, `version`
+and `userVersion` you pass to `createIndexedDbStorage`, so each user and version
+combination gets its own database and switching accounts does not require
+clearing data. The derivation itself is internal; set the inputs and the adapter
+does the rest.
 
 ```ts
-import { computeWorkspaceDatabaseName } from "@stratasync/storage-idb";
-
-const dbName = computeWorkspaceDatabaseName({
+const storage = createIndexedDbStorage({
   userId: "user-abc",
   version: 1,
   userVersion: 1,
 });
-// Returns: "ss_<32-char-hash>"
 ```
 
-Each user/version combination gets its own database, so switching accounts doesn't require clearing data.
+Bump `userVersion` when a local schema change should start a client from a
+clean database.
 
-## Utility exports
+## Public surface
 
-### Store name functions
-
-Deterministic names for stores and databases:
+The package exports the factory and two types:
 
 ```ts
-import {
-  computeModelStoreName,
-  computeWorkspaceDatabaseName,
-  computePartialDatabaseName,
-} from "@stratasync/storage-idb";
+import { createIndexedDbStorage } from "@stratasync/storage-idb";
+import type { DatabaseInfo, PartialIndexEntry } from "@stratasync/storage-idb";
 ```
 
-| Function                                                         | Description                                                |
-| ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| `computeModelStoreName(modelName, schemaVersion, registry)`      | Deterministic hash-based store name for a model.           |
-| `computeWorkspaceDatabaseName({ userId, version, userVersion })` | Deterministic database name for a workspace.               |
-| `computePartialDatabaseName(storeName)`                          | Derives the partial index database name from a store name. |
-
-### Granular store operations
-
-For testing and advanced use:
-
-```ts
-import {
-  // Model rows
-  getAllModelRows,
-  putManyModelRows,
-  deleteManyModelRows,
-  countModelRows,
-  iterateModelRows,
-
-  // Metadata
-  getMetadata,
-  setMetadata,
-  getLastSyncId,
-  setLastSyncId,
-  isBootstrapComplete,
-  setBootstrapComplete,
-
-  // Outbox
-  addTransaction,
-  getAllTransactions,
-  getTransactionsByState,
-  markTransactionSent,
-  markTransactionCompleted,
-  markTransactionFailed,
-  removeTransaction,
-  clearOutbox,
-
-  // Partial indexes
-  getPartialIndex,
-  setPartialIndex,
-  hasPartialIndex,
-  clearPartialIndexes,
-} from "@stratasync/storage-idb";
-```
-
-Additional granular operations for metadata, outbox, and partial indexes are also available.
+Everything else on this page is reached through the adapter instance
+(`storage.get(...)`, `storage.setPartialIndex(...)`, and so on), not imported
+directly. Store-name derivation and the per-store read and write helpers are
+internal to the package and are not part of the public API.
 
 ## Architecture role
 
