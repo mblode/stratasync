@@ -66,6 +66,21 @@ const COALESCED_CATCH_UP_ACTION_LIMIT = 10_000;
 /** Delay before resubscribing after the live delta stream fails. */
 const RESUBSCRIBE_DELAY_MS = 5000;
 
+/**
+ * Delay before retrying a group-change re-bootstrap that failed. The latch is
+ * still set, so packets keep being held until an attempt succeeds.
+ */
+const GROUP_CHANGE_RETRY_DELAY_MS = 5000;
+
+/**
+ * A membership change: a group was shared with this user (its history sits
+ * before the cursor, so the delta stream will never carry it) or taken away
+ * (its rows would otherwise stay cached, silently frozen). Only a full
+ * bootstrap, which the server filters on current membership, converges both.
+ */
+const isGroupChangeAction = (action: SyncAction): boolean =>
+  action.action === "G" || action.action === "S";
+
 const wait = (ms: number): Promise<void> =>
   // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
   new Promise((resolve) => {
@@ -84,11 +99,6 @@ export interface DeltaPipelineDeps {
   applyPendingOutboxTransactions(): Promise<void>;
   /** Completes + processes pending outbox transactions, emits the count. */
   processOutboxTransactions(): Promise<void>;
-  /** Handles sync-group membership changes carried by delta actions. */
-  handleSyncGroupActions(
-    actions: SyncAction[],
-    nextSyncId: SyncId
-  ): Promise<void>;
   /**
    * Loads the rows behind a newly granted partial-index coverage key and
    * records the coverage. Absent until the lazy loader is wired.
@@ -121,6 +131,10 @@ export class DeltaPipeline {
   private pendingCoverageLoads: CoverageKey[] = [];
   /** Pending resubscribe after a stream failure; cleared on reset. */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Guards against stacking group-change re-bootstraps. */
+  private groupChangeBootstrapInFlight = false;
+  /** Retry of a failed group-change re-bootstrap; cleared on reset. */
+  private groupChangeRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: SyncContext, deps: DeltaPipelineDeps) {
     this.ctx = ctx;
@@ -134,7 +148,16 @@ export class DeltaPipeline {
    */
   reset(): void {
     this.clearReconnectTimer();
+    this.clearGroupChangeRetryTimer();
+    this.groupChangeBootstrapInFlight = false;
     this.pendingCoverageLoads = [];
+  }
+
+  private clearGroupChangeRetryTimer(): void {
+    if (this.groupChangeRetryTimer) {
+      clearTimeout(this.groupChangeRetryTimer);
+      this.groupChangeRetryTimer = null;
+    }
   }
 
   private clearReconnectTimer(): void {
@@ -265,31 +288,105 @@ export class DeltaPipeline {
     }
 
     try {
-      await this.ctx.runWithStateLock(async () => {
-        const activeRunToken = this.ctx.getRunToken();
-        await this.deps.runBootstrap(activeRunToken);
-        if (!this.ctx.isRunActive(activeRunToken)) {
-          return;
-        }
-        await this.deps.applyPendingOutboxTransactions();
-      });
-
-      if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
-        return true;
-      }
-
-      await this.deps.processOutboxTransactions();
-      if (this.ctx.isRunning() && !this.ctx.getDeltaSubscription()) {
-        this.startDeltaSubscription(this.ctx.cursor.lastSyncId);
-      }
-      if (this.ctx.isRunning()) {
-        this.ctx.setState("syncing");
-      }
-      return true;
+      await this.bootstrapAndResume();
     } catch (recoveryError) {
       this.ctx.recordError(recoveryError);
-      return true;
     }
+    return true;
+  }
+
+  /**
+   * Runs a full bootstrap under the state lock, re-applies the outbox, then
+   * resumes the live stream from the new cursor. Shared by cursor-too-old
+   * recovery and by group-change reconciliation.
+   */
+  private async bootstrapAndResume(): Promise<void> {
+    await this.ctx.runWithStateLock(async () => {
+      const activeRunToken = this.ctx.getRunToken();
+      await this.deps.runBootstrap(activeRunToken);
+      if (!this.ctx.isRunActive(activeRunToken)) {
+        return;
+      }
+      await this.deps.applyPendingOutboxTransactions();
+    });
+
+    if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
+      return;
+    }
+
+    await this.deps.processOutboxTransactions();
+    if (this.ctx.isRunning() && !this.ctx.getDeltaSubscription()) {
+      this.startDeltaSubscription(this.ctx.cursor.lastSyncId);
+    }
+    if (this.ctx.isRunning()) {
+      this.ctx.setState("syncing");
+    }
+  }
+
+  /**
+   * Latches the group-change reconcile and schedules the full re-bootstrap it
+   * requires.
+   *
+   * Called from inside packet application, which holds the state lock, so the
+   * bootstrap itself runs on a detached task: it takes that lock again. The
+   * latch is persisted first, so a stop() before the task lands still leaves
+   * the next start owing the bootstrap, and it is only cleared by a bootstrap
+   * that completes (see BootstrapRunner.bootstrap).
+   */
+  private async requestGroupChangeBootstrap(): Promise<void> {
+    if (!this.ctx.isGroupChangePending()) {
+      this.ctx.setGroupChangePending(true);
+      await this.ctx.storage.setMeta({
+        groupChangePending: true,
+        updatedAt: Date.now(),
+      });
+    }
+    this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
+  }
+
+  private scheduleGroupChangeBootstrap(runToken: number): void {
+    if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
+      return;
+    }
+    this.groupChangeBootstrapInFlight = true;
+
+    this.runGroupChangeBootstrap(runToken)
+      .catch((error: unknown) => {
+        if (this.ctx.isRunActive(runToken)) {
+          this.ctx.recordError(error);
+        }
+      })
+      .finally(() => {
+        this.groupChangeBootstrapInFlight = false;
+        // A failed attempt leaves the latch set; keep trying while this run
+        // is alive, because every packet is being held until it lands.
+        if (this.ctx.isRunActive(runToken) && this.ctx.isGroupChangePending()) {
+          this.clearGroupChangeRetryTimer();
+          this.groupChangeRetryTimer = setTimeout(() => {
+            this.groupChangeRetryTimer = null;
+            this.scheduleGroupChangeBootstrap(runToken);
+          }, GROUP_CHANGE_RETRY_DELAY_MS);
+        }
+      });
+  }
+
+  private async runGroupChangeBootstrap(runToken: number): Promise<void> {
+    // Close the live stream first. The old iterator would otherwise keep
+    // consuming (and holding) packets against a cursor the bootstrap is about
+    // to replace, and the resume below opens a fresh one from the new cursor.
+    const current = this.ctx.getDeltaSubscription();
+    this.ctx.setDeltaSubscription(null);
+    if (current) {
+      try {
+        await current.return?.();
+      } catch {
+        // Best-effort close; the bootstrap proceeds regardless.
+      }
+    }
+    if (!this.ctx.isRunActive(runToken)) {
+      return;
+    }
+    await this.bootstrapAndResume();
   }
 
   /**
@@ -472,6 +569,17 @@ export class DeltaPipeline {
    * re-applied.
    */
   private async applyDeltaPacket(packet: DeltaPacket): Promise<void> {
+    // Nothing is applied while a group-change re-bootstrap is owed, so the
+    // cursor cannot move past the group action. If it did, and the bootstrap
+    // then failed, an ordinary reconnect would resume from a cursor beyond
+    // the action and it would never be redelivered: the membership change
+    // would be lost, which is exactly what the durable action exists to
+    // prevent. The cost is a little redelivery once the bootstrap lands.
+    if (this.ctx.isGroupChangePending()) {
+      this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
+      return;
+    }
+
     const latestAppliedSyncId = this.ctx.cursor.lastSyncId;
     const nextActions = packet.actions.filter((action) =>
       isSyncIdGreaterThan(action.id, latestAppliedSyncId)
@@ -480,6 +588,14 @@ export class DeltaPipeline {
       ...packet,
       actions: nextActions,
     };
+
+    // Checked before anything is applied: a re-bootstrap replaces local state
+    // wholesale, so persisting this packet first would be wasted work against
+    // a cursor about to be discarded.
+    if (filteredPacket.actions.some(isGroupChangeAction)) {
+      await this.requestGroupChangeBootstrap();
+      return;
+    }
 
     if (filteredPacket.actions.length === 0) {
       await this.handleEmptyPacket(filteredPacket);
@@ -497,10 +613,6 @@ export class DeltaPipeline {
       filteredPacket.actions
     );
     await this.handleCoverageActions(filteredPacket.actions);
-    await this.deps.handleSyncGroupActions(
-      filteredPacket.actions,
-      filteredPacket.lastSyncId
-    );
 
     // Write to storage and collect identity map ops (no MobX reactions yet).
     const deferredOps: DeferredMapOp[] = [];

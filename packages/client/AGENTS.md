@@ -26,7 +26,6 @@ src/
     delta-pipeline.ts     delta reconciliation + pending replay
     pending-hydration.ts  re-apply pending outbox txs onto identity maps
     cursor.ts             sync-id cursor tracking
-    sync-groups.ts        multi-tenant group membership
     context.ts / state.ts shared orchestrator context + state
   outbox-manager.ts     offline mutation queue with batching and retry
   identity-map.ts       per-model ObservableMap + registry (with onEvict)
@@ -92,7 +91,7 @@ tests/
 - Use predicate builders (`eq`, `neq`, `gt`, `lt`, `isIn`, `contains`, `matches`, `and`, `or`, `not`) for type-safe query construction.
 - Undo/redo creates inverse operations (INSERT↔DELETE, UPDATE↔UPDATE with swapped payload, ARCHIVE↔UNARCHIVE). History entries associate with transaction IDs for conflict cleanup.
 - Adapter interfaces (`StorageAdapter`, `TransportAdapter`) are defined in `types.ts`. Implementations live in separate packages (`sync-storage-idb`, `sync-transport-graphql`).
-- Sync groups enable multi-tenancy. Group changes trigger re-bootstrap and subscription restart.
+- Sync groups enable multi-tenancy. A `"G"`/`"S"` action (membership changed) holds the cursor and forces a full re-bootstrap, which filters on the server's current membership and so converges whether a group was added or removed. The latch persists in `StorageMeta.groupChangePending` until a bootstrap completes, so stop/start and a failed attempt still owe it. There is no partial-bootstrap path for group changes.
 - Outbox entries are ordered and must be replayed in sequence on reconnect.
 - Rebase strategy defaults to `"server-wins"`, where conflicting local mutations are rolled back. `"client-wins"` and `"merge"` update the original baseline instead.
 - Field-level conflict detection is on by default (`fieldLevelConflicts: true`). Non-overlapping field changes on the same entity do NOT conflict.

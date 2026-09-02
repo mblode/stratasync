@@ -37,6 +37,17 @@ Correctness fixes:
   observe the cancelled run before storage is closed or cleared; an update
   skips `undefined` members instead of diverging optimistic state from what the
   server was sent.
+- **client (behaviour change)**: a sync-group action (`"G"`/`"S"`) now holds the
+  cursor and forces a full re-bootstrap, matching the Swift client, instead of
+  diffing the group list. The diff could not converge: an unchanged list was a
+  no-op, so a row that left the user's audience without their groups changing
+  stayed cached; a removed group was evicted by the model's `groupKey` index,
+  which finds nothing when rows carry a per-row group; and a partial bootstrap
+  for a non-workspace group was scoped by a consumer's workspace filter and
+  returned nothing. The re-bootstrap is latched in `StorageMeta.groupChangePending`
+  until one completes, so stop/start and a failed attempt still owe it, and no
+  packet is applied while it is owed so the action cannot be lost. There is no
+  partial-bootstrap path for group changes any more.
 - **server**: a client whose cursor sits exactly one below the oldest retained
   sync action is no longer sent through a full bootstrap — the next action it
   needs is the earliest one kept.

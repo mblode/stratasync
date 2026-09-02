@@ -73,10 +73,21 @@ publishes it. It is a durable action rather than a control frame, so a user who
 is offline still learns about it on their next catch-up, which is the whole
 point: a control frame sent to a disconnected client is simply lost.
 
-On the client, joining a group triggers a partial bootstrap for it and leaving
-one evicts its rows. A partial bootstrap that is cancelled part-way does not
-record the group as subscribed, so the next start fetches it properly rather
-than believing a half-loaded group is complete.
+On the client, a group action holds the cursor and forces a full re-bootstrap.
+The server filters that bootstrap on the user's current membership, so it
+converges in both directions: a group shared with the user arrives (its history
+sits before the cursor and would never come as deltas), and a group taken away
+has its rows dropped (nothing else can carry a row _out_ of a replica). The
+re-bootstrap is latched in local metadata until one completes, so a client
+stopped part-way, or one whose attempt failed, still owes it on the next start.
+Every packet is held while it is owed, so the cursor cannot move past the
+action and lose it.
+
+A change that alters _who can see existing rows_ without changing anyone's
+group list (a project turning private, a task moving into one) still needs the
+server to send the affected users a group action, because a delta is published
+to one group and a row leaving a group is invisible to everyone still in the
+old one.
 
 ## Testing a scoping change
 

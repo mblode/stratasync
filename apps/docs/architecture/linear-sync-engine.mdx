@@ -73,7 +73,7 @@ See [Conflict resolution](/guides/conflict-resolution).
 
 Groups are the permission boundary. A client receives deltas only for the groups it subscribes to, and `auth.resolveGroups` on the server decides what those are per request.
 
-Membership changes ship as durable `"G"` sync actions rather than control frames, so a user who is offline when they are added to a team still learns about it on their next catch-up. Joining a group triggers a partial bootstrap for it; leaving one evicts its rows.
+Membership changes ship as durable `"G"` sync actions rather than control frames, so a user who is offline when they are added to a team still learns about it on their next catch-up. A group action holds the cursor and forces a full re-bootstrap, which the server filters on current membership, so it converges whether a group was added (its history sits before the cursor and would never arrive as deltas) or removed (its rows would otherwise stay cached). The re-bootstrap is latched in local metadata until one completes, so a client stopped mid-way still owes it on the next start.
 
 ### Undo and redo
 

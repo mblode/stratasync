@@ -221,6 +221,14 @@ export interface StorageMeta {
   subscribedSyncGroups?: string[];
   clientId?: string;
   bootstrapComplete?: boolean;
+  /**
+   * Set when a sync-group membership change ("G"/"S" action) has been seen
+   * but the full re-bootstrap it requires has not yet succeeded. While set,
+   * delta packets are held rather than applied so the cursor cannot move past
+   * the action, and the next start forces a bootstrap. Cleared only by a
+   * completed full bootstrap.
+   */
+  groupChangePending?: boolean;
   lastSyncAt?: number;
   databaseVersion?: number;
   updatedAt?: number;
