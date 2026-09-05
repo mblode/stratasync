@@ -365,6 +365,13 @@ export type SyncClientEvent =
   | { type: "outboxChange"; pendingCount: number }
   | { type: "catchUpChange"; catchingUp: boolean }
   | {
+      type: "mutationRejected";
+      modelName: string;
+      modelId: string;
+      action: Transaction["action"];
+      error: string;
+    }
+  | {
       type: "modelChange";
       modelName: string;
       modelId: string;
