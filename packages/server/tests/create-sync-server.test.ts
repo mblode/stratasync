@@ -222,6 +222,24 @@ describe(createSyncServer, () => {
     await server.shutdown();
   });
 
+  it("uses only the authoritative resolver plus personal group when configured", async () => {
+    const logger = makeLogger();
+    const { redis } = makeRedis();
+    const { config } = groupConfig(redis, logger);
+    config.auth.groupResolutionMode = "authoritative";
+    const server = await createSyncServer(config);
+    const received: SyncActionOutput[] = [];
+    server.deltaSubscriber.onDelta((action) => received.push(action));
+
+    await server.notifyGroupsChanged("user-a");
+
+    expect(received[0]?.data.subscribedSyncGroups).toEqual([
+      "resolved-group",
+      "user-a",
+    ]);
+    await server.shutdown();
+  });
+
   it("persists the group action so an offline user still receives it", async () => {
     const logger = makeLogger();
     const { redis } = makeRedis();
@@ -342,9 +360,7 @@ describe("group change durability", () => {
     await server.shutdown();
   });
 
-  it("survives redis being down", async () => {
-    // Redis is best-effort for deltas and must be for this too: the action is
-    // already committed, so a failed fan-out costs liveness, never the change.
+  it("propagates redis failure after durably writing the group action", async () => {
     const logger = makeLogger();
     const { redis } = makeRedis(() => Promise.reject(new Error("redis down")));
     const created: Record<string, unknown>[] = [];
@@ -353,7 +369,9 @@ describe("group change durability", () => {
       groupConfig(redis, logger, (row) => created.push(row)).config
     );
 
-    await expect(server.notifyGroupsChanged("user-a")).resolves.toBeUndefined();
+    await expect(server.notifyGroupsChanged("user-a")).rejects.toThrow(
+      "redis down"
+    );
     expect(created).toHaveLength(1);
 
     await server.shutdown();

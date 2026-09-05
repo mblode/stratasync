@@ -2,6 +2,7 @@
 import { EventEmitter } from "node:events";
 
 import type { SyncAuthConfig, WebSocketHooks } from "../../src/config.js";
+import { BOOTSTRAP_REQUIRED_WS_MESSAGE } from "../../src/core/errors.js";
 import type { DeltaSubscriberLike } from "../../src/delta/delta-publisher.js";
 import { registerSyncWebsocket } from "../../src/websocket/sync-websocket.js";
 
@@ -122,14 +123,20 @@ const createLiveAction = (syncId: string) => ({
   syncId,
 });
 
+// oxlint-disable-next-line eslint/complexity -- one route harness exposes independent auth, replay, transport, and lifecycle seams
 const setup = (overrides?: {
   deltaSubscriber?: MockDeltaSubscriber;
   getSyncActions?: () => Promise<unknown[]>;
   getUserGroups?: () => Promise<string[]>;
   getEarliestSyncId?: () => Promise<bigint>;
+  getLastSyncIdForGroups?: () => Promise<bigint>;
+  getSyncGroupActions?: () => Promise<unknown[]>;
   resolveGroups?: (userId: string) => Promise<string[]>;
   verifyToken?: SyncAuthConfig["verifyToken"];
   authorizeAccess?: SyncAuthConfig["authorizeAccess"];
+  groupResolutionMode?: SyncAuthConfig["groupResolutionMode"];
+  reauthorizeBeforeWebSocketDelivery?: boolean;
+  webSocketGroupRefreshCatchUpIntervalMs?: number;
   onClose?: WebSocketHooks["onClose"];
   onMessage?: WebSocketHooks["onMessage"];
   onSubscribe?: WebSocketHooks["onSubscribe"];
@@ -167,16 +174,34 @@ const setup = (overrides?: {
     overrides?.getSyncActions ?? vi.fn().mockResolvedValue([]);
   const getEarliestSyncId =
     overrides?.getEarliestSyncId ?? vi.fn().mockResolvedValue(0n);
+  const getLastSyncIdForGroups =
+    overrides?.getLastSyncIdForGroups ?? vi.fn().mockResolvedValue(0n);
+  const getSyncGroupActions =
+    overrides?.getSyncGroupActions ?? vi.fn().mockResolvedValue([]);
   const auth = {
     ...(overrides?.authorizeAccess
       ? { authorizeAccess: overrides.authorizeAccess }
       : {}),
+    ...(overrides?.groupResolutionMode
+      ? { groupResolutionMode: overrides.groupResolutionMode }
+      : {}),
     resolveGroups,
+    ...(overrides?.reauthorizeBeforeWebSocketDelivery
+      ? { reauthorizeBeforeWebSocketDelivery: true }
+      : {}),
+    ...(overrides?.webSocketGroupRefreshCatchUpIntervalMs
+      ? {
+          webSocketGroupRefreshCatchUpIntervalMs:
+            overrides.webSocketGroupRefreshCatchUpIntervalMs,
+        }
+      : {}),
     verifyToken,
   };
   const syncDao = {
     getEarliestSyncId,
+    getLastSyncIdForGroups,
     getSyncActions,
+    getSyncGroupActions,
     getUserGroups,
   } as unknown as Parameters<typeof registerSyncWebsocket>[1]["syncDao"];
   const logger = {
@@ -208,6 +233,7 @@ const setup = (overrides?: {
     auth,
     deltaSubscriber,
     getSyncActions,
+    getSyncGroupActions,
     getUserGroups,
     logger,
     routeHandler,
@@ -405,6 +431,30 @@ describe(registerSyncWebsocket, () => {
     });
   });
 
+  it("bypasses stored memberships in authoritative group-resolution mode", async () => {
+    const getUserGroups = vi.fn().mockResolvedValue(["stale-workspace"]);
+    const harness = setup({
+      getUserGroups,
+      groupResolutionMode: "authoritative",
+      resolveGroups: vi.fn().mockResolvedValue(["live-workspace"]),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+    expect(getUserGroups).not.toHaveBeenCalled();
+    expect(parseMessage(harness.socket.sent[0])).toEqual({
+      afterSyncId: "0",
+      groups: ["live-workspace", "user-1"],
+      type: "subscribed",
+    });
+  });
+
   it("retains the principal and final allowed groups on every subscribe", async () => {
     const principal = { keyId: "key-1" };
     const authorizeAccess = vi.fn().mockResolvedValue({
@@ -530,6 +580,369 @@ describe(registerSyncWebsocket, () => {
     expect(
       (refresh.packet as { actions: { data: unknown }[] }).actions[0]?.data
     ).toEqual({ subscribedSyncGroups: ["workspace-1", "user-1"] });
+  });
+
+  it("reauthorizes before live delivery when the durable group notification is lost", async () => {
+    let resolvedGroups = ["workspace-1", "workspace-2"];
+    const verifyToken = vi.fn().mockResolvedValue({ userId: "user-1" });
+    const harness = setup({
+      deltaSubscriber: new MockDeltaSubscriber(),
+      reauthorizeBeforeWebSocketDelivery: true,
+      resolveGroups: vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(resolvedGroups)),
+      verifyToken,
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+      expect(verifyToken).toHaveBeenCalledTimes(2);
+    });
+
+    resolvedGroups = ["workspace-1"];
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("1"), groupId: "workspace-2" },
+      ["workspace-2"]
+    );
+    await waitForAssertion(() => {
+      expect(verifyToken).toHaveBeenCalledTimes(3);
+    });
+    expect(harness.socket.sent).toHaveLength(1);
+
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("2"), groupId: "workspace-1" },
+      ["workspace-1"]
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(2);
+    });
+    expect(parseMessage(harness.socket.sent[1])).toMatchObject({
+      packet: { actions: [{ groupId: "workspace-1", syncId: "2" }] },
+      type: "delta",
+    });
+  });
+
+  it("sends full newly authorized groups in G without widening the live session", async () => {
+    let resolvedGroups = ["workspace-1"];
+    const harness = setup({
+      deltaSubscriber: new MockDeltaSubscriber(),
+      reauthorizeBeforeWebSocketDelivery: true,
+      resolveGroups: vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(resolvedGroups)),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+
+    resolvedGroups = ["workspace-1", "workspace-3"];
+    harness.deltaSubscriber.emit(
+      {
+        ...createLiveAction("1"),
+        action: "G",
+        data: { subscribedSyncGroups: ["workspace-1", "user-1"] },
+        groupId: "user-1",
+        modelName: "__sync_groups__",
+      },
+      ["user-1"]
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(2);
+    });
+    expect(parseMessage(harness.socket.sent[1])).toMatchObject({
+      packet: {
+        actions: [
+          {
+            data: {
+              subscribedSyncGroups: ["workspace-1", "workspace-3", "user-1"],
+            },
+          },
+        ],
+      },
+      type: "delta",
+    });
+
+    // A client may ignore G. The active server session still cannot expand
+    // until a fresh subscribe selects the newly granted group.
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("2"), groupId: "workspace-3" },
+      ["workspace-3"]
+    );
+    await flush();
+    expect(harness.socket.sent).toHaveLength(2);
+  });
+
+  it("closes fail-closed when a delivery policy revokes the credential", async () => {
+    let accessAllowed = true;
+    const authorizeAccess = vi
+      .fn()
+      .mockImplementation(({ groups }) =>
+        Promise.resolve(accessAllowed ? { allowedGroups: groups } : false)
+      );
+    const harness = setup({
+      authorizeAccess,
+      deltaSubscriber: new MockDeltaSubscriber(),
+      reauthorizeBeforeWebSocketDelivery: true,
+      resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+      verifyToken: vi
+        .fn()
+        .mockResolvedValue({ principal: { keyId: "key-1" }, userId: "user-1" }),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+
+    accessAllowed = false;
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("1"), groupId: "workspace-1" },
+      ["workspace-1"]
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.closeCalls).toHaveLength(1);
+    });
+
+    expect(harness.socket.closeCalls[0]).toEqual({
+      code: 4003,
+      reason: "WebSocket delivery authorization failed",
+    });
+    expect(parseMessage(harness.socket.sent[1])).toEqual({
+      code: "ACCESS_DENIED",
+      message: "WebSocket delivery authorization failed",
+      type: "error",
+    });
+    expect(harness.socket.sent).toHaveLength(2);
+  });
+
+  it("reauthorizes replay and buffered actions after a concurrent revocation", async () => {
+    const replay = createDeferred<unknown[]>();
+    let resolvedGroups = ["workspace-1", "workspace-2"];
+    const harness = setup({
+      deltaSubscriber: new MockDeltaSubscriber(),
+      getSyncActions: vi.fn().mockImplementation(() => replay.promise),
+      reauthorizeBeforeWebSocketDelivery: true,
+      resolveGroups: vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(resolvedGroups)),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+    await waitForAssertion(() => {
+      expect(harness.deltaSubscriber.callback).toBeTruthy();
+    });
+
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("2"), groupId: "workspace-2" },
+      ["workspace-2"]
+    );
+    resolvedGroups = ["workspace-1"];
+    replay.resolve([{ ...createReplayAction(1n), groupId: "workspace-2" }]);
+
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+    expect(parseMessage(harness.socket.sent[0])).toEqual({
+      afterSyncId: "0",
+      groups: ["workspace-1", "user-1"],
+      type: "subscribed",
+    });
+  });
+
+  it("serializes protected live frame checks and sends in syncId order", async () => {
+    const firstLiveDecision = createDeferred<{
+      allowedGroups: readonly string[];
+    }>();
+    let policyCall = 0;
+    const authorizeAccess = vi.fn().mockImplementation(async ({ groups }) => {
+      policyCall += 1;
+      if (policyCall === 3) {
+        return await firstLiveDecision.promise;
+      }
+      return { allowedGroups: groups };
+    });
+    const harness = setup({
+      authorizeAccess,
+      deltaSubscriber: new MockDeltaSubscriber(),
+      reauthorizeBeforeWebSocketDelivery: true,
+      resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+      verifyToken: vi
+        .fn()
+        .mockResolvedValue({ principal: { keyId: "key-1" }, userId: "user-1" }),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+    );
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("1"), groupId: "workspace-1" },
+      ["workspace-1"]
+    );
+    harness.deltaSubscriber.emit(
+      { ...createLiveAction("2"), groupId: "workspace-1" },
+      ["workspace-1"]
+    );
+    await waitForAssertion(() => {
+      expect(authorizeAccess).toHaveBeenCalledTimes(3);
+    });
+    expect(harness.socket.sent).toHaveLength(1);
+
+    firstLiveDecision.resolve({
+      allowedGroups: ["workspace-1", "user-1"],
+    });
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(3);
+    });
+    const deliveredSyncIds = harness.socket.sent
+      .slice(1)
+      .map((frame) => parseMessage(frame))
+      .map((frame) => (frame.packet as { lastSyncId: string }).lastSyncId);
+    expect(deliveredSyncIds).toEqual(["1", "2"]);
+  });
+
+  it("forces bootstrap when a missed G action is older than the live cursor", async () => {
+    vi.useFakeTimers();
+    try {
+      const deltaSubscriber = new MockDeltaSubscriber();
+      const groupRefresh = {
+        ...createReplayAction(1n),
+        action: "G",
+        data: { subscribedSyncGroups: ["workspace-1", "user-1"] },
+        groupId: "user-1",
+        model: "__sync_groups__",
+        modelId: "user-1",
+      };
+      const harness = setup({
+        deltaSubscriber,
+        getLastSyncIdForGroups: vi.fn().mockResolvedValue(2n),
+        getSyncGroupActions: vi.fn().mockResolvedValue([groupRefresh]),
+        reauthorizeBeforeWebSocketDelivery: true,
+        resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+        webSocketGroupRefreshCatchUpIntervalMs: 100,
+      });
+
+      harness.socket.emit(
+        "message",
+        Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.socket.sent).toHaveLength(1);
+
+      // Redis missed G/1, then delivered an allowed action with a later id.
+      deltaSubscriber.emit(
+        { ...createLiveAction("2"), groupId: "workspace-1" },
+        ["workspace-1"]
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.socket.sent).toHaveLength(2);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(harness.socket.sent).toHaveLength(3);
+      expect(parseMessage(harness.socket.sent[2])).toMatchObject({
+        code: "BOOTSTRAP_REQUIRED",
+        type: "error",
+      });
+      expect(harness.socket.closeCalls).toEqual([
+        { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delivers a caught-up G action that advances the live cursor", async () => {
+    vi.useFakeTimers();
+    try {
+      const groupRefresh = {
+        ...createReplayAction(1n),
+        action: "G",
+        data: { subscribedSyncGroups: ["workspace-1", "user-1"] },
+        groupId: "user-1",
+        model: "__sync_groups__",
+        modelId: "user-1",
+      };
+      const harness = setup({
+        getLastSyncIdForGroups: vi.fn().mockResolvedValue(1n),
+        getSyncGroupActions: vi.fn().mockResolvedValue([groupRefresh]),
+        reauthorizeBeforeWebSocketDelivery: true,
+        resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+        webSocketGroupRefreshCatchUpIntervalMs: 100,
+      });
+
+      harness.socket.emit(
+        "message",
+        Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(parseMessage(harness.socket.sent[1])).toMatchObject({
+        packet: {
+          actions: [{ action: "G", syncId: "1" }],
+          lastSyncId: "1",
+        },
+        type: "delta",
+      });
+      expect(harness.socket.closeCalls).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("forces bootstrap when durable G catch-up falls behind retention", async () => {
+    vi.useFakeTimers();
+    try {
+      const getEarliestSyncId = vi
+        .fn()
+        .mockResolvedValueOnce(0n)
+        .mockResolvedValueOnce(10n);
+      const harness = setup({
+        getEarliestSyncId,
+        getLastSyncIdForGroups: vi.fn().mockResolvedValue(10n),
+        reauthorizeBeforeWebSocketDelivery: true,
+        webSocketGroupRefreshCatchUpIntervalMs: 100,
+      });
+
+      harness.socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({ afterSyncId: "5", token: "tok", type: "subscribe" })
+        )
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.socket.sent).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(harness.socket.closeCalls).toEqual([
+        { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
+      ]);
+      expect(parseMessage(harness.socket.sent[1])).toMatchObject({
+        code: "BOOTSTRAP_REQUIRED",
+        type: "error",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops live delivery to a revoked group without resubscribing", async () => {

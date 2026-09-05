@@ -7,12 +7,14 @@ import {
   gt,
   inArray,
   isNull,
+  lte,
   or,
   sql,
 } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import type { RawSyncActionRow } from "../core/sync-action.js";
+import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
 import type { SyncDb } from "../db.js";
 import { getColumn } from "../utils/sync-utils.js";
 
@@ -133,6 +135,39 @@ export class SyncDao {
       .select()
       .from(this.tables.syncActions)
       .where(and(gt(idCol, afterId), this.visibleGroupCondition(groups)))
+      .orderBy(asc(idCol))
+      .limit(limit);
+
+    return rows as unknown as RawSyncActionRow[];
+  }
+
+  /**
+   * Gets durable group-refresh actions addressed to one user's personal group
+   * within a closed cursor window. The upper bound lets a catch-up cycle scan
+   * a stable prefix while newer commits wait for the next cycle.
+   */
+  async getSyncGroupActions(
+    afterId: bigint,
+    throughId: bigint,
+    userId: string,
+    limit: number
+  ): Promise<RawSyncActionRow[]> {
+    const actionCol = getColumn(this.tables.syncActions, "action");
+    const groupIdCol = getColumn(this.tables.syncActions, "groupId");
+    const idCol = getColumn(this.tables.syncActions, "id");
+    const modelCol = getColumn(this.tables.syncActions, "model");
+    const rows = await this.db
+      .select()
+      .from(this.tables.syncActions)
+      .where(
+        and(
+          gt(idCol, afterId),
+          lte(idCol, throughId),
+          eq(groupIdCol, userId),
+          eq(modelCol, SYNC_GROUPS_MODEL),
+          eq(actionCol, SYNC_GROUPS_ACTION)
+        )
+      )
       .orderBy(asc(idCol))
       .limit(limit);
 

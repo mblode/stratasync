@@ -84,6 +84,66 @@ export const applyPendingTransactionsToIdentityMaps = (
   }
 };
 
+/**
+ * Removes rollback data for mutations whose target is absent from a freshly
+ * replaced server snapshot. The replacement is the authority for records that
+ * previously existed: if a queued update/delete is later rejected, restoring
+ * its pre-mutation value would recreate a row the caller can no longer read.
+ *
+ * Missing inserts remain durable but are withheld too: without model-specific
+ * parent metadata, the client cannot prove that an offline child insert still
+ * belongs to an authorized group. The server response and authorized delta
+ * decide whether it can return to the identity map.
+ */
+export const preparePendingTransactionsForPrivacySnapshot = (
+  identityMaps: IdentityMapRegistry,
+  pending: Transaction[]
+): {
+  changed: Transaction[];
+  replayable: Transaction[];
+  withheld: Transaction[];
+} => {
+  const changed: Transaction[] = [];
+  const replayable: Transaction[] = [];
+  const withheld: Transaction[] = [];
+
+  for (const tx of pending) {
+    const map = identityMaps.getMap<Record<string, unknown>>(tx.modelName);
+    if (map.has(tx.modelId)) {
+      replayable.push(tx);
+      continue;
+    }
+    withheld.push(tx);
+
+    // An absent insert may belong below a parent group that was just revoked.
+    // Generic model metadata cannot prove that relationship, so retain it in
+    // the durable outbox but keep it (and later mutations to the same absent
+    // target) out of the identity map until the server accepts it.
+    if (tx.action !== "I" && tx.original !== undefined) {
+      tx.original = undefined;
+      changed.push(tx);
+    }
+  }
+
+  return { changed, replayable, withheld };
+};
+
+export const excludePrivacyWithheldTransactions = (
+  pending: Transaction[],
+  withheldClientTxIds: string[] | undefined,
+  identityMaps?: IdentityMapRegistry
+): Transaction[] => {
+  if (!withheldClientTxIds || withheldClientTxIds.length === 0) {
+    return pending;
+  }
+  const withheld = new Set(withheldClientTxIds);
+  return pending.filter(
+    (tx) =>
+      !withheld.has(tx.clientTxId) ||
+      identityMaps?.getMap(tx.modelName).has(tx.modelId) === true
+  );
+};
+
 /** Compares two group lists as sets (order-insensitive, duplicates ignored). */
 export const areGroupsEqual = (a: string[], b: string[]): boolean => {
   const setA = new Set(a);

@@ -229,6 +229,8 @@ export interface StorageMeta {
    * completed full bootstrap.
    */
   groupChangePending?: boolean;
+  /** Pending mutations quarantined by an authoritative privacy replacement. */
+  privacyWithheldClientTxIds?: string[];
   lastSyncAt?: number;
   databaseVersion?: number;
   updatedAt?: number;

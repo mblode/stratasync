@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
 
+import { resolveAuthorizedGroups } from "./auth/authorize.js";
 import { BootstrapService } from "./bootstrap/bootstrap-service.js";
 import type {
   SyncLogger,
@@ -27,7 +28,6 @@ import { DeltaService } from "./delta/delta-service.js";
 import { createSyncAuthMiddleware } from "./fastify/middleware.js";
 import { registerSyncRoutes } from "./fastify/routes.js";
 import { MutateService } from "./mutate/mutate-service.js";
-import { dedupeSyncGroups } from "./utils/sync-scope.js";
 import { registerSyncWebsocket } from "./websocket/sync-websocket.js";
 
 export const createSyncServer = async (
@@ -136,11 +136,7 @@ export const createSyncServer = async (
    * rewrites the payload to the connection's final authorized groups.
    */
   const notifyGroupsChanged = async (userId: string): Promise<void> => {
-    const [resolvedGroups, dbGroups] = await Promise.all([
-      config.auth.resolveGroups(userId),
-      syncDao.getUserGroups(userId),
-    ]);
-    const groups = dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
+    const groups = await resolveAuthorizedGroups(config.auth, syncDao, userId);
 
     // Must run in a transaction. createSyncAction takes a
     // `pg_advisory_xact_lock` to allocate ids in commit order; that lock is
@@ -162,7 +158,11 @@ export const createSyncServer = async (
         })
     );
 
-    await deltaPublisher.publish(toSyncActionOutput(action), [userId]);
+    const output = toSyncActionOutput(action);
+    const publish =
+      deltaPublisher.publishCritical?.bind(deltaPublisher) ??
+      deltaPublisher.publish.bind(deltaPublisher);
+    await publish(output, [userId]);
 
     logger.debug(
       { groupCount: groups.length, userId },

@@ -93,6 +93,7 @@ const createDb = (seed: Record<string, Record<string, unknown>[]> = {}) => {
     memberships: MembershipRow[];
     syncActions: SyncActionRow[];
     modelRows: { table: string; row: Record<string, unknown> }[];
+    modelUpdates: { table: string; data: Record<string, unknown> }[];
   }
 
   const makeDb = (staged: Staged): SyncDb =>
@@ -174,7 +175,22 @@ const createDb = (seed: Record<string, Record<string, unknown>[]> = {}) => {
       select() {
         return {
           from(table) {
-            const tableRows = rows[tableNameOf(table)] ?? [];
+            const tableName = tableNameOf(table);
+            const stagedRows = staged.modelRows
+              .filter((entry) => entry.table === tableName)
+              .map((entry) => entry.row);
+            const tableRows = [...(rows[tableName] ?? []), ...stagedRows].map(
+              (row) => {
+                const updates = staged.modelUpdates.filter(
+                  (entry) => entry.table === tableName
+                );
+                return Object.assign(
+                  {},
+                  row,
+                  ...updates.map(({ data }) => data)
+                );
+              }
+            );
             return {
               where() {
                 return {
@@ -192,6 +208,7 @@ const createDb = (seed: Record<string, Record<string, unknown>[]> = {}) => {
         const txStaged: Staged = {
           memberships: [],
           modelRows: [],
+          modelUpdates: [],
           syncActions: [],
         };
         const txDb = makeDb(txStaged);
@@ -209,19 +226,34 @@ const createDb = (seed: Record<string, Record<string, unknown>[]> = {}) => {
           rows[table] ??= [];
           rows[table].push(row);
         }
+        for (const { data, table } of txStaged.modelUpdates) {
+          const [row] = rows[table] ?? [];
+          if (row) {
+            Object.assign(row, data);
+          }
+        }
 
         return result;
       },
-      update() {
+      update(table) {
+        const tableName = tableNameOf(table);
         return {
-          set: () => ({
-            where: () => Promise.resolve({ rowCount: 1 }),
+          set: (data: Record<string, unknown>) => ({
+            where: () => {
+              staged.modelUpdates.push({ data, table: tableName });
+              return Promise.resolve({ rowCount: 1 });
+            },
           }),
         };
       },
     }) as unknown as SyncDb;
 
-  const db = makeDb({ memberships: [], modelRows: [], syncActions: [] });
+  const db = makeDb({
+    memberships: [],
+    modelRows: [],
+    modelUpdates: [],
+    syncActions: [],
+  });
 
   return { committed, db, rows };
 };
@@ -523,6 +555,145 @@ describe("group scoping: resolveGroup precedence", () => {
       "proj-1",
       "user-a",
     ]);
+  });
+});
+
+describe("group scoping: publication audience", () => {
+  it("resolves the published group from post-mutation data without widening write access", async () => {
+    const { committed, db } = createDb();
+    const seen: (Record<string, unknown> | null)[] = [];
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolveGroup: ({ payload }) => payload.workspaceId as string,
+      resolvePublishGroup: ({ record }) => {
+        seen.push(record);
+        return record?.projectId as string;
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        modelId: "task-1",
+        modelName: "Task",
+        payload: {
+          id: "task-1",
+          projectId: "private-project",
+          title: "Moved",
+          workspaceId: "ws-1",
+        },
+      }),
+    ]);
+
+    expect(result.success).toBeTruthy();
+    expect(seen[0]).toMatchObject({
+      id: "task-1",
+      projectId: "private-project",
+    });
+    expect(committed.syncActions[0]?.groupId).toBe("private-project");
+  });
+
+  it("reloads the complete row after a partial update", async () => {
+    const { committed, db } = createDb({
+      tasks: [
+        {
+          id: "task-1",
+          projectId: "project-1",
+          title: "Before",
+          workspaceId: "ws-1",
+        },
+      ],
+    });
+    let publishedRecord: Record<string, unknown> | null = null;
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolvePublishGroup: ({ record }) => {
+        publishedRecord = record;
+        return record?.workspaceId as string;
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        action: "UPDATE",
+        modelId: "task-1",
+        modelName: "Task",
+        payload: { title: "After" },
+      }),
+    ]);
+
+    expect(result.success).toBeTruthy();
+    expect(publishedRecord).toMatchObject({
+      id: "task-1",
+      projectId: "project-1",
+      title: "After",
+      workspaceId: "ws-1",
+    });
+    expect(committed.syncActions[0]?.groupId).toBe("ws-1");
+  });
+
+  it("uses the complete pre-mutation row for a delete", async () => {
+    const { committed, db } = createDb({
+      tasks: [
+        {
+          id: "task-1",
+          projectId: "project-1",
+          title: "Before",
+          workspaceId: "ws-1",
+        },
+      ],
+    });
+    let publishedRecord: Record<string, unknown> | null = null;
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolvePublishGroup: ({ record }) => {
+        publishedRecord = record;
+        return record?.workspaceId as string;
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        action: "DELETE",
+        modelId: "task-1",
+        modelName: "Task",
+      }),
+    ]);
+
+    expect(result.success).toBeTruthy();
+    expect(publishedRecord).toMatchObject({
+      id: "task-1",
+      projectId: "project-1",
+      title: "Before",
+      workspaceId: "ws-1",
+    });
+    expect(committed.syncActions[0]?.groupId).toBe("ws-1");
+  });
+
+  it("rolls back the model mutation when post-mutation resolution fails", async () => {
+    const { committed, db, rows } = createDb();
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolvePublishGroup: () => {
+        throw new Error("publication group unavailable");
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        modelId: "task-1",
+        modelName: "Task",
+        payload: { id: "task-1", title: "Hi", workspaceId: "ws-1" },
+      }),
+    ]);
+
+    expect(result.success).toBeFalsy();
+    expect(result.results[0]?.error).toBe("publication group unavailable");
+    expect(rows.tasks).toHaveLength(0);
+    expect(committed.syncActions).toHaveLength(0);
   });
 });
 

@@ -1,9 +1,16 @@
 import type { WebSocket } from "ws";
 
+import {
+  BOOTSTRAP_REQUIRED,
+  BOOTSTRAP_REQUIRED_WS_MESSAGE,
+} from "../core/errors.js";
+import { toSyncActionOutput } from "../core/sync-action.js";
 import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
 import { SyncId } from "../core/sync-id.js";
+import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
-import type { SyncActionOutput } from "../types.js";
+import type { SyncActionOutput, SyncUserContext } from "../types.js";
+import type { AsyncMutex } from "../utils/async-mutex.js";
 import { buildDeltaFrame, buildErrorFrame } from "./messages.js";
 
 export const MAX_BUFFERED_ACTIONS = 10_000;
@@ -13,6 +20,13 @@ export type SessionPhase = "idle" | "replaying" | "live" | "closed";
 interface BufferedAction {
   action: SyncActionOutput;
   groups: string[];
+}
+
+type ReauthorizeDelivery = (token: string) => Promise<SyncUserContext | null>;
+
+interface ClientSessionOptions {
+  deliveryMutex: AsyncMutex;
+  reauthorizeDelivery?: ReauthorizeDelivery;
 }
 
 const hasGroupOverlap = (
@@ -44,12 +58,22 @@ export class ClientSession {
 
   private readonly socket: WebSocket;
   private readonly deltaSubscriber?: DeltaSubscriberLike;
+  private readonly deliveryMutex: AsyncMutex;
+  private readonly reauthorizeDelivery?: ReauthorizeDelivery;
   private unsubscribe: (() => void) | null = null;
   private bufferedActions: BufferedAction[] = [];
+  private groupRefreshCursor = 0n;
+  private token: string | null = null;
 
-  constructor(socket: WebSocket, deltaSubscriber?: DeltaSubscriberLike) {
+  constructor(
+    socket: WebSocket,
+    deltaSubscriber: DeltaSubscriberLike | undefined,
+    options: ClientSessionOptions
+  ) {
     this.socket = socket;
     this.deltaSubscriber = deltaSubscriber;
+    this.deliveryMutex = options.deliveryMutex;
+    this.reauthorizeDelivery = options.reauthorizeDelivery;
   }
 
   get isClosed(): boolean {
@@ -68,6 +92,8 @@ export class ClientSession {
     this.principal = undefined;
     this.afterSyncId = 0n;
     this.bufferedActions = [];
+    this.groupRefreshCursor = 0n;
+    this.token = null;
   }
 
   /**
@@ -78,12 +104,15 @@ export class ClientSession {
     userId: string,
     groups: string[],
     afterSyncId: bigint,
+    token: string,
     principal?: unknown
   ): void {
     this.userId = userId;
     this.groups = groups;
     this.principal = principal;
     this.afterSyncId = afterSyncId;
+    this.groupRefreshCursor = afterSyncId;
+    this.token = token;
     this.phase = "replaying";
     this.bufferedActions = [];
   }
@@ -99,8 +128,8 @@ export class ClientSession {
     }
 
     this.unsubscribe = this.deltaSubscriber.onDelta(
-      (action: SyncActionOutput, groups: string[]) => {
-        this.onLiveDelta(action, groups);
+      async (action: SyncActionOutput, groups: string[]) => {
+        await this.onLiveDelta(action, groups);
       }
     );
 
@@ -112,7 +141,10 @@ export class ClientSession {
     }
   }
 
-  private onLiveDelta(action: SyncActionOutput, groups: string[]): void {
+  private async onLiveDelta(
+    action: SyncActionOutput,
+    groups: string[]
+  ): Promise<void> {
     if (this.phase === "closed") {
       return;
     }
@@ -130,7 +162,13 @@ export class ClientSession {
       return;
     }
 
-    this.sendDeltaAction(action);
+    try {
+      await this.deliveryMutex.runExclusive(async () => {
+        await this.sendDeltaAction(action);
+      });
+    } catch {
+      this.close();
+    }
   }
 
   private bufferLiveDelta(action: SyncActionOutput, groups: string[]): void {
@@ -157,7 +195,7 @@ export class ClientSession {
    * Sends a single action if it advances the cursor, then advances it. Used by
    * both replay and live delivery.
    */
-  sendDeltaAction(action: SyncActionOutput): void {
+  async sendDeltaAction(action: SyncActionOutput): Promise<void> {
     if (this.phase === "closed") {
       return;
     }
@@ -167,11 +205,16 @@ export class ClientSession {
       return;
     }
 
-    if (action.groupId && !this.groups.includes(action.groupId)) {
+    const authorizedGroups = action.groupId
+      ? await this.reauthorizeProtectedDelivery()
+      : undefined;
+    if (this.isClosed || authorizedGroups === null) {
       return;
     }
 
-    this.afterSyncId = syncId;
+    if (action.groupId && !this.groups.includes(action.groupId)) {
+      return;
+    }
 
     if (isSyncGroupsAction(action)) {
       const latestGroups = Array.isArray(action.data.subscribedSyncGroups)
@@ -187,10 +230,140 @@ export class ClientSession {
       const scopedAction = isSyncGroupsAction(action)
         ? {
             ...action,
-            data: { subscribedSyncGroups: [...this.groups] },
+            data: {
+              subscribedSyncGroups: authorizedGroups ?? [...this.groups],
+            },
           }
         : action;
-      this.socket.send(buildDeltaFrame(scopedAction, action.syncId));
+      if (syncId > this.afterSyncId) {
+        this.afterSyncId = syncId;
+      }
+      if (isSyncGroupsAction(action) && syncId > this.groupRefreshCursor) {
+        this.groupRefreshCursor = syncId;
+      }
+      this.socket.send(
+        buildDeltaFrame(scopedAction, SyncId.serialize(this.afterSyncId))
+      );
+    }
+  }
+
+  /**
+   * Scans a stable durable prefix for personal group refreshes missed by the
+   * live transport. Uses a cursor independent of ordinary delta delivery so a
+   * later live action cannot hide an earlier missed G action.
+   */
+  async catchUpGroupRefreshActions(syncDao: SyncDao): Promise<void> {
+    if (this.phase !== "live" || !this.userId) {
+      return;
+    }
+
+    const earliestSyncId = await syncDao.getEarliestSyncId();
+    if (
+      this.groupRefreshCursor > 0n &&
+      earliestSyncId > this.groupRefreshCursor
+    ) {
+      this.requireBootstrap();
+      return;
+    }
+
+    const throughSyncId = await syncDao.getLastSyncIdForGroups([this.userId]);
+    if (throughSyncId <= this.groupRefreshCursor) {
+      return;
+    }
+
+    const pageSize = 100;
+    let cursor = this.groupRefreshCursor;
+    while (!this.isClosed && cursor < throughSyncId) {
+      const actions = await syncDao.getSyncGroupActions(
+        cursor,
+        throughSyncId,
+        this.userId,
+        pageSize
+      );
+      for (const action of actions) {
+        if (action.id <= this.afterSyncId) {
+          this.requireBootstrap();
+          return;
+        }
+        await this.sendDeltaAction(toSyncActionOutput(action));
+        if (this.isClosed) {
+          return;
+        }
+      }
+      if (actions.length < pageSize) {
+        break;
+      }
+      const lastAction = actions.at(-1);
+      if (!lastAction) {
+        break;
+      }
+      cursor = lastAction.id;
+    }
+
+    this.groupRefreshCursor = throughSyncId;
+  }
+
+  /** Freshly authorizes the final subscribed acknowledgement when enabled. */
+  async authorizeSubscribedFrame(): Promise<boolean> {
+    const authorizedGroups = await this.reauthorizeProtectedDelivery();
+    return authorizedGroups !== null && !this.isClosed;
+  }
+
+  private async reauthorizeProtectedDelivery(): Promise<
+    string[] | null | undefined
+  > {
+    if (!this.reauthorizeDelivery) {
+      return undefined;
+    }
+
+    const { token, userId: expectedUserId } = this;
+    if (!(token && expectedUserId)) {
+      this.failDeliveryAuthorization();
+      return null;
+    }
+
+    const authorized = await this.reauthorizeDelivery(token);
+    if (this.isClosed || this.socket.readyState !== this.socket.OPEN) {
+      return null;
+    }
+    if (!authorized || authorized.userId !== expectedUserId) {
+      this.failDeliveryAuthorization();
+      return null;
+    }
+
+    const allowedGroups = new Set(authorized.groups);
+    this.groups = this.groups.filter((group) => allowedGroups.has(group));
+    this.principal = authorized.principal;
+    return [...allowedGroups];
+  }
+
+  private failDeliveryAuthorization(): void {
+    this.groups = [];
+    this.principal = undefined;
+    this.bufferedActions = [];
+    this.detach();
+    this.phase = "closed";
+    if (this.socket.readyState === this.socket.OPEN) {
+      this.socket.send(
+        buildErrorFrame(
+          "WebSocket delivery authorization failed",
+          "ACCESS_DENIED"
+        )
+      );
+      this.socket.close(4003, "WebSocket delivery authorization failed");
+    }
+  }
+
+  private requireBootstrap(): void {
+    this.groups = [];
+    this.bufferedActions = [];
+    this.detach();
+    this.phase = "closed";
+    if (this.socket.readyState === this.socket.OPEN) {
+      this.socket.send(
+        buildErrorFrame(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED)
+      );
+      this.socket.close(4009, BOOTSTRAP_REQUIRED_WS_MESSAGE);
     }
   }
 
@@ -198,31 +371,35 @@ export class ClientSession {
    * Transitions replaying -> live: sorts the buffer ascending, dedupes
    * first-wins by syncId, re-checks group overlap, and delivers each.
    */
-  flushBufferedActions(): void {
-    this.phase = "live";
-
-    const sorted = this.bufferedActions.toSorted((left, right) =>
-      SyncId.compare(
-        SyncId.parse(left.action.syncId),
-        SyncId.parse(right.action.syncId)
-      )
-    );
-
+  async flushBufferedActions(): Promise<void> {
     const seenSyncIds = new Set<string>();
-    for (const entry of sorted) {
-      if (seenSyncIds.has(entry.action.syncId)) {
-        continue;
-      }
-      seenSyncIds.add(entry.action.syncId);
+    while (this.bufferedActions.length > 0 && !this.isClosed) {
+      const pending = this.bufferedActions;
+      this.bufferedActions = [];
+      const sorted = pending.toSorted((left, right) =>
+        SyncId.compare(
+          SyncId.parse(left.action.syncId),
+          SyncId.parse(right.action.syncId)
+        )
+      );
 
-      if (!hasGroupOverlap(this.groups, entry.groups)) {
-        continue;
-      }
+      for (const entry of sorted) {
+        if (seenSyncIds.has(entry.action.syncId)) {
+          continue;
+        }
+        seenSyncIds.add(entry.action.syncId);
 
-      this.sendDeltaAction(entry.action);
+        if (!hasGroupOverlap(this.groups, entry.groups)) {
+          continue;
+        }
+
+        await this.sendDeltaAction(entry.action);
+      }
     }
 
-    this.bufferedActions = [];
+    if (!this.isClosed) {
+      this.phase = "live";
+    }
   }
 
   /** Tears down the delta subscription without changing phase. */

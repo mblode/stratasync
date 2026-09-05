@@ -1,7 +1,10 @@
 import type { Transaction } from "../../core/src/index";
 import { noopReactivityAdapter } from "../../core/src/index";
 import { IdentityMapRegistry } from "../src/identity-map";
-import { applyPendingTransactionsToIdentityMaps } from "../src/sync/pending-hydration";
+import {
+  applyPendingTransactionsToIdentityMaps,
+  preparePendingTransactionsForPrivacySnapshot,
+} from "../src/sync/pending-hydration";
 
 /**
  * A class-model instance with a prototype getter and _applyUpdate, mirroring
@@ -35,6 +38,23 @@ const createUnarchiveTx = (modelId: string): Transaction => ({
   payload: {},
   retryCount: 0,
   state: "awaitingSync",
+});
+
+const createTransaction = (
+  action: Transaction["action"],
+  modelId: string,
+  original?: Record<string, unknown>
+): Transaction => ({
+  action,
+  clientId: "client-1",
+  clientTxId: `tx-${action}-${modelId}`,
+  createdAt: Date.now(),
+  modelId,
+  modelName: "Task",
+  original,
+  payload: action === "I" ? { id: modelId, title: "Local" } : {},
+  retryCount: 0,
+  state: "queued",
 });
 
 describe("applyPendingTransactionsToIdentityMaps (V branch)", () => {
@@ -76,5 +96,41 @@ describe("applyPendingTransactionsToIdentityMaps (V branch)", () => {
     ]);
 
     expect(map.has("missing")).toBeFalsy();
+  });
+});
+
+describe("authoritative snapshot rollback baselines", () => {
+  it("replays only snapshot-authorized targets and quarantines missing insert chains", () => {
+    const registry = new IdentityMapRegistry(noopReactivityAdapter);
+    registry.getMap<Record<string, unknown>>("Task").set("authorized", {
+      id: "authorized",
+      title: "Server",
+    });
+    const revoked = createTransaction("D", "revoked", {
+      id: "revoked",
+      title: "Private",
+    });
+    const authorized = createTransaction("U", "authorized", {
+      title: "Server",
+    });
+    const insert = createTransaction("I", "local");
+    const updateAfterInsert = createTransaction("U", "local", {
+      title: "Local",
+    });
+
+    const { changed, replayable } =
+      preparePendingTransactionsForPrivacySnapshot(registry, [
+        revoked,
+        authorized,
+        insert,
+        updateAfterInsert,
+      ]);
+
+    expect(changed).toEqual([revoked, updateAfterInsert]);
+    expect(replayable).toEqual([authorized]);
+    expect(revoked.original).toBeUndefined();
+    expect(authorized.original).toEqual({ title: "Server" });
+    expect(insert.payload).toMatchObject({ title: "Local" });
+    expect(updateAfterInsert.original).toBeUndefined();
   });
 });

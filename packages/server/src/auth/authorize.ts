@@ -64,6 +64,22 @@ export type AuthResult =
       error: unknown;
     };
 
+export const resolveAuthorizedGroups = async (
+  auth: SyncAuthConfig,
+  syncDao: SyncDao,
+  userId: string
+): Promise<string[]> => {
+  if (auth.groupResolutionMode === "authoritative") {
+    return dedupeSyncGroups([...(await auth.resolveGroups(userId)), userId]);
+  }
+
+  const [resolvedGroups, dbGroups] = await Promise.all([
+    auth.resolveGroups(userId),
+    syncDao.getUserGroups(userId),
+  ]);
+  return dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
+};
+
 /**
  * Authorizes a token end-to-end: verify, then resolve groups from auth and the
  * DAO in parallel, then dedupe (resolved + db + userId) before applying access
@@ -87,12 +103,7 @@ export const authorizeToken = async (
   const { userId } = payload;
 
   try {
-    const [resolvedGroups, dbGroups] = await Promise.all([
-      auth.resolveGroups(userId),
-      syncDao.getUserGroups(userId),
-    ]);
-
-    const resolved = dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
+    const resolved = await resolveAuthorizedGroups(auth, syncDao, userId);
     let groups = resolved;
 
     if (auth.authorizeAccess) {

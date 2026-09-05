@@ -71,6 +71,8 @@ const formatError = (error: unknown) => {
 export interface DeltaPublisherLike {
   publish(action: SyncActionOutput, groups: string[]): Promise<void>;
   publishMany(actions: SyncActionOutput[], groups: string[]): Promise<void>;
+  /** Publishes locally and propagates any remote transport failure. */
+  publishCritical?(action: SyncActionOutput, groups: string[]): Promise<void>;
 }
 
 export type DeltaSubscriberCallback = (
@@ -319,6 +321,14 @@ class DeltaPublisher implements DeltaPublisherLike {
     for (const action of actions) {
       await this.publish(action, groups);
     }
+  }
+
+  async publishCritical(
+    action: SyncActionOutput,
+    groups: string[]
+  ): Promise<void> {
+    this.bus.publish(action, groups);
+    await this.redis?.publish(action, groups);
   }
 }
 
