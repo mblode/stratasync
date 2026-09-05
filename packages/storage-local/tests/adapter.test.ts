@@ -349,6 +349,36 @@ describe(LocalStorageAdapter, () => {
       const outbox = await adapter.getOutbox();
       expect(outbox).toHaveLength(1);
     });
+
+    it("should preserve privacy metadata when requested", async () => {
+      await adapter.put("Todo", { id: "1", title: "A" });
+      const pendingTransaction = makeTx({ clientTxId: "tx-private" });
+      await adapter.addToOutbox(pendingTransaction);
+      await adapter.setMeta({
+        bootstrapComplete: true,
+        clientId: "client-1",
+        firstSyncId: "3",
+        groupChangePending: true,
+        lastSyncAt: 123,
+        lastSyncId: "10",
+        privacyWithheldClientTxIds: ["tx-private"],
+        subscribedSyncGroups: ["user-1", "workspace-1"],
+      });
+
+      await adapter.clear({ preserveOutbox: true });
+
+      expect(await adapter.getAll("Todo")).toHaveLength(0);
+      expect(await adapter.getOutbox()).toEqual([pendingTransaction]);
+      const meta = await adapter.getMeta();
+      expect(meta.clientId).toBe("client-1");
+      expect(meta.groupChangePending).toBeTruthy();
+      expect(meta.privacyWithheldClientTxIds).toEqual(["tx-private"]);
+      expect(meta.subscribedSyncGroups).toEqual(["user-1", "workspace-1"]);
+      expect(meta.bootstrapComplete).toBeFalsy();
+      expect(meta.firstSyncId).toBe("0");
+      expect(meta.lastSyncAt).toBeUndefined();
+      expect(meta.lastSyncId).toBe("0");
+    });
   });
 
   describe("isolation", () => {

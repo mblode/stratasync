@@ -267,6 +267,14 @@ class InMemoryStorage implements StorageAdapter {
   }
 
   clear(options?: ClearStorageOptions): Promise<void> {
+    const preservedMeta = options?.preserveOutbox
+      ? {
+          clientId: this.meta.clientId,
+          groupChangePending: this.meta.groupChangePending,
+          privacyWithheldClientTxIds: this.meta.privacyWithheldClientTxIds,
+          subscribedSyncGroups: this.meta.subscribedSyncGroups,
+        }
+      : {};
     this.data.clear();
     this.modelPersistence.clear();
     if (!options?.preserveOutbox) {
@@ -274,7 +282,7 @@ class InMemoryStorage implements StorageAdapter {
     }
     this.partialIndexes.clear();
     this.syncActions.length = 0;
-    this.meta = { lastSyncId: "0" };
+    this.meta = { lastSyncId: "0", ...preservedMeta };
     return Promise.resolve();
   }
 
@@ -4612,8 +4620,11 @@ describe("reverse-done alignment", () => {
   it("keeps restart hydration quarantined when privacy metadata persistence fails", async () => {
     const storage = new FailingPrivacyMetadataStorage();
     await storage.setMeta({
-      bootstrapComplete: true,
+      // Done Bear's one-time recovery proxy forces this false even though the
+      // database already contains a prior snapshot.
+      bootstrapComplete: false,
       clientId: "client-1",
+      lastSyncAt: 1,
       lastSyncId: "10",
       subscribedSyncGroups: ["team-1"],
     });

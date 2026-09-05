@@ -104,13 +104,14 @@ export class BootstrapRunner {
       return;
     }
 
+    const replacesExistingSnapshot =
+      previousMeta.bootstrapComplete === true ||
+      previousMeta.lastSyncAt !== undefined ||
+      (await this.hasLocalData());
     // A completed remote response is now replacing an existing snapshot and
     // may bridge over a missed revocation. Preserve ordinary offline fallback
     // until this point, then durably quarantine before changing any rows.
-    if (
-      previousMeta.bootstrapComplete === true &&
-      !this.ctx.isGroupChangePending()
-    ) {
+    if (replacesExistingSnapshot && !this.ctx.isGroupChangePending()) {
       await this.ctx.storage.setMeta({
         groupChangePending: true,
         updatedAt: Date.now(),

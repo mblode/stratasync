@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 
 import { isQuotaExceededError, StorageQuotaError } from "@stratasync/client";
 import { ModelRegistry } from "@stratasync/core";
-import type { SchemaDefinition, SyncAction } from "@stratasync/core";
+import type {
+  SchemaDefinition,
+  SyncAction,
+  Transaction,
+} from "@stratasync/core";
 import { openDB } from "idb";
 
 import {
@@ -131,6 +135,61 @@ test("IndexedDbStorageAdapter registers workspace database metadata", async () =
     dbName,
     computePartialDbName(dbName, baseSchema, 1, "Comment"),
   ]);
+});
+
+test("preserving the outbox keeps privacy metadata but resets snapshot state", async () => {
+  const userId = `user-${randomUUID()}`;
+  const version = 1;
+  const userVersion = 1;
+  const dbName = computeWorkspaceDatabaseName({ userId, userVersion, version });
+  const adapter = new IndexedDbStorageAdapter();
+  await adapter.open({ schema: baseSchema, userId, userVersion, version });
+  await adapter.setMeta({
+    bootstrapComplete: true,
+    clientId: "client-1",
+    firstSyncId: "3",
+    groupChangePending: true,
+    lastSyncAt: 123,
+    lastSyncId: "10",
+    privacyWithheldClientTxIds: ["tx-private"],
+    subscribedSyncGroups: ["user-1", "workspace-1"],
+  });
+  await adapter.put("Task", { id: "task-1", title: "Private" });
+  const pendingTransaction: Transaction = {
+    action: "I",
+    clientId: "client-1",
+    clientTxId: "tx-private",
+    createdAt: Date.now(),
+    modelId: "task-1",
+    modelName: "Task",
+    payload: { title: "Private" },
+    retryCount: 0,
+    state: "queued",
+  };
+  await adapter.addToOutbox(pendingTransaction);
+
+  await adapter.clear({ preserveOutbox: true });
+
+  assert.equal(await adapter.get("Task", "task-1"), null);
+  assert.deepEqual(await adapter.getOutbox(), [pendingTransaction]);
+  const meta = await adapter.getMeta();
+  assert.equal(meta.clientId, "client-1");
+  assert.equal(meta.groupChangePending, true);
+  assert.deepEqual(meta.privacyWithheldClientTxIds, ["tx-private"]);
+  assert.deepEqual(meta.subscribedSyncGroups, ["user-1", "workspace-1"]);
+  assert.equal(meta.bootstrapComplete, false);
+  assert.equal(meta.firstSyncId, "0");
+  assert.equal(meta.lastSyncAt, undefined);
+  assert.equal(meta.lastSyncId, "0");
+
+  await adapter.clear();
+
+  assert.deepEqual(await adapter.getOutbox(), []);
+  const clearedMeta = await adapter.getMeta();
+  assert.equal(clearedMeta.groupChangePending, undefined);
+
+  await adapter.close();
+  await deleteDatabases(["stratasync_databases", dbName]);
 });
 
 test("schema hash changes bump schemaVersion", async () => {
