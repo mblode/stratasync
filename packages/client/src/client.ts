@@ -30,7 +30,10 @@ import { MutationCoordinator } from "./mutations.js";
 import { OutboxManager } from "./outbox-manager.js";
 import { executeQuery } from "./query.js";
 import { SyncOrchestrator } from "./sync-orchestrator.js";
-import { applyPendingTransactionsToIdentityMaps } from "./sync/pending-hydration.js";
+import {
+  applyPendingTransactionsToIdentityMaps,
+  excludePrivacyWithheldTransactions,
+} from "./sync/pending-hydration.js";
 import type {
   ModelChangeAction,
   ModelStore,
@@ -470,8 +473,16 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       );
       const pending = await activeOutboxManager.getActiveTransactions();
       if (pending.length > 0) {
+        const meta = await options.storage.getMeta();
         identityMaps.batch(() => {
-          applyPendingTransactionsToIdentityMaps(identityMaps, pending);
+          applyPendingTransactionsToIdentityMaps(
+            identityMaps,
+            excludePrivacyWithheldTransactions(
+              pending,
+              meta.privacyWithheldClientTxIds,
+              identityMaps
+            )
+          );
         });
       }
     });

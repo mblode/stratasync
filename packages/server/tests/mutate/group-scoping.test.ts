@@ -526,6 +526,66 @@ describe("group scoping: resolveGroup precedence", () => {
   });
 });
 
+describe("group scoping: publication audience", () => {
+  it("resolves the published group from post-mutation data without widening write access", async () => {
+    const { committed, db } = createDb();
+    const seen: (Record<string, unknown> | null)[] = [];
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolveGroup: ({ payload }) => payload.workspaceId as string,
+      resolvePublishGroup: ({ record }) => {
+        seen.push(record);
+        return record?.projectId as string;
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        modelId: "task-1",
+        modelName: "Task",
+        payload: {
+          id: "task-1",
+          projectId: "private-project",
+          title: "Moved",
+          workspaceId: "ws-1",
+        },
+      }),
+    ]);
+
+    expect(result.success).toBeTruthy();
+    expect(seen[0]).toMatchObject({
+      id: "task-1",
+      projectId: "private-project",
+    });
+    expect(committed.syncActions[0]?.groupId).toBe("private-project");
+  });
+
+  it("rolls back the model mutation when post-mutation resolution fails", async () => {
+    const { committed, db, rows } = createDb();
+    const model: SyncModelConfig = {
+      ...workspaceScopedTask,
+      resolvePublishGroup: () => {
+        throw new Error("publication group unavailable");
+      },
+    };
+    const service = makeService({ Task: model }, db);
+
+    const result = await run(service, makeContext("user-a", ["ws-1"]), [
+      makeTx({
+        modelId: "task-1",
+        modelName: "Task",
+        payload: { id: "task-1", title: "Hi", workspaceId: "ws-1" },
+      }),
+    ]);
+
+    expect(result.success).toBeFalsy();
+    expect(result.results[0]?.error).toBe("publication group unavailable");
+    expect(rows.tasks).toHaveLength(0);
+    expect(committed.syncActions).toHaveLength(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 3. insertCreatesGroup.
 // ---------------------------------------------------------------------------

@@ -82,6 +82,13 @@ export interface SyncAuthConfig {
   verifyToken: (token: string) => Promise<SyncAuthPayload | null>;
   resolveGroups: (userId: string) => Promise<string[]>;
   /**
+   * `merge` combines application groups with StrataSync's membership table.
+   * `authoritative` trusts only `resolveGroups` plus the personal user group,
+   * avoiding stale mirrored memberships in security-sensitive applications.
+   * Defaults to `merge`.
+   */
+  groupResolutionMode?: "authoritative" | "merge";
+  /**
    * Narrows a credential to an operation and a subset of the user's resolved
    * groups. A principal without this policy is rejected rather than treated as
    * an unrestricted user.
@@ -89,6 +96,20 @@ export interface SyncAuthConfig {
   authorizeAccess?: (
     context: SyncAccessContext
   ) => SyncAccessDecision | false | Promise<SyncAccessDecision | false>;
+  /**
+   * Re-run the complete read authorization pipeline immediately before each
+   * protected WebSocket delta and subscribed acknowledgement.
+   *
+   * This closes the delivery gap when a live group-change notification is
+   * delayed or lost. Each successful check may only narrow the active session;
+   * clients must subscribe again before newly granted groups become active.
+   */
+  reauthorizeBeforeWebSocketDelivery?: boolean;
+  /**
+   * Periodically scans durable personal-group actions so an active socket can
+   * recover a group refresh missed by the live delta transport.
+   */
+  webSocketGroupRefreshCatchUpIntervalMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +252,17 @@ export interface SyncModelConfig {
    * `groupKey: null` does.
    */
   resolveGroup?: (
+    ctx: ResolveGroupContext
+  ) => string | null | Promise<string | null>;
+  /**
+   * Optional post-mutation resolver for the sync action's delivery audience.
+   *
+   * This runs inside the row transaction after the model mutation and receives
+   * its returned data as `record`. It does not authorize the write or grant a
+   * membership: `resolveGroup` remains the sole authorization boundary. When
+   * omitted, the action is published to the group authorized before mutation.
+   */
+  resolvePublishGroup?: (
     ctx: ResolveGroupContext
   ) => string | null | Promise<string | null>;
   /**

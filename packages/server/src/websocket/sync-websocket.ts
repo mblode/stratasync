@@ -152,6 +152,17 @@ export const registerSyncWebsocket = (
     logger = noopLogger,
     syncDao,
   } = options;
+  const groupRefreshCatchUpIntervalMs =
+    auth.webSocketGroupRefreshCatchUpIntervalMs;
+  if (
+    groupRefreshCatchUpIntervalMs !== undefined &&
+    (!Number.isFinite(groupRefreshCatchUpIntervalMs) ||
+      groupRefreshCatchUpIntervalMs <= 0)
+  ) {
+    throw new TypeError(
+      "webSocketGroupRefreshCatchUpIntervalMs must be a positive finite number"
+    );
+  }
 
   // Use route registration that is compatible with @fastify/websocket.
   // The `websocket: true` option and single-arg handler signature come from the
@@ -215,8 +226,24 @@ export const registerSyncWebsocket = (
     },
     (socket: WebSocket, request?: SyncWebSocketRequest) => {
       const connectionId = randomUUID();
-      const session = new ClientSession(socket, deltaSubscriber);
       const messageMutex = new AsyncMutex();
+      const session = new ClientSession(socket, deltaSubscriber, {
+        deliveryMutex: messageMutex,
+        ...(auth.reauthorizeBeforeWebSocketDelivery
+          ? {
+              reauthorizeDelivery: async (token: string) => {
+                const result = await authorizeToken(
+                  auth,
+                  syncDao,
+                  token,
+                  logger,
+                  "read"
+                );
+                return result.status === "authorized" ? result.user : null;
+              },
+            }
+          : {}),
+      });
       let cleanupPerformed = false;
       let initialUser = request?.syncUser;
 
@@ -226,6 +253,28 @@ export const registerSyncWebsocket = (
         logger,
         () => session.isClosed
       );
+      let groupRefreshCatchUpRunning = false;
+      const groupRefreshCatchUpTimer = groupRefreshCatchUpIntervalMs
+        ? setInterval(async () => {
+            if (groupRefreshCatchUpRunning) {
+              return;
+            }
+            groupRefreshCatchUpRunning = true;
+            try {
+              await messageMutex.runExclusive(async () => {
+                await session.catchUpGroupRefreshActions(syncDao);
+              });
+            } catch (error) {
+              logger.warn(
+                { connId: connectionId, error },
+                "WebSocket group refresh catch-up failed"
+              );
+            } finally {
+              groupRefreshCatchUpRunning = false;
+            }
+          }, groupRefreshCatchUpIntervalMs)
+        : undefined;
+      groupRefreshCatchUpTimer?.unref();
 
       const getConnectionContext = () => ({
         connId: connectionId,
@@ -243,6 +292,7 @@ export const registerSyncWebsocket = (
         socket.send(buildErrorFrame(message, code));
       };
 
+      // oxlint-disable-next-line eslint/complexity -- auth, replay, and retention failures deliberately share one serialized lifecycle
       const handleSubscribe = async (msg: SubscribeMessage): Promise<void> => {
         const previousContext = getConnectionContext();
 
@@ -291,10 +341,12 @@ export const registerSyncWebsocket = (
         }
 
         const requestedAfterSyncId = SyncId.parse(msg.afterSyncId ?? "0");
+        const token = request?.syncToken ?? msg.token;
         session.beginReplay(
           user.userId,
           groups,
           requestedAfterSyncId,
+          token,
           user.principal
         );
 
@@ -330,8 +382,11 @@ export const registerSyncWebsocket = (
           if (session.isClosed) {
             return;
           }
-          session.flushBufferedActions();
+          await session.flushBufferedActions();
           if (session.isClosed) {
+            return;
+          }
+          if (!(await session.authorizeSubscribedFrame())) {
             return;
           }
           socket.send(
@@ -420,6 +475,9 @@ export const registerSyncWebsocket = (
         cleanupPerformed = true;
         session.close();
         heartbeat.stop();
+        if (groupRefreshCatchUpTimer) {
+          clearInterval(groupRefreshCatchUpTimer);
+        }
         safeRunOnClose();
       };
 

@@ -1208,6 +1208,18 @@ async function* reconciledUnchanged(): AsyncGenerator<
   return { lastSyncId: "70", subscribedSyncGroups: ["team-1"] };
 }
 
+// oxlint-disable-next-line func-style -- generators require function declaration
+async function* reconciledEmpty(): AsyncGenerator<
+  ModelRow,
+  BootstrapMetadata,
+  unknown
+> {
+  await Promise.resolve();
+  const rows: ModelRow[] = [];
+  yield* rows;
+  return { lastSyncId: "70", subscribedSyncGroups: [] };
+}
+
 const readGroupChangePending = async (
   storage: InMemoryStorage
 ): Promise<boolean | undefined> => {
@@ -3970,6 +3982,152 @@ describe("reverse-done alignment", () => {
     }
   });
 
+  it("does not restore a revoked row when its pending delete is rejected after reconciliation", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Private" },
+          modelName: "Task",
+        },
+      ],
+    });
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return reconciledEmpty();
+    }) as TestTransport["bootstrap"];
+
+    transport.mutate = () => Promise.reject(new Error("offline"));
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await expect(client.delete("Task", "task-1")).rejects.toThrow("offline");
+      const outboxBeforeReconcile = await storage.getOutbox();
+      expect(outboxBeforeReconcile[0]?.original).toMatchObject({
+        title: "Private",
+      });
+
+      transport.mutate = (batch: TransactionBatch): Promise<MutateResult> =>
+        Promise.resolve({
+          lastSyncId: "70",
+          results: batch.transactions.map((tx) => ({
+            clientTxId: tx.clientTxId,
+            error: "access revoked",
+            success: false,
+          })),
+          success: true,
+        });
+      transport.emitDelta(groupActionPacket("60"));
+      await waitForSync(client, "70");
+      await waitUntil(async () => {
+        const outbox = await storage.getOutbox();
+        return outbox.length === 0;
+      }, "Timed out waiting for rejected transaction cleanup");
+
+      expect(client.getCached("Task", "task-1")).toBeNull();
+      expect(await storage.get("Task", "task-1")).toBeNull();
+      expect(await storage.getOutbox()).toHaveLength(0);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("keeps an offline insert durable but hidden after its group is revoked", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        { data: { id: "team-1", name: "Private" }, modelName: "Team" },
+      ],
+    });
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return reconciledEmpty();
+    }) as TestTransport["bootstrap"];
+    transport.mutate = () => Promise.reject(new Error("offline"));
+    const client = createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await expect(
+        client.create("Task", {
+          id: "task-offline",
+          teamId: "team-1",
+          title: "Local child",
+        })
+      ).rejects.toThrow("offline");
+
+      transport.emitDelta(groupActionPacket("60"));
+      await waitForSync(client, "70");
+
+      expect(client.getCached("Task", "task-offline")).toBeNull();
+      expect(await storage.get("Task", "task-offline")).toBeNull();
+      expect(await storage.getOutbox()).toMatchObject([
+        {
+          action: "I",
+          modelId: "task-offline",
+          payload: { teamId: "team-1", title: "Local child" },
+          state: "queued",
+        },
+      ]);
+
+      await client.stop();
+      const restartedTransport = new TestTransport({
+        fullMetadata: { lastSyncId: "70", subscribedSyncGroups: [] },
+        fullRows: [],
+      });
+      restartedTransport.mutate = () => Promise.reject(new Error("offline"));
+      const restarted = createSyncClient({
+        batchMutations: false,
+        reactivity: noopReactivityAdapter,
+        schema,
+        storage,
+        transport: restartedTransport,
+      });
+      try {
+        await restarted.start();
+        expect(restarted.getCached("Task", "task-offline")).toBeNull();
+        expect(await storage.getOutbox()).toHaveLength(1);
+      } finally {
+        await restarted.stop();
+      }
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("re-subscribes live deltas after a clean close and reconnect", async () => {
     const storage = new InMemoryStorage();
     const rows: ModelRow[] = [
@@ -4179,6 +4337,7 @@ describe("reverse-done alignment", () => {
       await sleep(SYNC_SETTLE_DELAY_MS);
 
       expect(client.lastSyncId).toBe("10");
+      expect(client.getCached("Task", "task-1")).toBeNull();
       expect(await storage.get("Task", "task-1")).toMatchObject({
         title: "Seed",
       });
@@ -4442,7 +4601,7 @@ describe("reverse-done alignment", () => {
     }
   });
 
-  it("ignores a group action redelivered from before the re-bootstrap cursor", async () => {
+  it("treats a group action redelivered from before the cursor as an invalidation", async () => {
     const storage = new InMemoryStorage();
     const transport = new TestTransport({
       fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
@@ -4475,16 +4634,19 @@ describe("reverse-done alignment", () => {
       await waitForSync(client, "70");
       expect(fullCalls).toBe(2);
 
-      // The bootstrap moved the cursor to 70. A redelivery of the same action
-      // is older than that and must not cost another bootstrap ...
+      // The bootstrap moved the cursor to 70. Durable delivery recovery may
+      // still redeliver the older control action after a missed live publish;
+      // every G/S is authoritative and must reconcile again.
       transport.emitDelta(groupActionPacket("60"));
-      await sleep(SYNC_SETTLE_DELAY_MS * 2);
-      expect(fullCalls).toBe(2);
-
-      // ... while a genuinely new change still does.
-      transport.emitDelta(groupActionPacket("80"));
       await waitUntil(
         () => fullCalls === 3,
+        "Timed out waiting for stale group-action re-bootstrap"
+      );
+
+      // A genuinely new change does too.
+      transport.emitDelta(groupActionPacket("80"));
+      await waitUntil(
+        () => fullCalls === 4,
         "Timed out waiting for re-bootstrap"
       );
     } finally {

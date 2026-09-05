@@ -156,6 +156,38 @@ export class MutateService {
     }
   }
 
+  private async resolvePublishGroupId(
+    db: SyncDb,
+    tx: TransactionInput,
+    prepared: PreparedTransaction,
+    data: Record<string, unknown>,
+    context: SyncUserContext,
+    authorizedGroupId: string | null
+  ): Promise<string | null> {
+    const resolver = prepared.modelConfig?.resolvePublishGroup;
+    if (!resolver) {
+      return authorizedGroupId;
+    }
+
+    try {
+      return await resolver({
+        action: prepared.action,
+        context,
+        db,
+        modelId: prepared.canonicalModelId,
+        modelName: tx.modelName,
+        payload: tx.payload,
+        record: data,
+      });
+    } catch (error) {
+      this.logger.warn(
+        { error, modelId: prepared.canonicalModelId, modelName: tx.modelName },
+        "Could not resolve publication group for mutation"
+      );
+      throw error;
+    }
+  }
+
   private static validateGroupAccess(
     context: SyncUserContext,
     groupId: string | null,
@@ -447,13 +479,21 @@ export class MutateService {
           record
         );
         const data = await this.applyModelMutation(txDb, tx, prepared, context);
+        const publishGroupId = await this.resolvePublishGroupId(
+          txDb,
+          tx,
+          prepared,
+          data,
+          context,
+          groupId
+        );
         const syncAction = await MutateService.createSyncActionInTransaction(
           txDao,
           tx,
           prepared.action,
           prepared.canonicalModelId,
           data,
-          groupId
+          publishGroupId
         );
 
         return {
