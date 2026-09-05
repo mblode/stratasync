@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/storage-idb",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "@stratasync/storage-idb: IndexedDB storage adapter for Strata Sync, an open-source implementation of Linear's sync engine.",
   "keywords": [
     "browser",

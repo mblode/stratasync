@@ -1,5 +1,13 @@
 # @stratasync/client
 
+## 2.3.0
+
+### Patch Changes
+
+- 0f82e5f: Reauthorize protected WebSocket delivery against authoritative groups, force deployed clients to bootstrap after a stale missed group refresh, route audience-changing mutations from complete post-state, and quarantine optimistic rollback and mutation replay until privacy replacement succeeds.
+- @stratasync/core@2.3.0
+  - @stratasync/y-doc@2.3.0
+
 ## 2.2.0
 
 ### Patch Changes
