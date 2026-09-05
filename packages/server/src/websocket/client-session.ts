@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 
+import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
 import { SyncId } from "../core/sync-id.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
 import type { SyncActionOutput } from "../types.js";
@@ -24,6 +25,10 @@ const hasGroupOverlap = (
   return clientGroups.some((group) => deltaGroups.includes(group));
 };
 
+const isSyncGroupsAction = (action: SyncActionOutput): boolean =>
+  action.action === SYNC_GROUPS_ACTION &&
+  action.modelName === SYNC_GROUPS_MODEL;
+
 /**
  * Per-connection sync state. A single `phase` replaces the five booleans the
  * legacy ClientState juggled, and the session owns the delta subscription so
@@ -33,6 +38,7 @@ export class ClientSession {
   phase: SessionPhase = "idle";
   userId: string | null = null;
   groups: string[] = [];
+  principal: unknown = undefined;
   /** Cursor as a bigint; serialized to the wire only at frame egress. */
   afterSyncId = 0n;
 
@@ -59,6 +65,7 @@ export class ClientSession {
     this.phase = "idle";
     this.userId = null;
     this.groups = [];
+    this.principal = undefined;
     this.afterSyncId = 0n;
     this.bufferedActions = [];
   }
@@ -67,9 +74,15 @@ export class ClientSession {
    * Begins a subscription: records identity/groups/cursor and enters the
    * replaying phase (live deltas are buffered until flush).
    */
-  beginReplay(userId: string, groups: string[], afterSyncId: bigint): void {
+  beginReplay(
+    userId: string,
+    groups: string[],
+    afterSyncId: bigint,
+    principal?: unknown
+  ): void {
     this.userId = userId;
     this.groups = groups;
+    this.principal = principal;
     this.afterSyncId = afterSyncId;
     this.phase = "replaying";
     this.bufferedActions = [];
@@ -154,10 +167,30 @@ export class ClientSession {
       return;
     }
 
+    if (action.groupId && !this.groups.includes(action.groupId)) {
+      return;
+    }
+
     this.afterSyncId = syncId;
 
+    if (isSyncGroupsAction(action)) {
+      const latestGroups = Array.isArray(action.data.subscribedSyncGroups)
+        ? action.data.subscribedSyncGroups.filter(
+            (group): group is string => typeof group === "string"
+          )
+        : [];
+      const latestGroupSet = new Set(latestGroups);
+      this.groups = this.groups.filter((group) => latestGroupSet.has(group));
+    }
+
     if (this.socket.readyState === this.socket.OPEN) {
-      this.socket.send(buildDeltaFrame(action, action.syncId));
+      const scopedAction = isSyncGroupsAction(action)
+        ? {
+            ...action,
+            data: { subscribedSyncGroups: [...this.groups] },
+          }
+        : action;
+      this.socket.send(buildDeltaFrame(scopedAction, action.syncId));
     }
   }
 

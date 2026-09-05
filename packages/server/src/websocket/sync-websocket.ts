@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 
 import { authorizeToken } from "../auth/authorize.js";
+import type { AuthResult } from "../auth/authorize.js";
 import type { SyncAuthConfig, SyncLogger, WebSocketHooks } from "../config.js";
 import { noopLogger } from "../config.js";
 import {
@@ -14,6 +15,8 @@ import { isRecord } from "../core/guards.js";
 import { SyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
+import { extractBearerToken } from "../fastify/middleware.js";
+import type { SyncUserContext } from "../types.js";
 import { AsyncMutex } from "../utils/async-mutex.js";
 import {
   dedupeSyncGroups,
@@ -60,6 +63,84 @@ interface RegisterWebSocketOptions {
   logger?: SyncLogger;
 }
 
+interface SyncWebSocketRequest {
+  headers?: { authorization?: string };
+  query?: Record<string, unknown>;
+  syncToken?: string;
+  syncUser?: SyncUserContext;
+}
+
+interface WebSocketUpgradeReply {
+  code(statusCode: number): { send(body: unknown): void };
+}
+
+const rejectWebSocketUpgradeAuth = (
+  result: AuthResult,
+  reply: WebSocketUpgradeReply
+): boolean => {
+  switch (result.status) {
+    case "authorized": {
+      return false;
+    }
+    case "invalid_token": {
+      reply.code(401).send({ error: "Invalid token" });
+      return true;
+    }
+    case "access_denied": {
+      reply.code(403).send({ error: "Access denied" });
+      return true;
+    }
+    case "group_failure": {
+      reply.code(500).send({ error: "Failed to resolve sync groups" });
+      return true;
+    }
+    case "policy_failure": {
+      reply.code(500).send({ error: "Failed to authorize sync access" });
+      return true;
+    }
+    default: {
+      return true;
+    }
+  }
+};
+
+const rejectWebSocketAuth = (
+  result: AuthResult,
+  socket: WebSocket,
+  sendError: (message: string, code?: string) => void
+): boolean => {
+  switch (result.status) {
+    case "authorized": {
+      return false;
+    }
+    case "invalid_token": {
+      sendError("Invalid token");
+      return true;
+    }
+    case "access_denied": {
+      sendError("Access denied");
+      return true;
+    }
+    case "group_failure": {
+      sendError("Failed to resolve sync groups");
+      if (socket.readyState === socket.OPEN) {
+        socket.close(1011, "Failed to resolve sync groups");
+      }
+      return true;
+    }
+    case "policy_failure": {
+      sendError("Failed to authorize sync access");
+      if (socket.readyState === socket.OPEN) {
+        socket.close(1011, "Failed to authorize sync access");
+      }
+      return true;
+    }
+    default: {
+      return true;
+    }
+  }
+};
+
 export const registerSyncWebsocket = (
   server: FastifyInstance,
   options: RegisterWebSocketOptions
@@ -80,37 +161,64 @@ export const registerSyncWebsocket = (
       get(
         path: string,
         opts: Record<string, unknown>,
-        handler: (socket: WebSocket) => void
+        handler: (socket: WebSocket, request?: SyncWebSocketRequest) => void
       ): void;
     }
   ).get(
     "/sync/ws",
     {
       preValidation: async (
-        request: { query: Record<string, string> },
-        reply: { code(n: number): { send(body: unknown): void } }
+        request: SyncWebSocketRequest,
+        reply: WebSocketUpgradeReply
       ) => {
-        const token = request.query?.token;
+        const queryToken = request.query?.token;
+        const header = request.headers?.authorization;
+        const headerToken = extractBearerToken(header);
+
+        if (header !== undefined && !headerToken) {
+          reply.code(401).send({ error: "Invalid authorization format" });
+          return;
+        }
+        if (
+          headerToken &&
+          queryToken !== undefined &&
+          queryToken !== headerToken
+        ) {
+          reply.code(400).send({ error: "Conflicting WebSocket credentials" });
+          return;
+        }
+
+        const token =
+          headerToken ?? (typeof queryToken === "string" ? queryToken : null);
         if (!token) {
           reply.code(401).send({ error: "Token required" });
           return;
         }
-        try {
-          const payload = await auth.verifyToken(token);
-          if (!payload) {
-            reply.code(401).send({ error: "Invalid token" });
-          }
-        } catch {
-          reply.code(401).send({ error: "Invalid token" });
+
+        const result = await authorizeToken(
+          auth,
+          syncDao,
+          token,
+          logger,
+          "read"
+        );
+        if (rejectWebSocketUpgradeAuth(result, reply)) {
+          return;
         }
+        if (result.status !== "authorized") {
+          return;
+        }
+        request.syncToken = token;
+        request.syncUser = result.user;
       },
       websocket: true,
     },
-    (socket: WebSocket) => {
+    (socket: WebSocket, request?: SyncWebSocketRequest) => {
       const connectionId = randomUUID();
       const session = new ClientSession(socket, deltaSubscriber);
       const messageMutex = new AsyncMutex();
       let cleanupPerformed = false;
+      let initialUser = request?.syncUser;
 
       const heartbeat = startHeartbeat(
         socket,
@@ -122,6 +230,9 @@ export const registerSyncWebsocket = (
       const getConnectionContext = () => ({
         connId: connectionId,
         groups: session.groups,
+        ...(session.principal === undefined
+          ? {}
+          : { principal: session.principal }),
         userId: session.userId ?? `anonymous-${connectionId}`,
       });
 
@@ -137,42 +248,31 @@ export const registerSyncWebsocket = (
 
         session.reset();
 
-        if (hooks?.onSubscribe) {
-          await hooks.onSubscribe(
-            socket,
-            getConnectionContext(),
-            previousContext
+        let user = initialUser;
+        initialUser = undefined;
+        if (!user) {
+          const authResult = await authorizeToken(
+            auth,
+            syncDao,
+            request?.syncToken ?? msg.token,
+            logger,
+            "read"
           );
           if (session.isClosed) {
             return;
           }
-        }
 
-        const authResult = await authorizeToken(
-          auth,
-          syncDao,
-          msg.token,
-          logger
-        );
-        if (session.isClosed) {
-          return;
-        }
-
-        // WS does not distinguish expired tokens from invalid ones.
-        if (authResult.status === "invalid_token") {
-          sendSocketError("Invalid token");
-          return;
-        }
-
-        if (authResult.status === "group_failure") {
-          sendSocketError("Failed to resolve sync groups");
-          if (socket.readyState === socket.OPEN) {
-            socket.close(1011, "Failed to resolve sync groups");
+          // WS does not distinguish expired tokens from invalid ones.
+          if (rejectWebSocketAuth(authResult, socket, sendSocketError)) {
+            return;
           }
-          return;
-        }
 
-        const { user } = authResult;
+          if (authResult.status !== "authorized") {
+            return;
+          }
+          const { user: authorizedUser } = authResult;
+          user = authorizedUser;
+        }
         const authorizedGroups = user.groups;
         const { groups, rejectedGroups } = resolveSubscribeGroups(
           authorizedGroups,
@@ -191,7 +291,23 @@ export const registerSyncWebsocket = (
         }
 
         const requestedAfterSyncId = SyncId.parse(msg.afterSyncId ?? "0");
-        session.beginReplay(user.userId, groups, requestedAfterSyncId);
+        session.beginReplay(
+          user.userId,
+          groups,
+          requestedAfterSyncId,
+          user.principal
+        );
+
+        if (hooks?.onSubscribe) {
+          await hooks.onSubscribe(
+            socket,
+            getConnectionContext(),
+            previousContext
+          );
+          if (session.isClosed) {
+            return;
+          }
+        }
 
         const earliestSyncId = await syncDao.getEarliestSyncId();
         if (session.isClosed) {

@@ -1,4 +1,9 @@
-import type { SyncAuthConfig, SyncLogger } from "../config.js";
+import type {
+  SyncAccessDecision,
+  SyncAccessOperation,
+  SyncAuthConfig,
+  SyncLogger,
+} from "../config.js";
 import { noopLogger } from "../config.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { SyncUserContext } from "../types.js";
@@ -32,9 +37,11 @@ export const verifyTokenOrNull = async (
 /**
  * Discriminated result of authorizing a token + resolving its sync groups.
  *
- * - `authorized`: token valid, groups resolved (deduped, including the userId).
+ * - `authorized`: token valid and groups resolved, then narrowed by policy.
  * - `invalid_token`: token missing/invalid (optionally expired).
  * - `group_failure`: token valid but group resolution threw.
+ * - `access_denied`: application policy rejected the operation.
+ * - `policy_failure`: application policy threw while deciding access.
  */
 export type AuthResult =
   | {
@@ -48,11 +55,19 @@ export type AuthResult =
   | {
       status: "group_failure";
       error: unknown;
+    }
+  | {
+      status: "access_denied";
+    }
+  | {
+      status: "policy_failure";
+      error: unknown;
     };
 
 /**
  * Authorizes a token end-to-end: verify, then resolve groups from auth and the
- * DAO in parallel, then dedupe (resolved + db + userId). Both the HTTP
+ * DAO in parallel, then dedupe (resolved + db + userId) before applying access
+ * policy. Both the HTTP
  * middleware and the WS subscribe path call this and map the discriminated
  * result to their existing byte-identical responses.
  */
@@ -60,7 +75,8 @@ export const authorizeToken = async (
   auth: SyncAuthConfig,
   syncDao: SyncDao,
   token: string,
-  logger: SyncLogger = noopLogger
+  logger: SyncLogger = noopLogger,
+  operation: SyncAccessOperation = "read"
 ): Promise<AuthResult> => {
   const { expired, payload } = await verifyTokenOrNull(auth, token);
 
@@ -76,7 +92,36 @@ export const authorizeToken = async (
       syncDao.getUserGroups(userId),
     ]);
 
-    const groups = dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
+    const resolved = dedupeSyncGroups([...resolvedGroups, ...dbGroups, userId]);
+    let groups = resolved;
+
+    if (auth.authorizeAccess) {
+      let decision: SyncAccessDecision | false;
+      try {
+        decision = await auth.authorizeAccess({
+          groups: resolved,
+          operation,
+          principal: payload.principal,
+          user: payload,
+        });
+      } catch (error) {
+        logger.error({ error, operation, userId }, "Sync access policy failed");
+        return { error, status: "policy_failure" };
+      }
+
+      if (!decision) {
+        return { status: "access_denied" };
+      }
+
+      const allowed = new Set(decision.allowedGroups);
+      groups = resolved.filter((group) => allowed.has(group));
+    } else if (payload.principal !== undefined) {
+      logger.warn(
+        { operation, userId },
+        "Sync principal rejected because no access policy is configured"
+      );
+      return { status: "access_denied" };
+    }
 
     return {
       status: "authorized",
@@ -84,6 +129,9 @@ export const authorizeToken = async (
         email: payload.email,
         groups,
         name: payload.name,
+        ...(payload.principal === undefined
+          ? {}
+          : { principal: payload.principal }),
         userId,
       },
     };

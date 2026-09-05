@@ -57,11 +57,38 @@ export interface SyncAuthPayload {
   userId: string;
   email?: string;
   name?: string | null;
+  /**
+   * Opaque credential identity for application authorization policy. The sync
+   * server carries it without interpreting it.
+   */
+  principal?: unknown;
+}
+
+export type SyncAccessOperation = "read" | "write";
+
+export interface SyncAccessContext {
+  groups: readonly string[];
+  operation: SyncAccessOperation;
+  principal: unknown;
+  user: SyncAuthPayload;
+}
+
+export interface SyncAccessDecision {
+  /** Exact subset of resolved groups this credential may use. */
+  allowedGroups: readonly string[];
 }
 
 export interface SyncAuthConfig {
   verifyToken: (token: string) => Promise<SyncAuthPayload | null>;
   resolveGroups: (userId: string) => Promise<string[]>;
+  /**
+   * Narrows a credential to an operation and a subset of the user's resolved
+   * groups. A principal without this policy is rejected rather than treated as
+   * an unrestricted user.
+   */
+  authorizeAccess?: (
+    context: SyncAccessContext
+  ) => SyncAccessDecision | false | Promise<SyncAccessDecision | false>;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +184,19 @@ export interface CompositeMutateConfig {
       payload: Record<string, unknown>
     ) => string;
   };
+  onBeforeInsert?: (
+    db: unknown,
+    modelId: string,
+    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
+    context?: SyncUserContext
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  onBeforeDelete?: (
+    db: unknown,
+    modelId: string,
+    payload: Record<string, unknown>,
+    context?: SyncUserContext
+  ) => void | Promise<void>;
   onAfterMutation?: (ctx: MutationContext) => void | Promise<void>;
 }
 
@@ -227,6 +267,7 @@ export interface WebSocketConnectionContext {
   userId: string;
   connId: string;
   groups: string[];
+  principal?: unknown;
 }
 
 export interface WebSocketHooks {
@@ -279,7 +320,8 @@ export interface SyncServer {
    * Tells a user their sync-group membership changed.
    *
    * Writes a `"G"` sync action addressed to the user's own group carrying their
-   * full current group list, then publishes it. Because it is an ordinary sync
+   * current group list, then publishes it. Credential-aware delivery narrows
+   * that payload to the final authorized groups. Because it is an ordinary sync
    * action it is durable: it is delivered on the live delta stream if they are
    * connected, and by replay or catch-up whenever they next are. That is the
    * point — a membership change must not be lost while a user is offline, or
