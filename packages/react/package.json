@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/react",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "@stratasync/react: React provider and hooks for Strata Sync, an open-source implementation of Linear's sync engine.",
   "keywords": [
     "collaborative-editing",

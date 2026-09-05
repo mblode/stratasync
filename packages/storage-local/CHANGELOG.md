@@ -1,5 +1,13 @@
 # @stratasync/storage-local
 
+## 2.3.0
+
+### Patch Changes
+
+- Updated dependencies [0f82e5f]
+  - @stratasync/client@2.3.0
+  - @stratasync/core@2.3.0
+
 ## 2.2.0
 
 ### Patch Changes
