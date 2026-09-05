@@ -196,8 +196,7 @@ describe(registerSyncRoutes, () => {
       expect(bootstrapResponse.body).toBe(
         '{"type":"metadata"}\n{"type":"row"}\n'
       );
-      expect(bootstrapResponse.headers["cache-control"]).toBe("no-cache");
-      expect(bootstrapResponse.headers.connection).toBe("keep-alive");
+      expect(bootstrapResponse.headers["cache-control"]).toBe("no-store");
       expect(bootstrapResponse.headers["content-type"]).toContain(
         "application/x-ndjson"
       );
@@ -223,8 +222,7 @@ describe(registerSyncRoutes, () => {
 
       expect(batchResponse.statusCode).toBe(200);
       expect(batchResponse.body).toBe('{"type":"metadata"}\n{"type":"row"}\n');
-      expect(batchResponse.headers["cache-control"]).toBe("no-cache");
-      expect(batchResponse.headers.connection).toBe("keep-alive");
+      expect(batchResponse.headers["cache-control"]).toBe("no-store");
       expect(batchResponse.headers["content-type"]).toContain(
         "application/x-ndjson"
       );
@@ -235,6 +233,37 @@ describe(registerSyncRoutes, () => {
       expect(
         batchResponse.headers["access-control-allow-credentials"]
       ).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps Fastify lifecycle hooks active for streamed bootstrap errors", async () => {
+    const onResponse = vi.fn();
+    const bootstrapService = {
+      async *batchLoadNdjson() {
+        yield* [];
+      },
+      async *generateBootstrapNdjson() {
+        yield '{"type":"metadata"}';
+        throw new Error("stream failed");
+      },
+    } as unknown as BootstrapService;
+    const { app } = createApp({ bootstrapService });
+    app.addHook("onResponse", onResponse);
+
+    try {
+      const response = await app.inject({
+        headers: { authorization: "Bearer token" },
+        method: "GET",
+        url: "/sync/bootstrap?schemaHash=abc",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(
+        '{"type":"metadata"}\n{"message":"stream failed","type":"error"}\n'
+      );
+      expect(onResponse).toHaveBeenCalledOnce();
     } finally {
       await app.close();
     }

@@ -176,11 +176,14 @@ caller's job (`syncDao.addGroupMembership` / `removeGroupMembership`).
 The client side is already handled by `@stratasync/client`: `SyncGroupManager`
 partial-bootstraps added groups and drops removed ones. A client that does not
 understand `"G"` actions ignores them (the row-applying path skips actions whose
-model is not in its registry) and converges on its next bootstrap.
+model is not in its registry) and converges on its next bootstrap. The server
+still shrinks an active WebSocket subscription before delivering later actions,
+so ignoring the refresh cannot retain access to a removed group. Refreshes never
+add groups to a connection; additions require another authorized subscribe.
 
 ## Auth
 
-Auth is pluggable via two callbacks:
+Auth is pluggable. Existing user-only authentication needs two callbacks:
 
 ```typescript
 auth: {
@@ -189,7 +192,40 @@ auth: {
 }
 ```
 
-The package does not know about JWT, API keys, or any auth provider. Your app provides the verification logic.
+For credentials with narrower authority than their user, preserve an opaque
+principal and authorize the operation plus its final groups in one callback:
+
+```typescript
+auth: {
+  verifyToken: async (token) => ({
+    userId: key.userId,
+    principal: { kind: "apiKey", scopes: key.scopes, groupIds: key.groupIds },
+  }),
+  resolveGroups,
+  authorizeAccess: async ({ groups, operation, principal }) => {
+    if (!canUseOperation(principal, operation)) return false;
+    return { allowedGroups: groups.filter((group) => canUseGroup(principal, group)) };
+  },
+}
+```
+
+The policy runs for every HTTP request and WebSocket subscribe. It may only
+narrow resolved groups; unknown groups in `allowedGroups` are discarded, and
+the personal user group is retained only when the policy returns it. A
+verified payload that carries `principal` fails closed when `authorizeAccess`
+is missing. The opaque principal and final group set are available to mutation,
+group-resolution, and WebSocket hooks. Durable group-refresh actions are also
+intersected with the connection's existing groups before delivery. This removes
+revoked groups immediately and cannot widen a restricted credential.
+
+The package does not know about JWT, API keys, or any auth provider. Your app provides the verification and policy logic.
+
+WebSocket upgrades prefer the standard `Authorization: Bearer ...` credential
+and retain `?token=` as a legacy fallback. Conflicting header and query tokens
+are rejected. The selected upgrade credential cannot be overridden by a token
+inside a subscribe frame: its authorized context is cached for the first
+subscribe, then the same credential is verified and authorized again on every
+resubscribe. This also rechecks credential expiry and current group policy.
 
 ## WebSocket Hooks
 
@@ -221,9 +257,16 @@ import { createSyncServer, SyncDao, BootstrapService, ... } from "@stratasync/se
 import { registerSyncRoutes, createSyncAuthMiddleware, ... } from "@stratasync/server/fastify";
 ```
 
+`createBootstrapRouteHandler(sync.bootstrapService)` and
+`createBatchLoadRouteHandler(sync.bootstrapService)` expose the same native
+Fastify streams when an app registers those routes itself. They return Node
+streams through `reply.send`, preserving Fastify lifecycle hooks and stream
+backpressure.
+
 ## Error Handling
 
 - **Pub/sub callback errors** are caught and silently ignored (standard event emitter pattern). Delta delivery is best-effort.
 - **Mutation hook errors** (`onAfterMutation`) are logged as warnings but do not fail the transaction. The sync action is already committed.
-- **Auth failures** return 401 with descriptive error messages.
+- **Authentication failures** return 401. Access-policy denials return 403;
+  policy execution failures return 500.
 - **Validation failures** return 400 with field-level error details.

@@ -123,6 +123,8 @@ export interface CompositeModelDef {
   delegate: MutationDelegate;
   actions: Set<ModelAction>;
   insertFields: Record<string, FieldSpec>;
+  onBeforeInsert?: StandardModelDef["onBeforeInsert"];
+  onBeforeDelete?: StandardModelDef["onBeforeDelete"];
 }
 
 export type ModelDef = StandardModelDef | CompositeModelDef;
@@ -149,7 +151,7 @@ const handleInsert = async (
   const hasId = def.kind === "standard";
   let data = buildInsertData(hasId ? modelId : null, payload, def.insertFields);
 
-  if (def.kind === "standard" && def.onBeforeInsert) {
+  if (def.onBeforeInsert) {
     data = await def.onBeforeInsert(db, modelId, payload, data, context);
   }
 
@@ -204,7 +206,7 @@ const handleDelete = async (
   payload: Record<string, unknown>,
   context?: SyncUserContext
 ): Promise<Record<string, unknown>> => {
-  if (def.kind === "standard" && def.onBeforeDelete) {
+  if (def.onBeforeDelete) {
     await def.onBeforeDelete(db, modelId, payload, context);
   }
   if (def.kind === "composite") {

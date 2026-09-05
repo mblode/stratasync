@@ -1,12 +1,17 @@
 export {
   createSyncAuthMiddleware,
+  extractBearerToken,
   getSyncUser,
   validateBody,
   validateQuery,
 } from "./middleware.js";
 export type { SyncAuthenticatedRequest } from "./middleware.js";
 
-export { registerSyncRoutes } from "./routes.js";
+export {
+  createBatchLoadRouteHandler,
+  createBootstrapRouteHandler,
+  registerSyncRoutes,
+} from "./routes.js";
 
 export {
   BatchLoadBodySchema,

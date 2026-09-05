@@ -3,7 +3,11 @@ import { z } from "zod";
 import type { ZodType } from "zod";
 
 import { authorizeToken } from "../auth/authorize.js";
-import type { SyncAuthConfig, SyncLogger } from "../config.js";
+import type {
+  SyncAccessOperation,
+  SyncAuthConfig,
+  SyncLogger,
+} from "../config.js";
 import { noopLogger } from "../config.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { SyncUserContext } from "../types.js";
@@ -17,7 +21,9 @@ type SyncAuthMiddleware = (
   reply: FastifyReply
 ) => Promise<void>;
 
-const extractBearerToken = (authHeader: string | null): string | null => {
+export const extractBearerToken = (
+  authHeader: string | null | undefined
+): string | null => {
   if (!authHeader) {
     return null;
   }
@@ -31,7 +37,8 @@ const extractBearerToken = (authHeader: string | null): string | null => {
 export const createSyncAuthMiddleware = (
   auth: SyncAuthConfig,
   syncDao: SyncDao,
-  logger: SyncLogger = noopLogger
+  logger: SyncLogger = noopLogger,
+  operation: SyncAccessOperation = "read"
 ): SyncAuthMiddleware =>
   async function syncAuthMiddleware(
     request: FastifyRequest,
@@ -55,7 +62,13 @@ export const createSyncAuthMiddleware = (
       return;
     }
 
-    const result = await authorizeToken(auth, syncDao, token, logger);
+    const result = await authorizeToken(
+      auth,
+      syncDao,
+      token,
+      logger,
+      operation
+    );
 
     if (result.status === "invalid_token") {
       reply
@@ -66,6 +79,16 @@ export const createSyncAuthMiddleware = (
 
     if (result.status === "group_failure") {
       reply.code(500).send({ error: "Failed to resolve sync groups" });
+      return;
+    }
+
+    if (result.status === "access_denied") {
+      reply.code(403).send({ error: "Access denied" });
+      return;
+    }
+
+    if (result.status === "policy_failure") {
+      reply.code(500).send({ error: "Failed to authorize sync access" });
       return;
     }
 

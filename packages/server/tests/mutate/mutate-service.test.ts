@@ -475,6 +475,35 @@ const createCompositeDeleteModelConfig = (): SyncModelConfig => ({
   table: taskLabels,
 });
 
+const createCompositeInsertModelConfig = (
+  onBeforeInsert: NonNullable<
+    Extract<SyncModelConfig["mutate"], { kind: "composite" }>["onBeforeInsert"]
+  >,
+  groupKey: SyncModelConfig["groupKey"] = null
+): SyncModelConfig => ({
+  bootstrap: {
+    buildScopeWhere: () => sql`true`,
+    cursor: {
+      fields: ["taskId", "labelId"],
+      syntheticId: (item) => `${item.taskId}:${item.labelId}`,
+      type: "composite",
+    },
+    fields: ["taskId", "labelId"],
+  },
+  groupKey,
+  mutate: {
+    actions: new Set(["I"]),
+    buildDeleteWhere: () => sql`true`,
+    insertFields: {
+      labelId: { type: "string" },
+      taskId: { type: "string" },
+    },
+    kind: "composite",
+    onBeforeInsert,
+  },
+  table: taskLabels,
+});
+
 // ---------------------------------------------------------------------------
 // MutateService.validateTransaction
 // ---------------------------------------------------------------------------
@@ -903,5 +932,88 @@ describe("MutateService.mutate", () => {
       error: "Invalid mutation: record not found",
       success: false,
     });
+  });
+
+  it("rolls back a rejected composite hook and permits a clean retry", async () => {
+    const { committedWrites, db, transactionCalls } = createMutationDb();
+    const dao = new SyncDao(db, { syncActions, syncGroupMemberships });
+    let parentExists = false;
+    const onBeforeInsert = vi.fn().mockImplementation((hookDb) => {
+      expect(hookDb).not.toBe(db);
+      if (!parentExists) {
+        throw new Error("Parent not found in this workspace");
+      }
+      return {
+        labelId: "label-1",
+        taskId: "task-1",
+      };
+    });
+    const service = new MutateService(db, dao, {
+      TaskLabel: createCompositeInsertModelConfig(onBeforeInsert),
+    });
+    const input = {
+      batchId: "batch-1",
+      transactions: [
+        {
+          action: "INSERT" as const,
+          clientId: "client-1",
+          clientTxId: "tx-1",
+          modelId: "task-1:label-1",
+          modelName: "TaskLabel",
+          payload: { labelId: "label-1", taskId: "task-1" },
+        },
+      ],
+    };
+
+    const rejected = await service.mutate(
+      { groups: [], userId: "user-1" },
+      input
+    );
+    expect(rejected.success).toBeFalsy();
+    expect(committedWrites).toEqual([]);
+
+    parentExists = true;
+    const retried = await service.mutate(
+      { groups: [], userId: "user-1" },
+      input
+    );
+
+    expect(retried.success).toBeTruthy();
+    expect(transactionCalls()).toBe(2);
+    expect(onBeforeInsert).toHaveBeenCalledTimes(2);
+    expect(committedWrites.map((write) => write.table)).toEqual([
+      "unknown",
+      "sync_actions",
+    ]);
+  });
+
+  it("checks composite group access before running its before hook", async () => {
+    const { committedWrites, db } = createMutationDb();
+    const dao = new SyncDao(db, { syncActions, syncGroupMemberships });
+    const onBeforeInsert = vi.fn();
+    const service = new MutateService(db, dao, {
+      TaskLabel: createCompositeInsertModelConfig(onBeforeInsert, "taskId"),
+    });
+
+    const result = await service.mutate(
+      { groups: ["another-task"], userId: "user-1" },
+      {
+        batchId: "batch-1",
+        transactions: [
+          {
+            action: "INSERT",
+            clientId: "client-1",
+            clientTxId: "tx-1",
+            modelId: "task-1:label-1",
+            modelName: "TaskLabel",
+            payload: { labelId: "label-1", taskId: "task-1" },
+          },
+        ],
+      }
+    );
+
+    expect(result.success).toBeFalsy();
+    expect(onBeforeInsert).not.toHaveBeenCalled();
+    expect(committedWrites).toEqual([]);
   });
 });

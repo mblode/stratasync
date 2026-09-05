@@ -1,4 +1,11 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Readable } from "node:stream";
+
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  RouteHandlerMethod,
+} from "fastify";
 
 import type { BootstrapService } from "../bootstrap/bootstrap-service.js";
 import type { SyncLogger } from "../config.js";
@@ -33,22 +40,74 @@ import {
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 5000;
 
-const setNdjsonStreamHeaders = (reply: FastifyReply): void => {
-  // Copy plugin-set headers (e.g. CORS) to the raw response before streaming
-  const pluginHeaders = reply.getHeaders();
-  for (const [key, value] of Object.entries(pluginHeaders)) {
-    if (value !== undefined) {
-      reply.raw.setHeader(key, value as number | string | string[]);
-    }
-  }
+const splitList = (value: string | undefined): string[] | undefined =>
+  value?.split(",").filter(Boolean);
 
-  reply.raw.statusCode = 200;
-  reply.raw.setHeader("Cache-Control", "no-cache");
-  reply.raw.setHeader("Connection", "keep-alive");
-  reply.raw.setHeader("Content-Type", "application/x-ndjson");
-  reply.raw.setHeader("Transfer-Encoding", "chunked");
-  reply.hijack();
+const withNdjsonErrors = async function* withNdjsonErrors(
+  lines: AsyncIterable<string>
+): AsyncGenerator<string> {
+  try {
+    for await (const line of lines) {
+      yield `${line}\n`;
+    }
+  } catch (error) {
+    yield `${JSON.stringify({
+      message: error instanceof Error ? error.message : "Unknown error",
+      type: "error",
+    })}\n`;
+  }
 };
+
+const sendNdjson = (
+  reply: FastifyReply,
+  lines: AsyncIterable<string>
+): FastifyReply => {
+  reply.header("Cache-Control", "no-store");
+  reply.type("application/x-ndjson");
+  return reply.send(
+    Readable.from(withNdjsonErrors(lines), { encoding: "utf8" })
+  );
+};
+
+/** Creates the native Fastify bootstrap stream handler for custom route wiring. */
+export const createBootstrapRouteHandler =
+  (
+    bootstrapService: Pick<BootstrapService, "generateBootstrapNdjson">
+  ): RouteHandlerMethod =>
+  (request, reply) => {
+    const syncUser = getSyncUser(request);
+    const query = request.query as BootstrapQuery;
+    const syncGroups = resolveRequestedSyncGroups(
+      syncUser.groups,
+      splitList(query.syncGroups)
+    );
+
+    return sendNdjson(
+      reply,
+      bootstrapService.generateBootstrapNdjson(syncUser, {
+        firstSyncId: query.firstSyncId,
+        groups: syncGroups,
+        models: splitList(query.onlyModels),
+        noSyncPackets: query.noSyncPackets === "true",
+        schemaHash: query.schemaHash ?? "",
+        type: query.type,
+      })
+    );
+  };
+
+/** Creates the native Fastify batch-load stream handler for custom route wiring. */
+export const createBatchLoadRouteHandler =
+  (
+    bootstrapService: Pick<BootstrapService, "batchLoadNdjson">
+  ): RouteHandlerMethod =>
+  (request, reply) => {
+    const syncUser = getSyncUser(request);
+    const { firstSyncId, requests } = request.body as BatchLoadBody;
+    return sendNdjson(
+      reply,
+      bootstrapService.batchLoadNdjson(syncUser, requests, firstSyncId)
+    );
+  };
 
 interface RegisterRoutesOptions {
   bootstrapService: BootstrapService;
@@ -56,6 +115,10 @@ interface RegisterRoutesOptions {
   mutateService: MutateService;
   deltaPublisher?: DeltaPublisherLike;
   authMiddleware: (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => Promise<void>;
+  writeAuthMiddleware?: (
     request: FastifyRequest,
     reply: FastifyReply
   ) => Promise<void>;
@@ -73,88 +136,21 @@ export const registerSyncRoutes = (
     deltaService,
     logger = noopLogger,
     mutateService,
+    writeAuthMiddleware = authMiddleware,
   } = options;
 
   // GET /sync/bootstrap
   server.get<{ Querystring: BootstrapQuery }>(
     "/sync/bootstrap",
     { preHandler: [validateQuery(BootstrapQuerySchema), authMiddleware] },
-    async (
-      request: FastifyRequest<{ Querystring: BootstrapQuery }>,
-      reply: FastifyReply
-    ) => {
-      const syncUser = getSyncUser(request);
-      const { query } = request;
-
-      const onlyModels = query.onlyModels?.split(",").filter(Boolean);
-      const requestedGroups = query.syncGroups?.split(",").filter(Boolean);
-      const syncGroups = resolveRequestedSyncGroups(
-        syncUser.groups,
-        requestedGroups
-      );
-      const { firstSyncId, schemaHash, type } = query;
-
-      setNdjsonStreamHeaders(reply);
-
-      try {
-        for await (const line of bootstrapService.generateBootstrapNdjson(
-          syncUser,
-          {
-            firstSyncId,
-            groups: syncGroups,
-            models: onlyModels,
-            noSyncPackets: query.noSyncPackets === "true",
-            schemaHash: schemaHash ?? "",
-            type,
-          }
-        )) {
-          reply.raw.write(`${line}\n`);
-        }
-      } catch (error) {
-        reply.raw.write(
-          `${JSON.stringify({
-            message: error instanceof Error ? error.message : "Unknown error",
-            type: "error",
-          })}\n`
-        );
-      }
-
-      reply.raw.end();
-    }
+    createBootstrapRouteHandler(bootstrapService)
   );
 
   // POST /sync/batch
   server.post<{ Body: BatchLoadBody }>(
     "/sync/batch",
     { preHandler: [validateBody(BatchLoadBodySchema), authMiddleware] },
-    async (
-      request: FastifyRequest<{ Body: BatchLoadBody }>,
-      reply: FastifyReply
-    ) => {
-      const syncUser = getSyncUser(request);
-      const { firstSyncId, requests } = request.body;
-
-      setNdjsonStreamHeaders(reply);
-
-      try {
-        for await (const line of bootstrapService.batchLoadNdjson(
-          syncUser,
-          requests,
-          firstSyncId
-        )) {
-          reply.raw.write(`${line}\n`);
-        }
-      } catch (error) {
-        reply.raw.write(
-          `${JSON.stringify({
-            message: error instanceof Error ? error.message : "Unknown error",
-            type: "error",
-          })}\n`
-        );
-      }
-
-      reply.raw.end();
-    }
+    createBatchLoadRouteHandler(bootstrapService)
   );
 
   // GET /sync/deltas
@@ -222,7 +218,7 @@ export const registerSyncRoutes = (
   // POST /sync/mutate
   server.post<{ Body: MutateBody }>(
     "/sync/mutate",
-    { preHandler: [validateBody(MutateBodySchema), authMiddleware] },
+    { preHandler: [validateBody(MutateBodySchema), writeAuthMiddleware] },
     async (
       request: FastifyRequest<{ Body: MutateBody }>,
       reply: FastifyReply

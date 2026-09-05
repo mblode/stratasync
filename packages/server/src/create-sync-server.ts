@@ -90,6 +90,12 @@ export const createSyncServer = async (
       syncDao,
       logger
     );
+    const writeAuthMiddleware = createSyncAuthMiddleware(
+      config.auth,
+      syncDao,
+      logger,
+      "write"
+    );
 
     registerSyncRoutes(fastifyServer, {
       authMiddleware,
@@ -98,6 +104,7 @@ export const createSyncServer = async (
       deltaService,
       logger,
       mutateService,
+      writeAuthMiddleware,
     });
 
     registerSyncWebsocket(fastifyServer, {
@@ -124,8 +131,9 @@ export const createSyncServer = async (
    * client's cache serving rows from a group it no longer belongs to until
    * something forced a full bootstrap.
    *
-   * The action is addressed to the user's own group, which `authorizeToken`
-   * always includes, so exactly that user receives it.
+   * The action is addressed to the user's own group. Credential policies that
+   * need live refreshes must include that group in their allowed set; delivery
+   * rewrites the payload to the connection's final authorized groups.
    */
   const notifyGroupsChanged = async (userId: string): Promise<void> => {
     const [resolvedGroups, dbGroups] = await Promise.all([
