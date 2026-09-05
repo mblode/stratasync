@@ -661,13 +661,16 @@ export class DeltaPipeline {
     const pending = await this.getActiveOutboxTransactions();
     const privacyMeta = await this.ctx.storage.getMeta();
     const { privacyWithheldClientTxIds } = privacyMeta;
+    const replayPending = !this.ctx.isGroupChangePending();
 
     this.ctx.identityMaps.batch(() => {
-      const replayablePending = excludePrivacyWithheldTransactions(
-        pending,
-        privacyWithheldClientTxIds,
-        this.ctx.identityMaps
-      );
+      const replayablePending = replayPending
+        ? excludePrivacyWithheldTransactions(
+            pending,
+            privacyWithheldClientTxIds,
+            this.ctx.identityMaps
+          )
+        : [];
       touchPendingTransactionTargets(this.ctx.identityMaps, replayablePending);
 
       // Process conflict rollbacks inside the batch.  This ensures that
@@ -704,11 +707,7 @@ export class DeltaPipeline {
       }
       applyPendingTransactionsToIdentityMaps(
         this.ctx.identityMaps,
-        excludePrivacyWithheldTransactions(
-          pending,
-          privacyWithheldClientTxIds,
-          this.ctx.identityMaps
-        )
+        replayablePending
       );
     });
 

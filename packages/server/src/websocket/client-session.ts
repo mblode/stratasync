@@ -196,22 +196,12 @@ export class ClientSession {
    * both replay and live delivery.
    */
   async sendDeltaAction(action: SyncActionOutput): Promise<void> {
-    await this.deliverDeltaAction(action, false);
-  }
-
-  private async deliverDeltaAction(
-    action: SyncActionOutput,
-    allowStaleGroupRefresh: boolean
-  ): Promise<void> {
     if (this.phase === "closed") {
       return;
     }
 
     const syncId = SyncId.parse(action.syncId);
-    if (
-      syncId <= this.afterSyncId &&
-      !(allowStaleGroupRefresh && isSyncGroupsAction(action))
-    ) {
+    if (syncId <= this.afterSyncId) {
       return;
     }
 
@@ -252,11 +242,7 @@ export class ClientSession {
         this.groupRefreshCursor = syncId;
       }
       this.socket.send(
-        buildDeltaFrame(
-          scopedAction,
-          SyncId.serialize(this.afterSyncId),
-          action.syncId
-        )
+        buildDeltaFrame(scopedAction, SyncId.serialize(this.afterSyncId))
       );
     }
   }
@@ -295,7 +281,11 @@ export class ClientSession {
         pageSize
       );
       for (const action of actions) {
-        await this.deliverDeltaAction(toSyncActionOutput(action), true);
+        if (action.id <= this.afterSyncId) {
+          this.requireBootstrap();
+          return;
+        }
+        await this.sendDeltaAction(toSyncActionOutput(action));
         if (this.isClosed) {
           return;
         }

@@ -1220,6 +1220,17 @@ async function* reconciledEmpty(): AsyncGenerator<
   return { lastSyncId: "70", subscribedSyncGroups: [] };
 }
 
+// oxlint-disable-next-line func-style -- generators require function declaration
+async function* failedPrivacyBootstrap(): AsyncGenerator<
+  ModelRow,
+  BootstrapMetadata,
+  unknown
+> {
+  await Promise.resolve();
+  yield { data: { id: "replacement" }, modelName: "Task" };
+  throw new Error("privacy bootstrap failed");
+}
+
 const readGroupChangePending = async (
   storage: InMemoryStorage
 ): Promise<boolean | undefined> => {
@@ -4044,6 +4055,78 @@ describe("reverse-done alignment", () => {
       expect(client.getCached("Task", "task-1")).toBeNull();
       expect(await storage.get("Task", "task-1")).toBeNull();
       expect(await storage.getOutbox()).toHaveLength(0);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("does not restore a revoked row when rejection arrives while privacy bootstrap is failing", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Private" },
+          modelName: "Task",
+        },
+      ],
+    });
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return failedPrivacyBootstrap();
+    }) as TestTransport["bootstrap"];
+    transport.mutate = (batch: TransactionBatch): Promise<MutateResult> =>
+      Promise.resolve({
+        lastSyncId: "60",
+        results: batch.transactions.map((tx) => ({
+          clientTxId: tx.clientTxId,
+          error: "access revoked",
+          success: false,
+        })),
+        success: true,
+      });
+    const client = createSyncClient({
+      batchDelay: 50,
+      batchMutations: true,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      await client.delete("Task", "task-1");
+      transport.emitDelta(groupActionPacket("60"));
+
+      await waitUntil(
+        () => readGroupChangePending(storage),
+        "Timed out waiting for the privacy latch"
+      );
+      await waitUntil(async () => {
+        const outbox = await storage.getOutbox();
+        return outbox.length === 0;
+      });
+
+      expect(client.getCached("Task", "task-1")).toBeNull();
+      expect(await readGroupChangePending(storage)).toBeTruthy();
+      await expect(
+        client.create("Task", {
+          id: "task-during-reconcile",
+          teamId: "team-1",
+          title: "Must wait",
+        })
+      ).rejects.toThrow("reconciling access");
+      expect(client.getCached("Task", "task-during-reconcile")).toBeNull();
     } finally {
       await client.stop();
     }

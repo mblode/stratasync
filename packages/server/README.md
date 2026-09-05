@@ -310,12 +310,12 @@ lookup per protected frame.
 `webSocketGroupRefreshCatchUpIntervalMs` scans the durable personal-group
 `"G"` actions using a separate cursor. It repairs active clients after missed
 Redis messages and makes newly granted groups discoverable; confidentiality
-still comes from per-frame reauthorization. A recovered older `"G"` action is
-sent with the current packet cursor so the main cursor never moves backwards.
-Clients must treat every `"G"` action as a bootstrap signal even if that
-action's own sync ID is older. Falling behind sync-action retention emits
-`BOOTSTRAP_REQUIRED` and closes the socket instead of silently skipping a
-membership change.
+still comes from per-frame reauthorization. If a later delta already advanced
+the session past a recovered `"G"` action, the server emits
+`BOOTSTRAP_REQUIRED` and closes the socket. This keeps recovery compatible with
+clients that discard stale actions before interpreting `"G"`. Falling behind
+sync-action retention does the same instead of silently skipping a membership
+change.
 
 ## WebSocket Hooks
 

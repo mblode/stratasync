@@ -50,8 +50,7 @@ export const isSubscribeMessage = (msg: unknown): msg is SubscribeMessage => {
  */
 export const buildDeltaFrame = (
   action: SyncActionOutput,
-  lastSyncId: string,
-  actionSyncId = lastSyncId
+  lastSyncId: string
 ): string =>
   safeJsonStringify({
     packet: {
@@ -65,7 +64,7 @@ export const buildDeltaFrame = (
           groupId: action.groupId,
           modelId: action.modelId,
           modelName: action.modelName,
-          syncId: actionSyncId,
+          syncId: lastSyncId,
         },
       ],
       lastSyncId,

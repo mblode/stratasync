@@ -47,6 +47,8 @@ import { getModelData, getModelKey } from "./utils.js";
 
 const MUTATION_START_REQUIRED_ERROR =
   "Sync client must be started before mutations";
+const MUTATION_PRIVACY_RECONCILE_ERROR =
+  "Sync client is reconciling access; retry the mutation when sync completes";
 
 /**
  * Creates a sync client instance.
@@ -133,6 +135,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     const map = identityMaps.getMap<Record<string, unknown>>(tx.modelName);
     const existing = map.get(tx.modelId);
     const { original } = tx;
+
+    // G/S invalidation quarantines every previously visible row immediately.
+    // Until its authoritative replacement commits, a rejected write must not
+    // restore an old snapshot that may now be outside the user's authority.
+    // Removing a rejected optimistic insert remains safe.
+    if (orchestrator.isGroupChangeReconcilePending() && tx.action !== "I") {
+      return;
+    }
 
     switch (tx.action) {
       case "I": {
@@ -461,7 +471,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       await startPromise;
     }
 
-    return runWithStateLock(() => operation(getStartedOutboxManager()));
+    return runWithStateLock(() => {
+      if (orchestrator.isGroupChangeReconcilePending()) {
+        throw new Error(MUTATION_PRIVACY_RECONCILE_ERROR);
+      }
+      return operation(getStartedOutboxManager());
+    });
   };
 
   const rehydrateOutboxWithSyncCursor = async (
@@ -474,6 +489,9 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       const pending = await activeOutboxManager.getActiveTransactions();
       if (pending.length > 0) {
         const meta = await options.storage.getMeta();
+        if (meta.groupChangePending) {
+          return;
+        }
         identityMaps.batch(() => {
           applyPendingTransactionsToIdentityMaps(
             identityMaps,

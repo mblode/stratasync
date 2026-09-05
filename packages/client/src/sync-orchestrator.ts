@@ -243,6 +243,10 @@ export class SyncOrchestrator {
     return this.cursor.lastSyncId;
   }
 
+  isGroupChangeReconcilePending(): boolean {
+    return this.groupChangePending;
+  }
+
   /**
    * Gets the first sync ID from the last full bootstrap
    */
@@ -371,6 +375,9 @@ export class SyncOrchestrator {
   private async applyPendingOutboxTransactions(
     authoritativeReplacement = false
   ): Promise<void> {
+    if (this.groupChangePending && !authoritativeReplacement) {
+      return;
+    }
     const pending = await this.getActiveOutboxTransactions();
     const meta = await this.storage.getMeta();
     let withheldIds = meta.privacyWithheldClientTxIds ?? [];

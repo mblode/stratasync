@@ -3,4 +3,4 @@
 "@stratasync/client": patch
 ---
 
-Reauthorize protected WebSocket delivery against authoritative groups, recover missed durable group refreshes, route audience-changing mutations from post-state, and make client replacement bootstraps discard revoked local data.
+Reauthorize protected WebSocket delivery against authoritative groups, force deployed clients to bootstrap after a stale missed group refresh, route audience-changing mutations from complete post-state, and quarantine optimistic rollback and mutation replay until privacy replacement succeeds.

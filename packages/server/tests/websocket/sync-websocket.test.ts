@@ -820,7 +820,7 @@ describe(registerSyncWebsocket, () => {
     expect(deliveredSyncIds).toEqual(["1", "2"]);
   });
 
-  it("durably catches up a G action after a later live delta advanced the cursor", async () => {
+  it("forces bootstrap when a missed G action is older than the live cursor", async () => {
     vi.useFakeTimers();
     try {
       const deltaSubscriber = new MockDeltaSubscriber();
@@ -859,20 +859,51 @@ describe(registerSyncWebsocket, () => {
       await vi.advanceTimersByTimeAsync(100);
       expect(harness.socket.sent).toHaveLength(3);
       expect(parseMessage(harness.socket.sent[2])).toMatchObject({
+        code: "BOOTSTRAP_REQUIRED",
+        type: "error",
+      });
+      expect(harness.socket.closeCalls).toEqual([
+        { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delivers a caught-up G action that advances the live cursor", async () => {
+    vi.useFakeTimers();
+    try {
+      const groupRefresh = {
+        ...createReplayAction(1n),
+        action: "G",
+        data: { subscribedSyncGroups: ["workspace-1", "user-1"] },
+        groupId: "user-1",
+        model: "__sync_groups__",
+        modelId: "user-1",
+      };
+      const harness = setup({
+        getLastSyncIdForGroups: vi.fn().mockResolvedValue(1n),
+        getSyncGroupActions: vi.fn().mockResolvedValue([groupRefresh]),
+        reauthorizeBeforeWebSocketDelivery: true,
+        resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+        webSocketGroupRefreshCatchUpIntervalMs: 100,
+      });
+
+      harness.socket.emit(
+        "message",
+        Buffer.from(JSON.stringify({ token: "tok", type: "subscribe" }))
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(parseMessage(harness.socket.sent[1])).toMatchObject({
         packet: {
-          actions: [
-            {
-              action: "G",
-              data: {
-                subscribedSyncGroups: ["workspace-1", "user-1"],
-              },
-              syncId: "1",
-            },
-          ],
-          lastSyncId: "2",
+          actions: [{ action: "G", syncId: "1" }],
+          lastSyncId: "1",
         },
         type: "delta",
       });
+      expect(harness.socket.closeCalls).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
