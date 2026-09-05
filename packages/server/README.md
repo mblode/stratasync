@@ -157,13 +157,15 @@ Task: {
 ```
 
 `resolvePublishGroup` runs after the model mutation, inside the same database
-transaction, and receives the mutation handler's returned data as `record`.
-Its result is written to the sync action without granting membership or
-replacing the `resolveGroup` access check. If moving into the destination also
-requires permission, validate that permission in the model's transactional
-before-hook. If the publish resolver throws, both the model write and sync
-action roll back. Without it, the action retains the group authorized before
-the mutation.
+transaction. Standard inserts and updates receive the complete row reloaded
+from that transaction as `record`, including fields omitted from an update
+payload; deletes receive the complete pre-mutation row. Composite models
+receive the data returned by their mutation handler. Its result is written to
+the sync action without granting membership or replacing the `resolveGroup`
+access check. If moving into the destination also requires permission, validate
+that permission in the model's transactional before-hook. If the publish
+resolver throws, both the model write and sync action roll back. Without it,
+the action retains the group authorized before the mutation.
 
 `insertCreatesGroup` exists because group resolution runs _before_ the model
 mutation: a model whose group is its own id would otherwise be uninsertable,

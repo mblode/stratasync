@@ -160,6 +160,7 @@ export class MutateService {
     db: SyncDb,
     tx: TransactionInput,
     prepared: PreparedTransaction,
+    previousRecord: Record<string, unknown> | null,
     data: Record<string, unknown>,
     context: SyncUserContext,
     authorizedGroupId: string | null
@@ -170,6 +171,14 @@ export class MutateService {
     }
 
     try {
+      const record = await this.loadPublishRecord(
+        db,
+        tx,
+        prepared,
+        previousRecord,
+        data
+      );
+
       return await resolver({
         action: prepared.action,
         context,
@@ -177,7 +186,7 @@ export class MutateService {
         modelId: prepared.canonicalModelId,
         modelName: tx.modelName,
         payload: tx.payload,
-        record: data,
+        record,
       });
     } catch (error) {
       this.logger.warn(
@@ -186,6 +195,34 @@ export class MutateService {
       );
       throw error;
     }
+  }
+
+  private async loadPublishRecord(
+    db: SyncDb,
+    tx: TransactionInput,
+    prepared: PreparedTransaction,
+    previousRecord: Record<string, unknown> | null,
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (prepared.modelConfig?.mutate.kind !== "standard") {
+      return data;
+    }
+    if (prepared.action === "D") {
+      if (!previousRecord) {
+        throw new Error("Invalid mutation: pre-mutation record not found");
+      }
+      return previousRecord;
+    }
+
+    const record = await this.lookupModelRecord(
+      db,
+      tx.modelName,
+      prepared.canonicalModelId
+    );
+    if (!record) {
+      throw new Error("Invalid mutation: post-mutation record not found");
+    }
+    return record;
   }
 
   private static validateGroupAccess(
@@ -483,6 +520,7 @@ export class MutateService {
           txDb,
           tx,
           prepared,
+          record,
           data,
           context,
           groupId

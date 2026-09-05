@@ -257,10 +257,13 @@ export interface SyncModelConfig {
   /**
    * Optional post-mutation resolver for the sync action's delivery audience.
    *
-   * This runs inside the row transaction after the model mutation and receives
-   * its returned data as `record`. It does not authorize the write or grant a
-   * membership: `resolveGroup` remains the sole authorization boundary. When
-   * omitted, the action is published to the group authorized before mutation.
+   * This runs inside the row transaction after the model mutation. Standard
+   * inserts and updates receive the complete reloaded row as `record`; deletes
+   * receive the complete pre-mutation row. Composite models receive the data
+   * returned by their mutation handler. It does not authorize the write or
+   * grant a membership: `resolveGroup` remains the sole authorization boundary.
+   * When omitted, the action is published to the group authorized before
+   * mutation.
    */
   resolvePublishGroup?: (
     ctx: ResolveGroupContext
