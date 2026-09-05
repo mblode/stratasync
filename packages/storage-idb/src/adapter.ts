@@ -19,11 +19,13 @@ import {
   PARTIAL_INDEX_STORE,
 } from "./stores/coverage.js";
 import {
+  DEFAULT_META,
   getMetadata,
   getModelPersistence as getModelPersistenceMeta,
   initializeMetadata,
   mergeMetadata,
   META_STORE,
+  SYNC_META_KEY,
   setModelPersistence as setModelPersistenceMeta,
 } from "./stores/meta.js";
 import {
@@ -817,10 +819,31 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     );
 
     const tx = db.transaction(existing, "readwrite");
-    const promises: Promise<void>[] = [];
+    const promises: Promise<unknown>[] = [];
+    let preservedMeta: StorageMeta | undefined;
+
+    if (preserveOutbox && existing.includes(META_STORE)) {
+      const current = (await tx.objectStore(META_STORE).get(SYNC_META_KEY)) as
+        | StorageMeta
+        | undefined;
+      if (current) {
+        preservedMeta = {
+          ...DEFAULT_META,
+          clientId: current.clientId,
+          groupChangePending: current.groupChangePending,
+          privacyWithheldClientTxIds: current.privacyWithheldClientTxIds,
+          subscribedSyncGroups: current.subscribedSyncGroups,
+        };
+      }
+    }
 
     for (const storeName of existing) {
       promises.push(tx.objectStore(storeName).clear());
+    }
+    if (preservedMeta) {
+      promises.push(
+        tx.objectStore(META_STORE).put(preservedMeta, SYNC_META_KEY)
+      );
     }
 
     await Promise.all([...promises, tx.done]);

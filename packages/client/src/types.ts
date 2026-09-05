@@ -88,8 +88,10 @@ export interface BatchOperation {
  */
 export interface ClearStorageOptions {
   /**
-   * Preserve outbox transactions while clearing model/meta state.
-   * Useful during full bootstrap to avoid dropping unsynced mutations.
+   * Preserve pending local mutations while clearing model data. Storage
+   * adapters must also preserve the client identity, subscribed groups, and
+   * privacy-reconciliation metadata associated with those mutations while
+   * resetting ordinary snapshot and cursor metadata.
    */
   preserveOutbox?: boolean;
 }
