@@ -84,6 +84,7 @@ export class BootstrapRunner {
    */
   async bootstrap(runToken: number): Promise<void> {
     this.ctx.setState("bootstrapping");
+    const previousMeta = await this.ctx.storage.getMeta();
 
     // Stream bootstrap data
     const iterator = this.ctx.transport.bootstrap({
@@ -121,6 +122,7 @@ export class BootstrapRunner {
       groupChangePending: false,
       lastSyncAt: Date.now(),
       lastSyncId: this.ctx.cursor.lastSyncId,
+      privacyWithheldClientTxIds: previousMeta.privacyWithheldClientTxIds,
       schemaHash: this.ctx.schemaHash,
       subscribedSyncGroups: this.ctx.getGroups(),
       updatedAt: Date.now(),

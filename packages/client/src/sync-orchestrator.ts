@@ -18,6 +18,8 @@ import { DeltaPipeline } from "./sync/delta-pipeline.js";
 import {
   applyPendingTransactionsToIdentityMaps,
   areGroupsEqual,
+  excludePrivacyWithheldTransactions,
+  preparePendingTransactionsForPrivacySnapshot,
 } from "./sync/pending-hydration.js";
 import { SyncStateMachine } from "./sync/state.js";
 import type {
@@ -108,8 +110,8 @@ export class SyncOrchestrator {
     this.context = this.buildContext();
     this.bootstrapRunner = new BootstrapRunner(this.context);
     this.deltaPipeline = new DeltaPipeline(this.context, {
-      applyPendingOutboxTransactions: () =>
-        this.applyPendingOutboxTransactions(),
+      applyPendingOutboxTransactions: (authoritativeReplacement) =>
+        this.applyPendingOutboxTransactions(authoritativeReplacement),
       // Without a lazy loader attached there is nothing to fetch, so fall back
       // to recording the coverage as before.
       loadCoverage: (modelName, indexedKey, keyValue) =>
@@ -241,6 +243,10 @@ export class SyncOrchestrator {
     return this.cursor.lastSyncId;
   }
 
+  isGroupChangeReconcilePending(): boolean {
+    return this.groupChangePending;
+  }
+
   /**
    * Gets the first sync ID from the last full bootstrap
    */
@@ -366,9 +372,45 @@ export class SyncOrchestrator {
     return this.bootstrapRunner.bootstrapIfNeeded(meta, runToken);
   }
 
-  private async applyPendingOutboxTransactions(): Promise<void> {
+  private async applyPendingOutboxTransactions(
+    authoritativeReplacement = false
+  ): Promise<void> {
+    if (this.groupChangePending && !authoritativeReplacement) {
+      return;
+    }
     const pending = await this.getActiveOutboxTransactions();
-    this.applyPendingTransactionsToIdentityMaps(pending);
+    const meta = await this.storage.getMeta();
+    let withheldIds = meta.privacyWithheldClientTxIds ?? [];
+    let replayable = excludePrivacyWithheldTransactions(
+      pending,
+      withheldIds,
+      this.identityMaps
+    );
+    if (authoritativeReplacement) {
+      const prepared = preparePendingTransactionsForPrivacySnapshot(
+        this.identityMaps,
+        pending
+      );
+      withheldIds = [
+        ...new Set([
+          ...withheldIds,
+          ...prepared.withheld.map((tx) => tx.clientTxId),
+        ]),
+      ];
+      await Promise.all(
+        prepared.changed.map((tx) =>
+          this.storage.updateOutboxTransaction(tx.clientTxId, {
+            original: undefined,
+          })
+        )
+      );
+      await this.storage.setMeta({
+        privacyWithheldClientTxIds: withheldIds,
+        updatedAt: Date.now(),
+      });
+      ({ replayable } = prepared);
+    }
+    this.applyPendingTransactionsToIdentityMaps(replayable);
   }
 
   private async processOutboxTransactions(): Promise<void> {

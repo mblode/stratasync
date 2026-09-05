@@ -21,6 +21,7 @@ import { getModelKey } from "../utils.js";
 import type { SyncContext } from "./context.js";
 import {
   applyPendingTransactionsToIdentityMaps,
+  excludePrivacyWithheldTransactions,
   touchPendingTransactionTargets,
 } from "./pending-hydration.js";
 
@@ -96,7 +97,9 @@ export interface DeltaPipelineDeps {
   /** Runs a full bootstrap for the given run token. */
   runBootstrap(runToken: number): Promise<void>;
   /** Re-applies pending outbox transactions to identity maps. */
-  applyPendingOutboxTransactions(): Promise<void>;
+  applyPendingOutboxTransactions(
+    authoritativeReplacement?: boolean
+  ): Promise<void>;
   /** Completes + processes pending outbox transactions, emits the count. */
   processOutboxTransactions(): Promise<void>;
   /**
@@ -303,11 +306,12 @@ export class DeltaPipeline {
   private async bootstrapAndResume(): Promise<void> {
     await this.ctx.runWithStateLock(async () => {
       const activeRunToken = this.ctx.getRunToken();
+      const privacyReconcile = this.ctx.isGroupChangePending();
       await this.deps.runBootstrap(activeRunToken);
       if (!this.ctx.isRunActive(activeRunToken)) {
         return;
       }
-      await this.deps.applyPendingOutboxTransactions();
+      await this.deps.applyPendingOutboxTransactions(privacyReconcile);
     });
 
     if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
@@ -339,6 +343,13 @@ export class DeltaPipeline {
       await this.ctx.storage.setMeta({
         groupChangePending: true,
         updatedAt: Date.now(),
+      });
+      // The current identity maps were built under authority the server just
+      // invalidated. Quarantine them immediately while keeping persisted rows
+      // intact until the replacement snapshot commits atomically. The durable
+      // latch prevents those rows from being hydrated after a restart.
+      this.ctx.identityMaps.batch(() => {
+        this.ctx.identityMaps.clearAll();
       });
     }
     this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
@@ -580,6 +591,15 @@ export class DeltaPipeline {
       return;
     }
 
+    // Group actions are invalidations rather than ordinary model deltas. A
+    // server may redeliver one after the general cursor has moved (for example,
+    // when live delivery was missed but a later authorized action arrived), so
+    // inspect the received packet before filtering stale model actions.
+    if (packet.actions.some(isGroupChangeAction)) {
+      await this.requestGroupChangeBootstrap();
+      return;
+    }
+
     const latestAppliedSyncId = this.ctx.cursor.lastSyncId;
     const nextActions = packet.actions.filter((action) =>
       isSyncIdGreaterThan(action.id, latestAppliedSyncId)
@@ -592,11 +612,6 @@ export class DeltaPipeline {
     // Checked before anything is applied: a re-bootstrap replaces local state
     // wholesale, so persisting this packet first would be wasted work against
     // a cursor about to be discarded.
-    if (filteredPacket.actions.some(isGroupChangeAction)) {
-      await this.requestGroupChangeBootstrap();
-      return;
-    }
-
     if (filteredPacket.actions.length === 0) {
       await this.handleEmptyPacket(filteredPacket);
       return;
@@ -644,9 +659,19 @@ export class DeltaPipeline {
     // Deferred conflict rollbacks are processed here too, inside the
     // batch, so their intermediate deletes are never visible.
     const pending = await this.getActiveOutboxTransactions();
+    const privacyMeta = await this.ctx.storage.getMeta();
+    const { privacyWithheldClientTxIds } = privacyMeta;
+    const replayPending = !this.ctx.isGroupChangePending();
 
     this.ctx.identityMaps.batch(() => {
-      touchPendingTransactionTargets(this.ctx.identityMaps, pending);
+      const replayablePending = replayPending
+        ? excludePrivacyWithheldTransactions(
+            pending,
+            privacyWithheldClientTxIds,
+            this.ctx.identityMaps
+          )
+        : [];
+      touchPendingTransactionTargets(this.ctx.identityMaps, replayablePending);
 
       // Process conflict rollbacks inside the batch.  This ensures that
       // the rollback's map.delete() and the subsequent server merge's
@@ -680,7 +705,10 @@ export class DeltaPipeline {
           map.delete(op.id);
         }
       }
-      applyPendingTransactionsToIdentityMaps(this.ctx.identityMaps, pending);
+      applyPendingTransactionsToIdentityMaps(
+        this.ctx.identityMaps,
+        replayablePending
+      );
     });
 
     this.emitModelChangeEvents(filteredPacket.actions, ownClientTxIds);

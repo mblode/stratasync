@@ -103,6 +103,9 @@ interface SyncModelConfig {
   resolveGroup?: (
     ctx: ResolveGroupContext
   ) => string | null | Promise<string | null>;
+  resolvePublishGroup?: (
+    ctx: ResolveGroupContext
+  ) => string | null | Promise<string | null>;
   groupType?: string; // Type recorded on memberships this model creates
   insertCreatesGroup?: boolean; // Let an insert open its own group
   bootstrap: BootstrapModelConfig;
@@ -138,6 +141,32 @@ Task: {
 
 Returning `null` means ungrouped, exactly as `groupKey: null` does.
 
+For a mutation that moves a row between audiences, keep `resolveGroup` focused
+on write authorization. It runs before the mutation and should resolve the
+existing row's group. Use `resolvePublishGroup` to route the resulting action:
+
+```typescript
+Task: {
+  groupKey: null,
+  resolveGroup: ({ context, record }) =>
+    (record?.projectId ?? context.userId) as string,
+  resolvePublishGroup: ({ context, record }) =>
+    (record?.projectId ?? context.userId) as string,
+  ...
+}
+```
+
+`resolvePublishGroup` runs after the model mutation, inside the same database
+transaction. Standard inserts and updates receive the complete row reloaded
+from that transaction as `record`, including fields omitted from an update
+payload; deletes receive the complete pre-mutation row. Composite models
+receive the data returned by their mutation handler. Its result is written to
+the sync action without granting membership or replacing the `resolveGroup`
+access check. If moving into the destination also requires permission, validate
+that permission in the model's transactional before-hook. If the publish
+resolver throws, both the model write and sync action roll back. Without it,
+the action retains the group authorized before the mutation.
+
 `insertCreatesGroup` exists because group resolution runs _before_ the model
 mutation: a model whose group is its own id would otherwise be uninsertable,
 since the group does not exist yet and the creator is not a member. With the
@@ -171,7 +200,11 @@ dropped, leaving that client's cache serving rows from a group it no longer
 belongs to.
 
 It emits the action only; writing or revoking the membership row stays the
-caller's job (`syncDao.addGroupMembership` / `removeGroupMembership`).
+caller's job (`syncDao.addGroupMembership` / `removeGroupMembership`). The
+database action commits before transport publication. When Redis is configured,
+`notifyGroupsChanged` propagates a Redis publish failure so a durable application
+queue can retry it; the already committed action remains available to replay and
+catch-up.
 
 The client side is already handled by `@stratasync/client`: `SyncGroupManager`
 partial-bootstraps added groups and drops removed ones. A client that does not
@@ -209,6 +242,23 @@ auth: {
 }
 ```
 
+Applications whose resolver is the membership authority should opt out of
+merging StrataSync's stored membership mirror:
+
+```typescript
+auth: {
+  groupResolutionMode: "authoritative",
+  resolveGroups,
+  verifyToken,
+}
+```
+
+The default `"merge"` mode combines `resolveGroups`, stored memberships, and
+the user's personal group. `"authoritative"` uses `resolveGroups` plus the
+personal group. In both modes, `authorizeAccess.allowedGroups` is the final
+intersection, so even the personal group is available only if the policy
+returns it.
+
 The policy runs for every HTTP request and WebSocket subscribe. It may only
 narrow resolved groups; unknown groups in `allowedGroups` are discarded, and
 the personal user group is retained only when the policy returns it. A
@@ -226,6 +276,46 @@ are rejected. The selected upgrade credential cannot be overridden by a token
 inside a subscribe frame: its authorized context is cached for the first
 subscribe, then the same credential is verified and authorized again on every
 resubscribe. This also rechecks credential expiry and current group policy.
+
+For credentials whose access can be revoked while a socket stays connected,
+enable a fresh read-policy check before every protected outbound frame:
+
+```typescript
+auth: {
+  groupResolutionMode: "authoritative",
+  reauthorizeBeforeWebSocketDelivery: true,
+  webSocketGroupRefreshCatchUpIntervalMs: 15_000,
+  resolveGroups,
+  verifyToken,
+  authorizeAccess,
+}
+```
+
+`reauthorizeBeforeWebSocketDelivery` runs the complete token, group, and read
+policy pipeline before each group-scoped replay, buffered, or live delta and
+before the final subscribed acknowledgement. Checks and sends are serialized
+per socket. A successful check intersects the active subscription with current
+access; it never adds a group until the client subscribes again. A `"G"` action
+still carries the full freshly authorized group list so the client knows when
+to bootstrap newly granted data. Authorization failure closes the socket.
+
+Each frame is sent only if its immediately preceding check observes access.
+This gives ordinary transaction linearization: a delta created after a
+committed revocation cannot pass a fresh check that observes that revocation.
+It cannot recall bytes already sent or impose an ordering on a check racing the
+revocation commit. The option therefore needs an authoritative resolver whose
+reads reflect committed membership changes, and it adds one full authorization
+lookup per protected frame.
+
+`webSocketGroupRefreshCatchUpIntervalMs` scans the durable personal-group
+`"G"` actions using a separate cursor. It repairs active clients after missed
+Redis messages and makes newly granted groups discoverable; confidentiality
+still comes from per-frame reauthorization. If a later delta already advanced
+the session past a recovered `"G"` action, the server emits
+`BOOTSTRAP_REQUIRED` and closes the socket. This keeps recovery compatible with
+clients that discard stale actions before interpreting `"G"`. Falling behind
+sync-action retention does the same instead of silently skipping a membership
+change.
 
 ## WebSocket Hooks
 

@@ -33,7 +33,10 @@ export const replaySyncActions = async (
     }
 
     for (const action of actions) {
-      session.sendDeltaAction(toSyncActionOutput(action));
+      await session.sendDeltaAction(toSyncActionOutput(action));
+      if (session.isClosed) {
+        return;
+      }
     }
 
     const lastAction = actions.at(-1);
