@@ -13,7 +13,14 @@ export interface ChangeSnapshot {
   original: Record<string, unknown>;
 }
 
+interface TrackedChangeSnapshot extends ChangeSnapshot {
+  propertyVersions: Map<string, number>;
+  rawChanges: Record<string, unknown>;
+  version: number;
+}
+
 interface ApplyUpdateOptions {
+  preserveChanges?: boolean;
   serialized?: boolean;
 }
 
@@ -23,6 +30,10 @@ interface ApplyUpdateOptions {
 export class Model {
   // ── Tracking infrastructure (must initialize before any decorated field) ──
   private readonly modifiedProperties = new Map<string, unknown>();
+  private readonly propertyVersions = new Map<string, number>();
+  private changeVersion = 0;
+  private saveActive = false;
+  private readonly saveWaiters: (() => void)[] = [];
   private suppressTracking = 0;
   private __cachedModelName?: string;
 
@@ -116,6 +127,7 @@ export class Model {
     if (!this.modifiedProperties || this.suppressTracking > 0) {
       return;
     }
+    this.bumpPropertyVersion(propertyName);
     this.markPropertyChanged(propertyName, oldValue, newValue);
   }
 
@@ -137,8 +149,15 @@ export class Model {
    * Creates a snapshot of changes for UpdateTransaction creation.
    */
   changeSnapshot(): ChangeSnapshot {
+    const { changes, original } = this.captureChangeSnapshot();
+    return { changes, original };
+  }
+
+  private captureChangeSnapshot(): TrackedChangeSnapshot {
     const changes: Record<string, unknown> = {};
     const original: Record<string, unknown> = {};
+    const propertyVersions = new Map<string, number>();
+    const rawChanges: Record<string, unknown> = {};
 
     for (const [propertyName, oldValue] of this.modifiedProperties.entries()) {
       const currentValue = this.__data[propertyName];
@@ -153,9 +172,20 @@ export class Model {
         propertyName,
         currentValue
       );
+      rawChanges[propertyName] = currentValue;
+      propertyVersions.set(
+        propertyName,
+        this.propertyVersions.get(propertyName) ?? 0
+      );
     }
 
-    return { changes, original };
+    return {
+      changes,
+      original,
+      propertyVersions,
+      rawChanges,
+      version: this.changeVersion,
+    };
   }
 
   /**
@@ -185,9 +215,27 @@ export class Model {
           ? this.deserializePropertyValue(key, value)
           : value;
         const current = this.__data[key];
+        if (
+          options.preserveChanges !== false &&
+          this.modifiedProperties.has(key)
+        ) {
+          const trackedOriginal = this.modifiedProperties.get(key);
+          if (Object.is(current, trackedOriginal)) {
+            this.modifiedProperties.delete(key);
+          } else {
+            if (Object.is(current, nextValue)) {
+              this.modifiedProperties.delete(key);
+            } else {
+              this.modifiedProperties.set(key, nextValue);
+            }
+            this.bumpPropertyVersion(key);
+            continue;
+          }
+        }
         if (!Object.is(current, nextValue)) {
           (this as Record<string, unknown>)[key] = nextValue;
           this.__data[key] = nextValue;
+          this.bumpPropertyVersion(key);
         }
       }
     });
@@ -222,6 +270,28 @@ export class Model {
    * Saves pending changes by creating an update transaction.
    */
   async save(): Promise<void> {
+    if (this.saveActive) {
+      // oxlint-disable-next-line avoid-new -- converts the preceding save's completion into an awaitable turn
+      await new Promise<boolean>((resolve) => {
+        this.saveWaiters.push(() => resolve(true));
+      });
+    } else {
+      this.saveActive = true;
+    }
+
+    try {
+      await this.persistChanges();
+    } finally {
+      const nextSave = this.saveWaiters.shift();
+      if (nextSave) {
+        nextSave();
+      } else {
+        this.saveActive = false;
+      }
+    }
+  }
+
+  private async persistChanges(): Promise<void> {
     if (!this.store) {
       throw new Error("Model store is not configured");
     }
@@ -236,7 +306,7 @@ export class Model {
       return;
     }
 
-    const snapshot = this.changeSnapshot();
+    const snapshot = this.captureChangeSnapshot();
     if (Object.keys(snapshot.changes).length === 0) {
       return;
     }
@@ -253,8 +323,8 @@ export class Model {
         original: snapshot.original,
       }
     );
-    this._applyUpdate(updated);
-    this.clearChanges();
+    this.clearSavedChanges(snapshot);
+    this.applySaveResult(updated, snapshot);
   }
 
   /**
@@ -301,6 +371,42 @@ export class Model {
     } finally {
       this.suppressTracking -= 1;
     }
+  }
+
+  private bumpPropertyVersion(propertyName: string): void {
+    this.changeVersion += 1;
+    this.propertyVersions.set(propertyName, this.changeVersion);
+  }
+
+  private clearSavedChanges(snapshot: TrackedChangeSnapshot): void {
+    for (const [propertyName, version] of snapshot.propertyVersions) {
+      if (this.propertyVersions.get(propertyName) === version) {
+        this.modifiedProperties.delete(propertyName);
+        continue;
+      }
+
+      const savedValue = snapshot.rawChanges[propertyName];
+      const currentValue = this.__data[propertyName];
+      if (Object.is(currentValue, savedValue)) {
+        this.modifiedProperties.delete(propertyName);
+      } else {
+        this.modifiedProperties.set(propertyName, savedValue);
+      }
+    }
+  }
+
+  private applySaveResult(
+    updated: Record<string, unknown>,
+    snapshot: TrackedChangeSnapshot
+  ): void {
+    const unchangedSinceSave: Record<string, unknown> = {};
+    for (const [propertyName, value] of Object.entries(updated)) {
+      const propertyVersion = this.propertyVersions.get(propertyName) ?? 0;
+      if (propertyVersion <= snapshot.version) {
+        unchangedSinceSave[propertyName] = value;
+      }
+    }
+    this._applyUpdate(unchangedSinceSave);
   }
 
   private getPropertySerializer(

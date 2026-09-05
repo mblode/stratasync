@@ -56,7 +56,7 @@ const TaskStatus = observer(function TaskStatus({
 });
 ```
 
-If the server rejects the mutation, the client rolls back the optimistic update and emits a `rebaseConflict` event. See [Conflict resolution](/guides/conflict-resolution) for details.
+If the server rejects the mutation, the client rolls back the persisted optimistic update and emits a `mutationRejected` event with the model, action, and generic error. A newer unsaved model edit remains visible and dirty so the application can retry or show recovery UI.
 
 ## Monitoring connection state
 

@@ -69,7 +69,7 @@ export const createDefaultModelFactory =
       store?: SyncStore;
       _applyUpdate?: (
         changes: Record<string, unknown>,
-        updateOptions?: ModelFactoryOptions
+        updateOptions?: ModelFactoryOptions & { preserveChanges?: boolean }
       ) => void;
     };
     if ("store" in candidate) {

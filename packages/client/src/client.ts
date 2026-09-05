@@ -10,6 +10,7 @@ import type {
 } from "@stratasync/core";
 import {
   captureArchiveState,
+  deserializeModelRecord,
   generateUUID,
   getOrCreateClientId,
   readArchivedAt,
@@ -29,6 +30,7 @@ import { MutationCoordinator } from "./mutations.js";
 import { OutboxManager } from "./outbox-manager.js";
 import { executeQuery } from "./query.js";
 import { SyncOrchestrator } from "./sync-orchestrator.js";
+import { applyPendingTransactionsToIdentityMaps } from "./sync/pending-hydration.js";
 import type {
   ModelChangeAction,
   ModelStore,
@@ -38,7 +40,7 @@ import type {
   SyncClientEvent,
   SyncClientOptions,
 } from "./types.js";
-import { getModelKey } from "./utils.js";
+import { getModelData, getModelKey } from "./utils.js";
 
 const MUTATION_START_REQUIRED_ERROR =
   "Sync client must be started before mutations";
@@ -110,6 +112,13 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   const handleRejectedTransaction = (tx: Transaction): void => {
     rollbackTransaction(tx);
     history.removeByTxId(tx.clientTxId);
+    emitEvent({
+      action: tx.action,
+      error: tx.lastError ?? "Mutation rejected",
+      modelId: tx.modelId,
+      modelName: tx.modelName,
+      type: "mutationRejected",
+    });
   };
 
   /**
@@ -452,11 +461,20 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     return runWithStateLock(() => operation(getStartedOutboxManager()));
   };
 
-  const synchronizeOutboxWithSyncCursor = async (
+  const rehydrateOutboxWithSyncCursor = async (
     activeOutboxManager: OutboxManager
   ): Promise<void> => {
-    await activeOutboxManager.completeUpToSyncId(orchestrator.getLastSyncId());
-    await activeOutboxManager.processPendingTransactions();
+    await runWithStateLock(async () => {
+      await activeOutboxManager.completeUpToSyncId(
+        orchestrator.getLastSyncId()
+      );
+      const pending = await activeOutboxManager.getActiveTransactions();
+      if (pending.length > 0) {
+        identityMaps.batch(() => {
+          applyPendingTransactionsToIdentityMaps(identityMaps, pending);
+        });
+      }
+    });
   };
 
   const serializeMutationRecord = (
@@ -464,6 +482,15 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     data: Record<string, unknown>
   ): Record<string, unknown> =>
     serializeModelRecord(
+      orchestrator.getRegistry().getModelProperties(modelName),
+      data
+    );
+
+  const deserializeMutationRecord = (
+    modelName: string,
+    data: Record<string, unknown>
+  ): Record<string, unknown> =>
+    deserializeModelRecord(
       orchestrator.getRegistry().getModelProperties(modelName),
       data
     );
@@ -528,8 +555,20 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       options.storage.setPartialIndex(modelName, indexName, key),
     unarchive: (modelName, id, unarchiveOpts) =>
       mutations.unarchive(modelName, id, unarchiveOpts),
-    update: (modelName, id, changes, updateOpts) =>
-      mutations.update(modelName, id, changes, updateOpts),
+    update: async (modelName, id, changes, updateOpts) => {
+      const updated = await mutations.update(
+        modelName,
+        id,
+        deserializeMutationRecord(modelName, changes),
+        {
+          alreadyApplied: true,
+          original: updateOpts?.original
+            ? deserializeMutationRecord(modelName, updateOpts.original)
+            : undefined,
+        }
+      );
+      return serializeMutationRecord(modelName, getModelData(updated));
+    },
   };
 
   const resolvedModelFactory =
@@ -744,11 +783,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           const nextOutboxManager = createOutboxManager();
           hasStarted = true;
 
+          await rehydrateOutboxWithSyncCursor(nextOutboxManager);
           await emitPendingCount({ awaitStart: false });
           // oxlint-disable-next-line no-void -- fire-and-forget background drain after startup
           void (async () => {
             try {
-              await synchronizeOutboxWithSyncCursor(nextOutboxManager);
+              await nextOutboxManager.processPendingTransactions();
               await emitPendingCount({ awaitStart: false });
             } catch (error) {
               if (startVersion !== lifecycleVersion) {

@@ -154,6 +154,14 @@ const snapshot = task.changeSnapshot();
 await task.save(); // Creates an update transaction, then clears changes
 ```
 
+`save()` resolves after the change has been written to the durable outbox. If
+that write fails, the model keeps both the edited value and its change snapshot
+so the same instance can retry. Saves on one instance run in call order; edits
+made while a save is pending remain dirty for the next save instead of being
+cleared by the older completion. If a server update or rejection lands while a
+newer edit is still unsaved, the visible edit is retained and its original
+baseline advances to the incoming value.
+
 ## Type utilities
 
 ### `Hydrated<T>`
