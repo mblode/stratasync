@@ -24,6 +24,7 @@ interface TransactionCreatedHook {
 
 type CreateOptions = TransactionCreatedHook;
 type UpdateOptions = TransactionCreatedHook & {
+  alreadyApplied?: boolean;
   original?: Record<string, unknown>;
 };
 type DeleteOptions = TransactionCreatedHook & {
@@ -244,8 +245,11 @@ export class MutationCoordinator {
       }
 
       const existingData = getModelData(existing) as T;
+      const comparisonData = mutationOptions?.alreadyApplied
+        ? (mutationOptions.original ?? existingData)
+        : existingData;
       const { effectiveChanges, effectiveChangeRecord } = buildEffectiveUpdate(
-        existingData,
+        comparisonData as T,
         changes
       );
 
@@ -267,7 +271,12 @@ export class MutationCoordinator {
       const optimistic = this.deps.isOptimistic();
 
       if (optimistic) {
-        map.update(id, effectiveChanges, { serialized: false });
+        if (!mutationOptions?.alreadyApplied) {
+          map.update(id, effectiveChanges, {
+            preserveChanges: false,
+            serialized: false,
+          });
+        }
         this.deps.markPresent(modelName, id);
         this.deps.emitModelChange(modelName, id, "update");
       }
@@ -281,7 +290,7 @@ export class MutationCoordinator {
           serializedOriginal
         );
       } catch (error) {
-        if (optimistic) {
+        if (optimistic && !mutationOptions?.alreadyApplied) {
           this.deps.rollbackOptimisticMutation("U", modelName, id, original);
         }
         throw error;

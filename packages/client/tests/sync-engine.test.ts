@@ -7,7 +7,7 @@ import {
   ModelRegistry,
   noopReactivityAdapter,
   Property,
-} from "../../core/src/index";
+} from "@stratasync/core";
 import type {
   BatchLoadOptions,
   BootstrapMetadata,
@@ -24,7 +24,8 @@ import type {
   SyncAction,
   Transaction,
   TransactionBatch,
-} from "../../core/src/index";
+} from "@stratasync/core";
+
 import { IdentityMapRegistry } from "../src/identity-map";
 import { createSyncClient } from "../src/index";
 import { SyncOrchestrator } from "../src/sync-orchestrator";
@@ -33,6 +34,7 @@ import type {
   ModelPersistenceMeta,
   StorageAdapter,
   StorageMeta,
+  SyncClientEvent,
   TransportAdapter,
 } from "../src/types";
 
@@ -1001,6 +1003,67 @@ const partialTaskSchema: SchemaDefinition = {
   },
 };
 
+class NativeSaveTask extends Model {
+  declare teamId: string;
+  declare title: string;
+}
+
+Property()(NativeSaveTask.prototype, "teamId");
+Property()(NativeSaveTask.prototype, "title");
+ClientModel("NativeSaveTask")(NativeSaveTask);
+
+const nativeSaveSchema: SchemaDefinition = {
+  models: {
+    NativeSaveTask: {
+      fields: {
+        id: {},
+        teamId: {},
+        title: {},
+      },
+      loadStrategy: "instant",
+    },
+  },
+};
+
+class ControlledOutboxStorage extends InMemoryStorage {
+  private addGate: Deferred<undefined> | undefined;
+  private addStarted: Deferred<undefined> | undefined;
+  private nextAddError: Error | undefined;
+
+  blockNextAdd(): {
+    release(): void;
+    started: Promise<undefined>;
+  } {
+    const gate = createDeferred<undefined>();
+    this.addGate = gate;
+    this.addStarted = createDeferred<undefined>();
+    return {
+      release: () => gate.resolve(),
+      started: this.addStarted.promise,
+    };
+  }
+
+  failNextAdd(error: Error): void {
+    this.nextAddError = error;
+  }
+
+  override async addToOutbox(tx: Transaction): Promise<void> {
+    if (this.nextAddError) {
+      const error = this.nextAddError;
+      this.nextAddError = undefined;
+      throw error;
+    }
+    if (this.addGate) {
+      const gate = this.addGate;
+      this.addGate = undefined;
+      this.addStarted?.resolve();
+      this.addStarted = undefined;
+      await gate.promise;
+    }
+    await super.addToOutbox(tx);
+  }
+}
+
 const eagerPartialSchema: SchemaDefinition = {
   models: {
     Comment: {
@@ -1177,6 +1240,356 @@ const waitForSubscribeCount = async (
 };
 
 describe("reverse-done alignment", () => {
+  const nativeSaveRows: ModelRow[] = [
+    {
+      data: { id: "task-1", teamId: "team-1", title: "Old" },
+      modelName: "NativeSaveTask",
+    },
+  ];
+
+  const createNativeSaveClient = (
+    storage: InMemoryStorage,
+    transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10" },
+      fullRows: nativeSaveRows,
+      startingSyncId: 100,
+    })
+  ) =>
+    createSyncClient({
+      batchMutations: false,
+      reactivity: noopReactivityAdapter,
+      schema: nativeSaveSchema,
+      storage,
+      transport,
+    });
+
+  it("persists native model saves through the outbox and reloads pending state", async () => {
+    const storage = new InMemoryStorage();
+    const client = createNativeSaveClient(storage);
+
+    await client.start();
+    const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+    expect(task).toBeInstanceOf(NativeSaveTask);
+    if (!task) {
+      throw new Error("Expected native task model");
+    }
+
+    task.title = "hello";
+    await task.save();
+
+    const outbox = await storage.getOutbox();
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]).toMatchObject({
+      action: "U",
+      modelId: "task-1",
+      modelName: "NativeSaveTask",
+      original: { title: "Old" },
+      payload: { title: "hello" },
+    });
+    expect(task.changeSnapshot()).toEqual({ changes: {}, original: {} });
+    expect(client.canUndo()).toBeTruthy();
+
+    await task.save();
+    task.title = "hello";
+    await task.save();
+    expect(await storage.getOutbox()).toHaveLength(1);
+
+    await client.stop();
+
+    const reloaded = createNativeSaveClient(
+      storage,
+      new TestTransport({
+        fullMetadata: { lastSyncId: "10" },
+        fullRows: nativeSaveRows,
+        startingSyncId: 200,
+      })
+    );
+    try {
+      await reloaded.start();
+      expect(
+        reloaded.getCached<NativeSaveTask>("NativeSaveTask", "task-1")?.title
+      ).toBe("hello");
+    } finally {
+      await reloaded.stop();
+    }
+  });
+
+  it("serializes overlapping native saves and preserves every newer dirty field", async () => {
+    const storage = new ControlledOutboxStorage();
+    const client = createNativeSaveClient(storage);
+
+    try {
+      await client.start();
+      const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+      if (!task) {
+        throw new Error("Expected native task model");
+      }
+
+      const blockedAdd = storage.blockNextAdd();
+      task.title = "First";
+      const firstSave = task.save();
+      task.title = "Second";
+      task.teamId = "team-2";
+      const secondSave = task.save();
+      await blockedAdd.started;
+      expect(await storage.getOutbox()).toHaveLength(0);
+      blockedAdd.release();
+      await Promise.all([secondSave, firstSave]);
+
+      expect(task.title).toBe("Second");
+      expect(task.changeSnapshot()).toEqual({ changes: {}, original: {} });
+      expect(await storage.getOutbox()).toMatchObject([
+        { original: { title: "Old" }, payload: { title: "First" } },
+        {
+          original: { teamId: "team-1", title: "First" },
+          payload: { teamId: "team-2", title: "Second" },
+        },
+      ]);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("retains a native edit for retry when durable outbox persistence fails", async () => {
+    const storage = new ControlledOutboxStorage();
+    const client = createNativeSaveClient(storage);
+
+    try {
+      await client.start();
+      const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+      if (!task) {
+        throw new Error("Expected native task model");
+      }
+
+      storage.failNextAdd(new Error("idb write failed"));
+      task.title = "Retry me";
+      await expect(task.save()).rejects.toThrow("idb write failed");
+
+      expect(task.title).toBe("Retry me");
+      expect(task.changeSnapshot()).toEqual({
+        changes: { title: "Retry me" },
+        original: { title: "Old" },
+      });
+      expect(await storage.getOutbox()).toHaveLength(0);
+
+      await task.save();
+      expect(await storage.getOutbox()).toMatchObject([
+        { original: { title: "Old" }, payload: { title: "Retry me" } },
+      ]);
+      expect(task.changeSnapshot()).toEqual({ changes: {}, original: {} });
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("rolls back a server-rejected native save and emits its generic failure", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10" },
+      fullRows: nativeSaveRows,
+    });
+    transport.mutate = (batch: TransactionBatch): Promise<MutateResult> =>
+      Promise.resolve({
+        lastSyncId: "10",
+        results: batch.transactions.map((tx) => ({
+          clientTxId: tx.clientTxId,
+          error: "write forbidden",
+          success: false,
+        })),
+        success: true,
+      });
+    const client = createSyncClient({
+      batchDelay: 20,
+      reactivity: noopReactivityAdapter,
+      schema: nativeSaveSchema,
+      storage,
+      transport,
+    });
+    const rejectedEvents: Extract<
+      SyncClientEvent,
+      { type: "mutationRejected" }
+    >[] = [];
+    const unsubscribe = client.onEvent((event) => {
+      if (event.type === "mutationRejected") {
+        rejectedEvents.push(event);
+      }
+    });
+    try {
+      await client.start();
+      const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+      if (!task) {
+        throw new Error("Expected native task model");
+      }
+
+      task.title = "Forbidden";
+      await task.save();
+      task.title = "Newer local edit";
+
+      await waitUntil(
+        () => rejectedEvents.length === 1,
+        "Timed out waiting for native mutation rejection"
+      );
+
+      expect(task.title).toBe("Newer local edit");
+      expect(task.changeSnapshot()).toEqual({
+        changes: { title: "Newer local edit" },
+        original: { title: "Old" },
+      });
+      expect(await storage.getOutbox()).toHaveLength(0);
+      expect(client.canUndo()).toBeFalsy();
+      expect(rejectedEvents).toEqual([
+        {
+          action: "U",
+          error: "write forbidden",
+          modelId: "task-1",
+          modelName: "NativeSaveTask",
+          type: "mutationRejected",
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      await client.stop();
+    }
+  });
+
+  it("rebases a newer unsaved edit over a same-field delta arriving during save", async () => {
+    const storage = new ControlledOutboxStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10" },
+      fullRows: nativeSaveRows,
+      startingSyncId: 100,
+    });
+    const client = createNativeSaveClient(storage, transport);
+    const conflicts: Extract<SyncClientEvent, { type: "rebaseConflict" }>[] =
+      [];
+    const unsubscribe = client.onEvent((event) => {
+      if (event.type === "rebaseConflict") {
+        conflicts.push(event);
+      }
+    });
+    // oxlint-disable-next-line consistent-function-scoping -- replaced with this test's outbox gate release
+    let releaseBlockedAdd = () => {
+      /* assigned after the client starts */
+    };
+
+    try {
+      await client.start();
+      const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+      if (!task) {
+        throw new Error("Expected native task model");
+      }
+
+      const blockedAdd = storage.blockNextAdd();
+      releaseBlockedAdd = blockedAdd.release;
+      task.title = "Persisting";
+      const save = task.save();
+      await blockedAdd.started;
+      task.title = "Newer local edit";
+
+      const syncWaiter = waitForSync(client, "11");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            clientId: "remote-client",
+            data: { id: "task-1", title: "Remote" },
+            id: "11",
+            modelId: "task-1",
+            modelName: "NativeSaveTask",
+          },
+        ],
+        lastSyncId: "11",
+      });
+      blockedAdd.release();
+      await Promise.all([save, syncWaiter]);
+
+      expect(task.title).toBe("Newer local edit");
+      expect(task.changeSnapshot()).toEqual({
+        changes: { title: "Newer local edit" },
+        original: { title: "Remote" },
+      });
+      expect(await storage.getOutbox()).toHaveLength(0);
+      expect(conflicts).toMatchObject([
+        {
+          modelId: "task-1",
+          modelName: "NativeSaveTask",
+          resolution: "server-wins",
+          type: "rebaseConflict",
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      releaseBlockedAdd();
+      await client.stop();
+    }
+  });
+
+  it("matches client.update history and preserves incoming non-overlapping deltas", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10" },
+      fullRows: nativeSaveRows,
+      startingSyncId: 100,
+    });
+    const client = createNativeSaveClient(storage, transport);
+
+    try {
+      await client.start();
+      const task = client.getCached<NativeSaveTask>("NativeSaveTask", "task-1");
+      if (!task) {
+        throw new Error("Expected native task model");
+      }
+
+      task.title = "Native";
+      task.teamId = "team-2";
+      await task.save();
+      await client.update("NativeSaveTask", "task-1", { title: "Control" });
+
+      expect(await storage.getOutbox()).toMatchObject([
+        {
+          original: { teamId: "team-1", title: "Old" },
+          payload: { teamId: "team-2", title: "Native" },
+        },
+        { original: { title: "Native" }, payload: { title: "Control" } },
+      ]);
+
+      await client.undo();
+      expect(task).toMatchObject({ teamId: "team-2", title: "Native" });
+      await client.undo();
+      expect(task.title).toBe("Old");
+      expect(task.teamId).toBe("team-1");
+      expect(client.canRedo()).toBeTruthy();
+
+      await client.redo();
+      expect(task).toMatchObject({ teamId: "team-2", title: "Native" });
+      await client.redo();
+      expect(task.title).toBe("Control");
+      expect(task.teamId).toBe("team-2");
+
+      task.title = "Local";
+      await task.save();
+      const syncWaiter = waitForSync(client, "11");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            clientId: "remote-client",
+            data: { id: "task-1", teamId: "team-3" },
+            id: "11",
+            modelId: "task-1",
+            modelName: "NativeSaveTask",
+          },
+        ],
+        lastSyncId: "11",
+      });
+      await syncWaiter;
+
+      expect(task).toMatchObject({ teamId: "team-3", title: "Local" });
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("does not surface a sync error if start is stopped before bootstrap fails", async () => {
     const storage = new InMemoryStorage();
     const bootstrapGate = createDeferred<undefined>();
@@ -2837,6 +3250,21 @@ describe("reverse-done alignment", () => {
       });
       expect(taskMap.get("task-1")?.payload).toEqual({
         deep: { count: 2 },
+      });
+
+      const nativeTask = taskMap.get("task-1");
+      if (!nativeTask) {
+        throw new Error("Expected serializer-backed native model");
+      }
+      nativeTask.payload = { deep: { count: 3 } };
+      await nativeTask.save();
+
+      outbox = await storage.getOutbox();
+      expect(outbox[2]?.payload).toEqual({
+        payload: JSON.stringify({ deep: { count: 3 } }),
+      });
+      expect(outbox[2]?.original).toEqual({
+        payload: JSON.stringify({ deep: { count: 2 } }),
       });
     } finally {
       await client.stop();

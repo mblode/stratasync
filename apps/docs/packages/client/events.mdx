@@ -60,16 +60,17 @@ const unsubscribe = client.onConnectionStateChange((state) => {
 
 Every event has a `type` discriminant.
 
-| Event Name         | Key Fields                                                                           | Description                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `syncStart`        | -                                                                                    | A sync cycle has begun.                                                            |
-| `syncComplete`     | `lastSyncId: number`                                                                 | A sync cycle finished. `lastSyncId` is the highest sync ID received.               |
-| `syncError`        | `error: Error`                                                                       | A sync cycle failed.                                                               |
-| `stateChange`      | `state: SyncClientState`                                                             | The client transitioned to a new sync state.                                       |
-| `connectionChange` | `state: ConnectionState`                                                             | The transport connection state changed.                                            |
-| `outboxChange`     | `pendingCount: number`                                                               | The count of unsynced transactions changed.                                        |
-| `modelChange`      | `modelName: string`, `modelId: string`, `action: ModelChangeAction`                  | A model was inserted, updated, deleted, archived, or unarchived (local or server). |
-| `rebaseConflict`   | `modelName: string`, `modelId: string`, `conflictType: string`, `resolution: string` | A conflict was detected during transaction rebasing.                               |
+| Event Name         | Key Fields                                                                           | Description                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `syncStart`        | -                                                                                    | A sync cycle has begun.                                                             |
+| `syncComplete`     | `lastSyncId: number`                                                                 | A sync cycle finished. `lastSyncId` is the highest sync ID received.                |
+| `syncError`        | `error: Error`                                                                       | A sync cycle failed.                                                                |
+| `stateChange`      | `state: SyncClientState`                                                             | The client transitioned to a new sync state.                                        |
+| `connectionChange` | `state: ConnectionState`                                                             | The transport connection state changed.                                             |
+| `outboxChange`     | `pendingCount: number`                                                               | The count of unsynced transactions changed.                                         |
+| `mutationRejected` | `modelName: string`, `modelId: string`, `action: TransactionAction`, `error: string` | The server rejected a mutation and its persisted optimistic change was rolled back. |
+| `modelChange`      | `modelName: string`, `modelId: string`, `action: ModelChangeAction`                  | A model was inserted, updated, deleted, archived, or unarchived (local or server).  |
+| `rebaseConflict`   | `modelName: string`, `modelId: string`, `conflictType: string`, `resolution: string` | A conflict was detected during transaction rebasing.                                |
 
 ```ts
 // Full type definitions
@@ -81,6 +82,13 @@ type SyncEvent =
   | { type: "stateChange"; state: SyncClientState }
   | { type: "connectionChange"; state: ConnectionState }
   | { type: "outboxChange"; pendingCount: number }
+  | {
+      type: "mutationRejected";
+      modelName: string;
+      modelId: string;
+      action: TransactionAction;
+      error: string;
+    }
   | {
       type: "modelChange";
       modelName: string;
