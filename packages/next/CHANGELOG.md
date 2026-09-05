@@ -1,5 +1,14 @@
 # @stratasync/next
 
+## 2.3.1
+
+### Patch Changes
+
+- Updated dependencies [bc19346]
+  - @stratasync/client@2.3.1
+  - @stratasync/core@2.3.1
+  - @stratasync/react@2.3.1
+
 ## 2.3.0
 
 ### Patch Changes
