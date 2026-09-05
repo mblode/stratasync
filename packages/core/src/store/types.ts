@@ -24,7 +24,10 @@ export interface SyncStore {
     modelName: string,
     id: string,
     changes: SerializedModelData,
-    options?: { original?: SerializedModelData }
+    options?: {
+      /** The serialized values captured before a model instance was edited. */
+      original?: SerializedModelData;
+    }
   ): Promise<SerializedModelData>;
   /** Deletes a model row using a serialized original snapshot. */
   delete?(

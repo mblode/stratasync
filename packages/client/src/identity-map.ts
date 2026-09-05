@@ -6,13 +6,14 @@ import type { ModelFactory, ModelFactoryOptions } from "./types.js";
 interface ModelInstanceLike {
   _applyUpdate?: (
     data: Record<string, unknown>,
-    options?: ModelFactoryOptions
+    options?: ModelFactoryOptions & { preserveChanges?: boolean }
   ) => void;
   makeObservable?: () => void;
   toJSON?: () => Record<string, unknown>;
 }
 
 interface IdentityMapMutationOptions {
+  preserveChanges?: boolean;
   serialized?: boolean;
 }
 
