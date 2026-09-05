@@ -140,6 +140,8 @@ const buildHandler = (model: SyncModelConfig): ModelHandler => {
           delegate,
           insertFields: mutateConfig.insertFields,
           kind: "composite",
+          onBeforeDelete: mutateConfig.onBeforeDelete,
+          onBeforeInsert: mutateConfig.onBeforeInsert,
         };
 
   return createModelHandler(def);

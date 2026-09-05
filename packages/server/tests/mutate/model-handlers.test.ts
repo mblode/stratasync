@@ -1,5 +1,6 @@
 import type { FieldSpec } from "../../src/mutate/field-codecs.js";
 import type {
+  CompositeModelDef,
   ModelDef,
   MutationDelegate,
   StandardModelDef,
@@ -509,5 +510,75 @@ describe("createModelHandler: composite insert", () => {
 
     // Serialized output should also omit id
     expect(result.id).toBeUndefined();
+  });
+
+  it("runs and applies a composite before-insert hook before writing", async () => {
+    const events: string[] = [];
+    const delegate = createMockDelegate({
+      insert: vi.fn().mockImplementation(() => {
+        events.push("insert");
+        return Promise.resolve();
+      }),
+    });
+    const onBeforeInsert = vi
+      .fn()
+      .mockImplementation((_db, _id, _payload, data) => {
+        events.push("hook");
+        return { ...data, checked: true };
+      });
+    const def: CompositeModelDef = {
+      actions: new Set(["I"]),
+      delegate,
+      insertFields: { labelId: { type: "string" }, taskId: { type: "string" } },
+      kind: "composite",
+      onBeforeInsert,
+    };
+
+    const result = await createModelHandler(def)(
+      mockDb,
+      "composite-id",
+      { labelId: "l1", taskId: "t1" },
+      "I",
+      { groups: ["workspace-1"], userId: "user-1" }
+    );
+
+    expect(events).toEqual(["hook", "insert"]);
+    expect(delegate.insert).toHaveBeenCalledWith(
+      mockDb,
+      expect.objectContaining({ checked: true })
+    );
+    expect(result).toMatchObject({ checked: true });
+  });
+
+  it("runs a composite before-delete hook before deleting", async () => {
+    const events: string[] = [];
+    const delegate: MutationDelegate = {
+      deleteByPayload: vi.fn().mockImplementation(() => {
+        events.push("delete");
+        return Promise.resolve({ rowCount: 1 });
+      }),
+      insert: vi.fn().mockResolvedValue(),
+    };
+    const onBeforeDelete = vi.fn().mockImplementation(() => {
+      events.push("hook");
+    });
+    const def: CompositeModelDef = {
+      actions: new Set(["D"]),
+      delegate,
+      insertFields: { labelId: { type: "string" }, taskId: { type: "string" } },
+      kind: "composite",
+      onBeforeDelete,
+    };
+    const payload = { labelId: "l1", taskId: "t1" };
+
+    await createModelHandler(def)(mockDb, "composite-id", payload, "D");
+
+    expect(events).toEqual(["hook", "delete"]);
+    expect(onBeforeDelete).toHaveBeenCalledWith(
+      mockDb,
+      "composite-id",
+      payload,
+      undefined
+    );
   });
 });

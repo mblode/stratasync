@@ -51,3 +51,40 @@ describe("DeltaService.isCursorStale", () => {
     expect(await service.isCursorStale(8n)).toBeTruthy();
   });
 });
+
+describe("DeltaService.fetchDeltas", () => {
+  it("scopes durable group refresh data to the authorized request groups", async () => {
+    const dao = {
+      getSyncActions: vi.fn().mockResolvedValue([
+        {
+          action: "G",
+          clientId: null,
+          clientTxId: null,
+          createdAt: new Date("2024-06-15T12:00:00.000Z"),
+          data: {
+            subscribedSyncGroups: ["workspace-1", "workspace-2", "user-1"],
+          },
+          groupId: "user-1",
+          id: 7n,
+          model: "__sync_groups__",
+          modelId: "user-1",
+        },
+      ]),
+    } as unknown as SyncDao;
+    const service = new DeltaService(dao);
+
+    const packet = await service.fetchDeltas(
+      {
+        groups: ["workspace-1", "user-1"],
+        principal: { keyId: "key-1" },
+        userId: "user-1",
+      },
+      0n,
+      100
+    );
+
+    expect(packet.actions[0]?.data).toEqual({
+      subscribedSyncGroups: ["workspace-1", "user-1"],
+    });
+  });
+});

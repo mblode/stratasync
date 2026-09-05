@@ -139,6 +139,8 @@ export interface SyncUserContext {
   groups: string[];
   email?: string;
   name?: string | null;
+  /** Opaque credential identity preserved for application authorization hooks. */
+  principal?: unknown;
 }
 
 /**

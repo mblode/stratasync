@@ -2,6 +2,7 @@ import type { SyncLogger } from "../config.js";
 import { noopLogger } from "../config.js";
 import { isSyncCursorStale } from "../core/errors.js";
 import { toSyncActionOutput } from "../core/sync-action.js";
+import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
 import { serializeSyncId } from "../core/sync-id.js";
 import type { SyncDao } from "../dao/sync-dao.js";
 import type { DeltaPacket, SyncUserContext } from "../types.js";
@@ -52,9 +53,16 @@ export class DeltaService {
     const lastAction = resultActions.at(-1);
     const lastSyncId = lastAction ? lastAction.id : afterSyncId;
 
-    const outputActions = resultActions.map((action) =>
-      toSyncActionOutput(action)
-    );
+    const outputActions = resultActions.map((action) => {
+      const output = toSyncActionOutput(action);
+      return output.action === SYNC_GROUPS_ACTION &&
+        output.modelName === SYNC_GROUPS_MODEL
+        ? {
+            ...output,
+            data: { subscribedSyncGroups: [...context.groups] },
+          }
+        : output;
+    });
 
     this.logger.debug(
       {

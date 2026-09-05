@@ -8,8 +8,9 @@
  * that happens to be open, and a client that missed one would keep serving
  * cached rows from a group it no longer belongs to.
  *
- * The action is addressed to the changed user's own group (their userId), which
- * `authorizeToken` always includes, so exactly that user receives it.
+ * The action is addressed to the changed user's own group (their userId).
+ * Credential policies that need live refreshes include that group in their
+ * exact allowed set; egress rewrites the payload to the final authorized set.
  */
 
 /**
