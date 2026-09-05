@@ -140,7 +140,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     // Until its authoritative replacement commits, a rejected write must not
     // restore an old snapshot that may now be outside the user's authority.
     // Removing a rejected optimistic insert remains safe.
-    if (orchestrator.isGroupChangeReconcilePending() && tx.action !== "I") {
+    if (orchestrator.shouldSuppressPrivacyRollback(tx) && tx.action !== "I") {
       return;
     }
 

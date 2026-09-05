@@ -82,6 +82,25 @@ const GROUP_CHANGE_RETRY_DELAY_MS = 5000;
 const isGroupChangeAction = (action: SyncAction): boolean =>
   action.action === "G" || action.action === "S";
 
+const getAuthoritativeGroups = (
+  actions: SyncAction[]
+): string[] | undefined => {
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    const action = actions[index];
+    if (!action || !isGroupChangeAction(action)) {
+      continue;
+    }
+    const groups = action.data.subscribedSyncGroups;
+    if (
+      Array.isArray(groups) &&
+      groups.every((group): group is string => typeof group === "string")
+    ) {
+      return [...new Set(groups)];
+    }
+  }
+  return undefined;
+};
+
 const wait = (ms: number): Promise<void> =>
   // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
   new Promise((resolve) => {
@@ -337,13 +356,25 @@ export class DeltaPipeline {
    * the next start owing the bootstrap, and it is only cleared by a bootstrap
    * that completes (see BootstrapRunner.bootstrap).
    */
-  private async requestGroupChangeBootstrap(): Promise<void> {
-    if (!this.ctx.isGroupChangePending()) {
+  private async requestGroupChangeBootstrap(
+    authoritativeGroups?: string[]
+  ): Promise<void> {
+    const wasPending = this.ctx.isGroupChangePending();
+    if (authoritativeGroups) {
+      this.ctx.setGroups(authoritativeGroups);
+    }
+    if (!wasPending) {
       this.ctx.setGroupChangePending(true);
-      await this.ctx.storage.setMeta({
-        groupChangePending: true,
-        updatedAt: Date.now(),
-      });
+    }
+    const pendingMeta = wasPending ? {} : { groupChangePending: true };
+    await this.ctx.storage.setMeta({
+      ...(authoritativeGroups
+        ? { subscribedSyncGroups: authoritativeGroups }
+        : {}),
+      ...pendingMeta,
+      updatedAt: Date.now(),
+    });
+    if (!wasPending) {
       // The current identity maps were built under authority the server just
       // invalidated. Quarantine them immediately while keeping persisted rows
       // intact until the replacement snapshot commits atomically. The durable
@@ -580,6 +611,19 @@ export class DeltaPipeline {
    * re-applied.
    */
   private async applyDeltaPacket(packet: DeltaPacket): Promise<void> {
+    // Group actions are invalidations rather than ordinary model deltas. A
+    // server may redeliver one after the general cursor has moved (for example,
+    // when live delivery was missed but a later authorized action arrived), so
+    // inspect the received packet before filtering stale model actions. The
+    // payload is the server's full current authorized group list and must be
+    // adopted before the replacement bootstrap is requested.
+    if (packet.actions.some(isGroupChangeAction)) {
+      await this.requestGroupChangeBootstrap(
+        getAuthoritativeGroups(packet.actions)
+      );
+      return;
+    }
+
     // Nothing is applied while a group-change re-bootstrap is owed, so the
     // cursor cannot move past the group action. If it did, and the bootstrap
     // then failed, an ordinary reconnect would resume from a cursor beyond
@@ -588,15 +632,6 @@ export class DeltaPipeline {
     // prevent. The cost is a little redelivery once the bootstrap lands.
     if (this.ctx.isGroupChangePending()) {
       this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
-      return;
-    }
-
-    // Group actions are invalidations rather than ordinary model deltas. A
-    // server may redeliver one after the general cursor has moved (for example,
-    // when live delivery was missed but a later authorized action arrived), so
-    // inspect the received packet before filtering stale model actions.
-    if (packet.actions.some(isGroupChangeAction)) {
-      await this.requestGroupChangeBootstrap();
       return;
     }
 

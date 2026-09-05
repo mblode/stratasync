@@ -107,7 +107,10 @@ export interface SyncAuthConfig {
   reauthorizeBeforeWebSocketDelivery?: boolean;
   /**
    * Periodically scans durable personal-group actions so an active socket can
-   * recover a group refresh missed by the live delta transport.
+   * recover a group refresh missed by the live delta transport. Enabling this
+   * also guards every ordinary outbound cursor advance against missed durable
+   * refreshes and forces bootstrap when requested subscribe groups were
+   * revoked.
    */
   webSocketGroupRefreshCatchUpIntervalMs?: number;
 }

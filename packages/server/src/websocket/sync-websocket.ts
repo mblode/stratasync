@@ -229,6 +229,9 @@ export const registerSyncWebsocket = (
       const messageMutex = new AsyncMutex();
       const session = new ClientSession(socket, deltaSubscriber, {
         deliveryMutex: messageMutex,
+        ...(groupRefreshCatchUpIntervalMs
+          ? { groupRefreshGuardDao: syncDao }
+          : {}),
         ...(auth.reauthorizeBeforeWebSocketDelivery
           ? {
               reauthorizeDelivery: async (token: string) => {
@@ -338,6 +341,10 @@ export const registerSyncWebsocket = (
             },
             "Rejected unauthorized WebSocket sync groups"
           );
+          if (groupRefreshCatchUpIntervalMs) {
+            sendSocketError(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED);
+            return;
+          }
         }
 
         const requestedAfterSyncId = SyncId.parse(msg.afterSyncId ?? "0");

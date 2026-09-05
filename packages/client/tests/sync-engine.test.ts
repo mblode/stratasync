@@ -3971,6 +3971,7 @@ describe("reverse-done alignment", () => {
       await waitForSync(client, "70");
 
       expect(fullCalls).toBe(2);
+      expect(transport.bootstrapCalls.at(-1)?.syncGroups).toEqual(["team-2"]);
       expect(
         transport.bootstrapCalls.filter((call) => call.type === "partial")
       ).toHaveLength(0);
@@ -4056,6 +4057,83 @@ describe("reverse-done alignment", () => {
       expect(await storage.get("Task", "task-1")).toBeNull();
       expect(await storage.getOutbox()).toHaveLength(0);
     } finally {
+      await client.stop();
+    }
+  });
+
+  it("does not restore a revoked row when an in-flight delete is rejected after reconciliation", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        {
+          data: { id: "task-1", teamId: "team-1", title: "Private" },
+          modelName: "Task",
+        },
+      ],
+    });
+    let fullCalls = 0;
+    const originalBootstrap = transport.bootstrap.bind(transport);
+    transport.bootstrap = ((options: BootstrapOptions) => {
+      if (options.type !== "full") {
+        return originalBootstrap(options);
+      }
+      fullCalls += 1;
+      if (fullCalls === 1) {
+        return originalBootstrap(options);
+      }
+      transport.bootstrapCalls.push(options);
+      return reconciledEmpty();
+    }) as TestTransport["bootstrap"];
+
+    const response = createDeferred<MutateResult>();
+    let sentBatch: TransactionBatch | undefined;
+    transport.mutate = (batch: TransactionBatch) => {
+      sentBatch = batch;
+      return response.promise;
+    };
+    const client = createSyncClient({
+      batchDelay: 1,
+      batchMutations: true,
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      const deletePromise = client.delete("Task", "task-1");
+      await waitUntil(() => sentBatch !== undefined);
+
+      transport.emitDelta(groupActionPacket("60"));
+      await waitForSync(client, "70");
+
+      const transaction = sentBatch?.transactions[0];
+      if (!transaction) {
+        throw new Error("Expected an in-flight delete transaction");
+      }
+      response.resolve({
+        lastSyncId: "70",
+        results: [
+          {
+            clientTxId: transaction.clientTxId,
+            error: "access revoked",
+            success: false,
+          },
+        ],
+        success: true,
+      });
+      await deletePromise;
+      await waitUntil(async () => {
+        const outbox = await storage.getOutbox();
+        return outbox.length === 0;
+      });
+
+      expect(client.getCached("Task", "task-1")).toBeNull();
+      expect(await storage.get("Task", "task-1")).toBeNull();
+    } finally {
+      response.resolve({ lastSyncId: "70", results: [], success: true });
       await client.stop();
     }
   });
