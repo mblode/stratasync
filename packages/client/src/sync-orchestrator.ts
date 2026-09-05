@@ -303,6 +303,14 @@ export class SyncOrchestrator {
       if (!this.isRunActive(activeRunToken)) {
         return;
       }
+      if (this.groupChangePending) {
+        await this.applyPendingOutboxTransactions(true);
+        await this.storage.setMeta({
+          groupChangePending: false,
+          updatedAt: Date.now(),
+        });
+        this.groupChangePending = false;
+      }
 
       // Local data is ready. Mark as syncing so the UI can render
       // cached content immediately without waiting for network ops.
@@ -433,10 +441,17 @@ export class SyncOrchestrator {
     await this.emitOutboxCount();
   }
 
-  private getActiveOutboxTransactions(): Promise<Transaction[]> {
-    // Only the OutboxManager writes to the outbox, so when it is absent the
-    // outbox is empty. Delegating keeps the active-state predicate in one place.
-    return this.outboxManager?.getActiveTransactions() ?? Promise.resolve([]);
+  private async getActiveOutboxTransactions(): Promise<Transaction[]> {
+    if (this.outboxManager) {
+      return this.outboxManager.getActiveTransactions();
+    }
+    // Startup privacy reconciliation runs before the client attaches its
+    // outbox manager. Read the durable queue directly so replacement cannot
+    // clear the latch without sanitizing those transactions.
+    const transactions = await this.storage.getOutbox();
+    return transactions.filter(
+      (tx) => tx.state !== "completed" && tx.state !== "failed"
+    );
   }
 
   /**

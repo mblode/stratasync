@@ -283,6 +283,18 @@ class InMemoryStorage implements StorageAdapter {
   }
 }
 
+class FailingPrivacyMetadataStorage extends InMemoryStorage {
+  privacyMetadataWriteFailed = false;
+
+  override setMeta(meta: Partial<StorageMeta>): Promise<void> {
+    if ((meta.privacyWithheldClientTxIds?.length ?? 0) > 0) {
+      this.privacyMetadataWriteFailed = true;
+      return Promise.reject(new Error("privacy metadata write failed"));
+    }
+    return super.setMeta(meta);
+  }
+}
+
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value?: T | PromiseLike<T>) => void;
@@ -2055,6 +2067,37 @@ describe("reverse-done alignment", () => {
 
   it("re-runs bootstrap when HTTP delta catch-up requires a fresh snapshot", async () => {
     const storage = new InMemoryStorage();
+    await storage.addToOutbox({
+      action: "I",
+      clientId: "client-1",
+      clientTxId: "pending-private-child",
+      createdAt: Date.now(),
+      modelId: "task-pending",
+      modelName: "Task",
+      payload: {
+        id: "task-pending",
+        teamId: "team-revoked",
+        title: "Pending private child",
+      },
+      retryCount: 0,
+      state: "queued",
+    });
+    await storage.addToOutbox({
+      action: "D",
+      clientId: "client-1",
+      clientTxId: "pending-revoked-delete",
+      createdAt: Date.now() + 1,
+      modelId: "task-revoked",
+      modelName: "Task",
+      original: {
+        id: "task-revoked",
+        teamId: "team-revoked",
+        title: "Revoked",
+      },
+      payload: { id: "task-revoked" },
+      retryCount: 0,
+      state: "queued",
+    });
     const initialRows: ModelRow[] = [
       {
         data: { id: "task-1", teamId: "team-1", title: "Initial" },
@@ -2063,6 +2106,10 @@ describe("reverse-done alignment", () => {
       {
         data: { id: "team-1", name: "Core" },
         modelName: "Team",
+      },
+      {
+        data: { id: "task-revoked", teamId: "team-revoked", title: "Revoked" },
+        modelName: "Task",
       },
     ];
     const recoveredRows: ModelRow[] = [
@@ -2113,6 +2160,7 @@ describe("reverse-done alignment", () => {
       }
       return Promise.resolve({ actions: [], lastSyncId: after });
     }) as TestTransport["fetchDeltas"];
+    transport.mutate = () => Promise.reject(new Error("offline"));
 
     const client = createSyncClient({
       reactivity: noopReactivityAdapter,
@@ -2132,6 +2180,20 @@ describe("reverse-done alignment", () => {
         id: "task-1",
         title: "Recovered",
       });
+      expect(client.getCached("Task", "task-pending")).toBeNull();
+      const meta = await storage.getMeta();
+      expect(meta.privacyWithheldClientTxIds).toContain(
+        "pending-private-child"
+      );
+      expect(meta.privacyWithheldClientTxIds).toContain(
+        "pending-revoked-delete"
+      );
+      expect(meta.groupChangePending).toBeFalsy();
+      const outbox = await storage.getOutbox();
+      expect(
+        outbox.find((tx) => tx.clientTxId === "pending-revoked-delete")
+          ?.original
+      ).toBeUndefined();
     } finally {
       await client.stop();
     }
@@ -4544,6 +4606,73 @@ describe("reverse-done alignment", () => {
       expect(await readGroupChangePending(storage)).toBeFalsy();
     } finally {
       await client.stop();
+    }
+  });
+
+  it("keeps restart hydration quarantined when privacy metadata persistence fails", async () => {
+    const storage = new FailingPrivacyMetadataStorage();
+    await storage.setMeta({
+      bootstrapComplete: true,
+      clientId: "client-1",
+      lastSyncId: "10",
+      subscribedSyncGroups: ["team-1"],
+    });
+    await storage.addToOutbox({
+      action: "I",
+      clientId: "client-1",
+      clientTxId: "tx-private-child",
+      createdAt: Date.now(),
+      modelId: "task-local",
+      modelName: "Task",
+      payload: {
+        id: "task-local",
+        teamId: "team-1",
+        title: "Offline private child",
+      },
+      retryCount: 0,
+      state: "queued",
+    });
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "20", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await expect(client.start()).rejects.toThrow(
+        "privacy metadata write failed"
+      );
+      expect(storage.privacyMetadataWriteFailed).toBeTruthy();
+      expect(await readGroupChangePending(storage)).toBeTruthy();
+      expect(client.getCached("Task", "task-local")).toBeNull();
+    } finally {
+      await client.stop();
+    }
+
+    const restartTransport = new TestTransport({
+      fullMetadata: { lastSyncId: "30", subscribedSyncGroups: [] },
+      fullRows: [],
+    });
+    restartTransport.bootstrap = () => failedPrivacyBootstrap();
+    const restarted = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport: restartTransport,
+    });
+    try {
+      await expect(restarted.start()).rejects.toThrow(
+        "privacy bootstrap failed"
+      );
+      expect(restarted.getCached("Task", "task-local")).toBeNull();
+      expect(await readGroupChangePending(storage)).toBeTruthy();
+    } finally {
+      await restarted.stop();
     }
   });
 

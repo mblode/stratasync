@@ -310,7 +310,7 @@ export class DeltaPipeline {
     }
 
     try {
-      await this.bootstrapAndResume();
+      await this.requestGroupChangeBootstrap();
     } catch (recoveryError) {
       this.ctx.recordError(recoveryError);
     }
@@ -325,12 +325,21 @@ export class DeltaPipeline {
   private async bootstrapAndResume(): Promise<void> {
     await this.ctx.runWithStateLock(async () => {
       const activeRunToken = this.ctx.getRunToken();
-      const privacyReconcile = this.ctx.isGroupChangePending();
       await this.deps.runBootstrap(activeRunToken);
       if (!this.ctx.isRunActive(activeRunToken)) {
         return;
       }
+      const privacyReconcile = this.ctx.isGroupChangePending();
       await this.deps.applyPendingOutboxTransactions(privacyReconcile);
+      if (privacyReconcile) {
+        // Pending rollback data and withheld IDs are durable now. Clear the
+        // latch in storage before opening ordinary packet application again.
+        await this.ctx.storage.setMeta({
+          groupChangePending: false,
+          updatedAt: Date.now(),
+        });
+        this.ctx.setGroupChangePending(false);
+      }
     });
 
     if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
@@ -363,9 +372,6 @@ export class DeltaPipeline {
     if (authoritativeGroups) {
       this.ctx.setGroups(authoritativeGroups);
     }
-    if (!wasPending) {
-      this.ctx.setGroupChangePending(true);
-    }
     const pendingMeta = wasPending ? {} : { groupChangePending: true };
     await this.ctx.storage.setMeta({
       ...(authoritativeGroups
@@ -375,6 +381,7 @@ export class DeltaPipeline {
       updatedAt: Date.now(),
     });
     if (!wasPending) {
+      this.ctx.setGroupChangePending(true);
       // The current identity maps were built under authority the server just
       // invalidated. Quarantine them immediately while keeping persisted rows
       // intact until the replacement snapshot commits atomically. The durable
