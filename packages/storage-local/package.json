@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/storage-local",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "@stratasync/storage-local: localStorage storage adapter for Strata Sync, an open-source implementation of Linear's sync engine. For demos, tests and lightweight apps.",
   "keywords": [
     "browser",
