@@ -820,7 +820,7 @@ describe(registerSyncWebsocket, () => {
     expect(deliveredSyncIds).toEqual(["1", "2"]);
   });
 
-  it("forces bootstrap when a missed G action is older than the live cursor", async () => {
+  it("forces bootstrap before a public frame can advance past a missed G action", async () => {
     vi.useFakeTimers();
     try {
       const deltaSubscriber = new MockDeltaSubscriber();
@@ -848,26 +848,57 @@ describe(registerSyncWebsocket, () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(harness.socket.sent).toHaveLength(1);
 
-      // Redis missed G/1, then delivered an allowed action with a later id.
-      deltaSubscriber.emit(
-        { ...createLiveAction("2"), groupId: "workspace-1" },
-        ["workspace-1"]
-      );
+      // Redis missed G/1, then delivered a public action with a later id. Even
+      // an ungrouped frame would advance the reconnect cursor past G/1.
+      deltaSubscriber.emit({ ...createLiveAction("2"), groupId: null }, []);
       await vi.advanceTimersByTimeAsync(0);
       expect(harness.socket.sent).toHaveLength(2);
-
-      await vi.advanceTimersByTimeAsync(100);
-      expect(harness.socket.sent).toHaveLength(3);
-      expect(parseMessage(harness.socket.sent[2])).toMatchObject({
+      expect(parseMessage(harness.socket.sent[1])).toMatchObject({
         code: "BOOTSTRAP_REQUIRED",
         type: "error",
       });
+      expect(harness.getSyncGroupActions).toHaveBeenCalledWith(
+        0n,
+        2n,
+        "user-1",
+        1
+      );
       expect(harness.socket.closeCalls).toEqual([
         { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
       ]);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("forces bootstrap when reconnect requests a group current auth rejects", async () => {
+    const getSyncActions = vi.fn().mockResolvedValue([]);
+    const harness = setup({
+      getSyncActions,
+      resolveGroups: vi.fn().mockResolvedValue(["workspace-current"]),
+      webSocketGroupRefreshCatchUpIntervalMs: 100,
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          afterSyncId: "11",
+          groups: ["workspace-revoked", "user-1"],
+          token: "tok",
+          type: "subscribe",
+        })
+      )
+    );
+
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+    expect(parseMessage(harness.socket.sent[0])).toMatchObject({
+      code: "BOOTSTRAP_REQUIRED",
+      type: "error",
+    });
+    expect(getSyncActions).not.toHaveBeenCalled();
   });
 
   it("delivers a caught-up G action that advances the live cursor", async () => {

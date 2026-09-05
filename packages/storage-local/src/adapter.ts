@@ -236,9 +236,20 @@ export class LocalStorageAdapter implements StorageAdapter {
   clear(options?: { preserveOutbox?: boolean }): Promise<void> {
     const preserveOutbox = options?.preserveOutbox === true;
     let savedOutbox: Transaction[] = [];
+    let savedMeta: StorageMeta | null = null;
 
     if (preserveOutbox) {
       savedOutbox = this.readOutbox();
+      const current = this.readJson<StorageMeta>("meta", { lastSyncId: "0" });
+      savedMeta = {
+        bootstrapComplete: false,
+        clientId: current.clientId,
+        firstSyncId: "0",
+        groupChangePending: current.groupChangePending,
+        lastSyncId: "0",
+        privacyWithheldClientTxIds: current.privacyWithheldClientTxIds,
+        subscribedSyncGroups: current.subscribedSyncGroups ?? [],
+      };
     }
 
     // Remove all keys with our prefix + dbName
@@ -256,6 +267,9 @@ export class LocalStorageAdapter implements StorageAdapter {
 
     if (preserveOutbox && savedOutbox.length > 0) {
       this.writeOutbox(savedOutbox);
+    }
+    if (savedMeta !== null) {
+      this.safeSetItem(this.key("meta"), JSON.stringify(savedMeta));
     }
 
     return Promise.resolve();

@@ -79,6 +79,7 @@ export class SyncOrchestrator {
    * so the delta pipeline can gate without a storage read per packet.
    */
   private groupChangePending = false;
+  private privacyWithheldClientTxIds = new Set<string>();
   private readonly emitEvent?: (event: SyncClientEvent) => void;
   private onTransactionConflict?: (tx: Transaction) => void;
 
@@ -247,6 +248,14 @@ export class SyncOrchestrator {
     return this.groupChangePending;
   }
 
+  shouldSuppressPrivacyRollback(tx: Transaction): boolean {
+    return (
+      this.groupChangePending ||
+      (this.privacyWithheldClientTxIds.has(tx.clientTxId) &&
+        !this.identityMaps.getMap(tx.modelName).has(tx.modelId))
+    );
+  }
+
   /**
    * Gets the first sync ID from the last full bootstrap
    */
@@ -293,6 +302,14 @@ export class SyncOrchestrator {
       await this.bootstrapIfNeeded(meta, activeRunToken);
       if (!this.isRunActive(activeRunToken)) {
         return;
+      }
+      if (this.groupChangePending) {
+        await this.applyPendingOutboxTransactions(true);
+        await this.storage.setMeta({
+          groupChangePending: false,
+          updatedAt: Date.now(),
+        });
+        this.groupChangePending = false;
       }
 
       // Local data is ready. Mark as syncing so the UI can render
@@ -341,6 +358,7 @@ export class SyncOrchestrator {
   private async loadMetadata(): Promise<StorageMeta> {
     const meta = await this.storage.getMeta();
     this.groupChangePending = meta.groupChangePending === true;
+    this.privacyWithheldClientTxIds = new Set(meta.privacyWithheldClientTxIds);
     this.clientId =
       meta.clientId ??
       getOrCreateClientId(`${this.options.dbName ?? "sync-db"}_client_id`);
@@ -397,6 +415,7 @@ export class SyncOrchestrator {
           ...prepared.withheld.map((tx) => tx.clientTxId),
         ]),
       ];
+      this.privacyWithheldClientTxIds = new Set(withheldIds);
       await Promise.all(
         prepared.changed.map((tx) =>
           this.storage.updateOutboxTransaction(tx.clientTxId, {
@@ -422,10 +441,17 @@ export class SyncOrchestrator {
     await this.emitOutboxCount();
   }
 
-  private getActiveOutboxTransactions(): Promise<Transaction[]> {
-    // Only the OutboxManager writes to the outbox, so when it is absent the
-    // outbox is empty. Delegating keeps the active-state predicate in one place.
-    return this.outboxManager?.getActiveTransactions() ?? Promise.resolve([]);
+  private async getActiveOutboxTransactions(): Promise<Transaction[]> {
+    if (this.outboxManager) {
+      return this.outboxManager.getActiveTransactions();
+    }
+    // Startup privacy reconciliation runs before the client attaches its
+    // outbox manager. Read the durable queue directly so replacement cannot
+    // clear the latch without sanitizing those transactions.
+    const transactions = await this.storage.getOutbox();
+    return transactions.filter(
+      (tx) => tx.state !== "completed" && tx.state !== "failed"
+    );
   }
 
   /**
@@ -504,6 +530,7 @@ export class SyncOrchestrator {
     // In-memory only: the persisted latch is what the next start reads, so a
     // stop() across an owed re-bootstrap still forces one on resume.
     this.groupChangePending = false;
+    this.privacyWithheldClientTxIds.clear();
     this.stateMachine.clearError();
     this.stateMachine.setCatchingUp(false);
 

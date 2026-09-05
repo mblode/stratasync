@@ -70,7 +70,9 @@ export class BootstrapRunner {
       await this.bootstrap(runToken);
     } catch (error) {
       const canFallback =
-        bootstrapMode === "auto" && (await this.hasLocalData());
+        bootstrapMode === "auto" &&
+        !this.ctx.isGroupChangePending() &&
+        (await this.hasLocalData());
       if (canFallback) {
         await this.localBootstrap(runToken);
         return;
@@ -102,6 +104,25 @@ export class BootstrapRunner {
       return;
     }
 
+    const replacesExistingSnapshot =
+      previousMeta.bootstrapComplete === true ||
+      previousMeta.lastSyncAt !== undefined ||
+      (await this.hasLocalData());
+    // A completed remote response is now replacing an existing snapshot and
+    // may bridge over a missed revocation. Preserve ordinary offline fallback
+    // until this point, then durably quarantine before changing any rows.
+    if (replacesExistingSnapshot && !this.ctx.isGroupChangePending()) {
+      await this.ctx.storage.setMeta({
+        groupChangePending: true,
+        updatedAt: Date.now(),
+      });
+      this.ctx.setGroupChangePending(true);
+      this.ctx.identityMaps.batch(() => {
+        this.ctx.identityMaps.clearAll();
+      });
+    }
+    const privacyReconcile = this.ctx.isGroupChangePending();
+
     await this.commitBootstrapRows(snapshot.rows);
 
     const databaseVersion = this.applyBootstrapMetadata(snapshot.metadata);
@@ -111,15 +132,17 @@ export class BootstrapRunner {
       return;
     }
 
-    // The bootstrap is what reconciles membership, so it is what clears the
-    // latch: it filtered on the server's current view of this user's groups
-    // and replaced the local snapshot with the result.
-    this.ctx.setGroupChangePending(false);
+    // Keep the durable privacy latch set until the caller has sanitized and
+    // persisted every pending transaction against this replacement snapshot.
+    // A crash in that later step must restart in quarantine.
+    if (!privacyReconcile) {
+      this.ctx.setGroupChangePending(false);
+    }
     await this.ctx.storage.setMeta({
       bootstrapComplete: true,
       databaseVersion,
       firstSyncId: this.ctx.cursor.firstSyncId,
-      groupChangePending: false,
+      groupChangePending: privacyReconcile,
       lastSyncAt: Date.now(),
       lastSyncId: this.ctx.cursor.lastSyncId,
       privacyWithheldClientTxIds: previousMeta.privacyWithheldClientTxIds,

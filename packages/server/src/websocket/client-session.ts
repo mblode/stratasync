@@ -26,6 +26,7 @@ type ReauthorizeDelivery = (token: string) => Promise<SyncUserContext | null>;
 
 interface ClientSessionOptions {
   deliveryMutex: AsyncMutex;
+  groupRefreshGuardDao?: SyncDao;
   reauthorizeDelivery?: ReauthorizeDelivery;
 }
 
@@ -59,6 +60,7 @@ export class ClientSession {
   private readonly socket: WebSocket;
   private readonly deltaSubscriber?: DeltaSubscriberLike;
   private readonly deliveryMutex: AsyncMutex;
+  private readonly groupRefreshGuardDao?: SyncDao;
   private readonly reauthorizeDelivery?: ReauthorizeDelivery;
   private unsubscribe: (() => void) | null = null;
   private bufferedActions: BufferedAction[] = [];
@@ -73,6 +75,7 @@ export class ClientSession {
     this.socket = socket;
     this.deltaSubscriber = deltaSubscriber;
     this.deliveryMutex = options.deliveryMutex;
+    this.groupRefreshGuardDao = options.groupRefreshGuardDao;
     this.reauthorizeDelivery = options.reauthorizeDelivery;
   }
 
@@ -216,6 +219,13 @@ export class ClientSession {
       return;
     }
 
+    if (
+      !isSyncGroupsAction(action) &&
+      !(await this.guardGroupRefreshCursor(syncId))
+    ) {
+      return;
+    }
+
     if (isSyncGroupsAction(action)) {
       const latestGroups = Array.isArray(action.data.subscribedSyncGroups)
         ? action.data.subscribedSyncGroups.filter(
@@ -244,6 +254,47 @@ export class ClientSession {
       this.socket.send(
         buildDeltaFrame(scopedAction, SyncId.serialize(this.afterSyncId))
       );
+    }
+  }
+
+  /**
+   * Prevents an ordinary frame from advancing the main cursor past a durable
+   * group refresh that this socket missed on the live transport.
+   */
+  private async guardGroupRefreshCursor(
+    throughSyncId: bigint
+  ): Promise<boolean> {
+    const { groupRefreshGuardDao: syncDao, userId } = this;
+    if (!(syncDao && userId) || throughSyncId <= this.groupRefreshCursor) {
+      return true;
+    }
+
+    try {
+      const earliestSyncId = await syncDao.getEarliestSyncId();
+      if (
+        this.groupRefreshCursor > 0n &&
+        earliestSyncId > this.groupRefreshCursor
+      ) {
+        this.requireBootstrap();
+        return false;
+      }
+
+      const [missedRefresh] = await syncDao.getSyncGroupActions(
+        this.groupRefreshCursor,
+        throughSyncId,
+        userId,
+        1
+      );
+      if (missedRefresh) {
+        this.requireBootstrap();
+        return false;
+      }
+
+      this.groupRefreshCursor = throughSyncId;
+      return true;
+    } catch {
+      this.requireBootstrap();
+      return false;
     }
   }
 
