@@ -1,5 +1,17 @@
 # @stratasync/client
 
+## 2.1.1
+
+### Patch Changes
+
+- 94993d2: Persist direct model assignments through the client outbox, retain newer
+  unsaved edits across overlapping saves, server reconciliation, and rejection,
+  emit generic mutation rejection events, and restore pending optimistic state
+  on warm startup.
+- Updated dependencies [94993d2]
+  - @stratasync/core@2.1.1
+  - @stratasync/y-doc@2.1.1
+
 ## 2.1.0
 
 ### Minor Changes
