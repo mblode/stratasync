@@ -1,5 +1,13 @@
 # @stratasync/transport-graphql
 
+## 2.2.0
+
+### Patch Changes
+
+- @stratasync/client@2.2.0
+  - @stratasync/core@2.2.0
+  - @stratasync/y-doc@2.2.0
+
 ## 2.1.1
 
 ### Patch Changes

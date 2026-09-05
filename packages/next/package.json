@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/next",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "@stratasync/next: Next.js App Router integration for Strata Sync, an open-source implementation of Linear's sync engine. Server-side bootstrap prefetch and a client provider.",
   "keywords": [
     "app-router",
