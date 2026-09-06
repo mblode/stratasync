@@ -29,6 +29,14 @@ Models, adapters, and the sync protocol, with a full API reference.
 
 ## Install
 
+A new app, ready to run:
+
+```bash
+npx stratasync init my-app
+```
+
+Or add the packages to an app you already have:
+
 ```bash
 npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
 npm install react mobx mobx-react-lite

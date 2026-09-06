@@ -13,7 +13,8 @@
       "@stratasync/y-doc",
       "@stratasync/storage-idb",
       "@stratasync/storage-local",
-      "@stratasync/transport-graphql"
+      "@stratasync/transport-graphql",
+      "stratasync"
     ]
   ],
   "linked": [],
