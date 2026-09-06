@@ -1,5 +1,6 @@
 import { siteConfig } from "@/lib/config";
 import { docsGroups } from "@/lib/docs-nav";
+import { guides, guideUrl } from "@/lib/guides";
 
 /*
  * `llms.txt` for the zone root. The docs host publishes its own at
@@ -32,6 +33,13 @@ const body = () => {
     })
     .join("\n\n");
 
+  const guideLines = guides
+    .map(
+      (guide) =>
+        `- [${guide.title}](${guideUrl(guide.slug)}): ${guide.description}`
+    )
+    .join("\n");
+
   return `# ${siteConfig.name}
 
 > ${siteConfig.answer}
@@ -55,6 +63,10 @@ Any page is available as markdown: append \`.md\`, or send \`Accept: text/markdo
 \`\`\`bash
 npx skills add mblode/stratasync
 \`\`\`
+
+## Guides
+
+${guideLines}
 
 ${sections}
 `;

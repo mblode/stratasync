@@ -117,8 +117,19 @@ export const webPageId = `${siteConfig.url}/#webpage`;
 export const breadcrumbId = `${siteConfig.url}/#breadcrumb`;
 export const faqId = `${siteConfig.url}/#faq`;
 
-export const breadcrumbSchema = () => ({
-  "@id": breadcrumbId,
+interface Crumb {
+  name: string;
+  url: string;
+}
+
+/**
+ * `trail` appends crumbs below the zone root, for pages deeper than
+ * `/stratasync`. Anything passed here must also render in the visible trail:
+ * a BreadcrumbList naming a crumb the page does not show is a structured-data
+ * policy violation, and answer engines read the DOM rather than the script.
+ */
+export const breadcrumbSchema = (trail: Crumb[] = [], id = breadcrumbId) => ({
+  "@id": id,
   "@type": "BreadcrumbList",
   itemListElement: [
     // "Matthew Blode", not "Home": the root crumb is the one piece of chrome
@@ -143,6 +154,12 @@ export const breadcrumbSchema = () => ({
       name: siteConfig.name,
       position: 3,
     },
+    ...trail.map((crumb, index) => ({
+      "@type": "ListItem",
+      item: crumb.url,
+      name: crumb.name,
+      position: 4 + index,
+    })),
   ],
 });
 
