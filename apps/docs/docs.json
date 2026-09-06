@@ -44,10 +44,6 @@
         ]
       },
       {
-        "group": "Comparisons",
-        "pages": ["comparisons/zero"]
-      },
-      {
         "group": "Packages",
         "pages": [
           "packages",

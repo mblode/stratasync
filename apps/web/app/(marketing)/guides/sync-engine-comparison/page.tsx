@@ -200,7 +200,7 @@ const Page = () => (
       Pick Zero if you want to think in queries and are happy to operate the
       cache. Pick Strata Sync if you would rather declare model classes and not
       add a process. The{" "}
-      <a href={`${siteConfig.links.docs}/comparisons/zero`}>
+      <a href={`${siteConfig.url}/guides/strata-sync-vs-zero`}>
         detailed Zero comparison
       </a>{" "}
       goes further, including when Zero is the better answer.

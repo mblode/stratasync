@@ -317,7 +317,7 @@ export const LandingComparison = () => {
           <p className="mx-auto max-w-2xl text-center text-muted-foreground text-sm">
             <a
               className="underline underline-offset-2 hover:text-foreground"
-              href={`${siteConfig.links.docs}/comparisons/zero`}
+              href={`${siteConfig.url}/guides/strata-sync-vs-zero`}
             >
               Strata Sync vs Zero, in detail
             </a>
