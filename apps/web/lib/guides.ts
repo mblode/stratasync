@@ -82,6 +82,86 @@ export const guides: Guide[] = [
   },
   {
     answer:
+      "Convex and Strata Sync solve the same problem from opposite ends. Convex brings its own managed reactive database and runs your writes as server functions. Strata Sync syncs the Postgres you already run, from routes inside your own Fastify app. The choice is mostly about who owns the database.",
+    description:
+      "Convex and Strata Sync compared: managed reactive database against your own Postgres, server functions against a durable outbox, and where the two architectures actually agree.",
+    faq: [
+      {
+        answer:
+          "Convex brings its own managed database, so your data lives in Convex rather than in a Postgres you operate. Strata Sync never owns your data: it reads and writes the database you already run, through routes registered on your existing Fastify app. If the database has other consumers or has to stay where it is, that difference decides it.",
+        question: "What is the main difference between Convex and Strata Sync?",
+      },
+      {
+        answer:
+          "Yes, self-hosting is available, though the managed cloud deployment is the default path and the one most of the documentation assumes. Strata Sync has no hosted option at all, because there is nothing to host: it is a library that runs inside your app and stores its sync log in your Postgres.",
+        question: "Can you self-host Convex?",
+      },
+      {
+        answer:
+          "More than the surface suggests. Convex uses optimistic concurrency control with transaction atomicity and a strictly increasing sequence identifier. Strata Sync assigns every change a monotonic syncId and has clients replay that order. Both are server-authoritative and both let a client catch up by asking for everything after a number, rather than merging without a coordinator.",
+        question:
+          "How do Convex and Strata Sync differ on ordering and conflicts?",
+      },
+      {
+        answer:
+          "Neither ships it. Record-level ordering handles text badly, because two people typing in one paragraph is the case a single ordering cannot merge sensibly. Strata Sync includes Yjs documents and presence for text fields through @stratasync/y-doc. With Convex you add a CRDT layer yourself.",
+        question: "Does Convex support collaborative text editing?",
+      },
+      {
+        answer:
+          "Choose Convex when you are starting fresh and want one product to own the database, the server functions and the sync, and you are happy for that product to be the backend. Choose Strata Sync when the Postgres already exists, has other consumers, or has to stay yours, and you want Linear's architecture rather than a new backend.",
+        question: "When should I choose Convex over Strata Sync?",
+      },
+    ],
+    keywords: [
+      "convex alternative",
+      "convex vs strata sync",
+      "convex sync engine",
+      "convex vs zero",
+    ],
+    slug: "strata-sync-vs-convex",
+    title: "Strata Sync vs Convex",
+    updated: "2026-09-07",
+  },
+  {
+    answer:
+      "Zero and Strata Sync are both server-authoritative sync engines over your own Postgres. Zero runs zero-cache beside the database and gives you ZQL, its own query language. Strata Sync registers routes on your existing Fastify app and has you declare model classes instead.",
+    description:
+      "Zero and Strata Sync compared: an extra cache process against routes in your own app, ZQL against model classes, and when Zero is the better pick.",
+    faq: [
+      {
+        answer:
+          "Zero introduces zero-cache, a process between your client and Postgres that holds the replica the server reasons about, and which you run, scale and monitor. Strata Sync introduces routes: @stratasync/server registers bootstrap, mutate and a WebSocket on the Fastify app you already deploy. Redis is optional and only for fan-out across instances.",
+        question: "Does Zero require running an extra service?",
+      },
+      {
+        answer:
+          "Zero ships ZQL, a query language of its own, and queries are subscriptions that update as the underlying data changes. Strata Sync follows Linear: you declare model classes with decorators and read them back through typed queries and React hooks, against a local replica, with no new query language to learn.",
+        question: "What is the difference between ZQL and Strata Sync queries?",
+      },
+      {
+        answer:
+          "Both are server-authoritative and both rebase, so neither asks you to reason about CRDT merge semantics for records. Strata Sync resolves conflicts per field rather than per record, so two people editing different fields of the same row do not collide at all.",
+        question: "How do Zero and Strata Sync handle conflicts?",
+      },
+      {
+        answer:
+          "Pick Zero if you want queries as the primary abstraction, you like ZQL, and you are happy to operate zero-cache. Pick Zero too if you want the backing of a team whose whole product this is: Strata Sync is one author plus contributors, in production on one product.",
+        question: "When should I choose Zero over Strata Sync?",
+      },
+    ],
+    keywords: [
+      "zero sync alternative",
+      "zero vs strata sync",
+      "rocicorp zero alternative",
+      "zero sync engine",
+    ],
+    slug: "strata-sync-vs-zero",
+    title: "Strata Sync vs Zero",
+    updated: "2026-09-07",
+  },
+  {
+    answer:
       "The open-source sync engines differ on three things: whether they own your database, whether you run an extra service, and whether writes go through them or through your own API. Convex owns the database. Electric and Zero sit beside your Postgres. Strata Sync runs inside your Fastify app.",
     description:
       "Strata Sync, Zero, ElectricSQL, Convex, InstantDB and PowerSync compared on database ownership, services to operate, the write path, conflict resolution, and collaborative text.",

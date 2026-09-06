@@ -178,7 +178,22 @@ const nextConfig = {
       ];
     });
 
-    return apexRedirects;
+    /*
+     * The Zero comparison moved from the Blode.md docs to the marketing
+     * guides, so all comparisons live in one place. Specific source, placed
+     * before nothing that could swallow it: `/docs/:path*` is a route handler
+     * rather than a redirect, and `next.config.js` redirects run ahead of
+     * routing, so this intercepts.
+     */
+    const moved = [
+      {
+        destination: "/guides/strata-sync-vs-zero",
+        permanent: true,
+        source: "/docs/comparisons/zero",
+      },
+    ];
+
+    return [...apexRedirects, ...moved];
   },
   rewrites() {
     return {
