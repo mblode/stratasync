@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useState } from "react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { siteConfig } from "@/lib/config";
 
 type StatusType = "check" | "cross" | "neutral";
 
@@ -302,6 +303,16 @@ export const LandingComparison = () => {
               );
             })}
           </div>
+
+          <p className="mx-auto max-w-2xl text-center text-muted-foreground text-sm">
+            <a
+              className="underline underline-offset-2 hover:text-foreground"
+              href={`${siteConfig.links.docs}/comparisons/zero`}
+            >
+              Strata Sync vs Zero, in detail
+            </a>
+            , including when to pick Zero instead.
+          </p>
 
           <p className="mx-auto max-w-2xl text-center text-muted-foreground text-xs">
             Other columns summarise each project&#8217;s documented default

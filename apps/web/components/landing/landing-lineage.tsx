@@ -215,7 +215,14 @@ export const LandingLineage = () => (
               reverse-engineering notes
             </a>{" "}
             wrote it down chapter by chapter. Strata Sync implements each
-            chapter in TypeScript, on your own Postgres.
+            chapter in TypeScript, on your own Postgres.{" "}
+            <a
+              className="underline underline-offset-2 hover:text-foreground"
+              href={`${siteConfig.links.docs}/architecture/linear-sync-engine`}
+            >
+              Read the full mapping
+            </a>
+            .
           </p>
         </div>
 
