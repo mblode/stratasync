@@ -19,7 +19,7 @@ const audiences = [
 export const HeroInstall = () => (
   <Tabs className="flex flex-col gap-4" defaultValue="humans">
     <TabsList
-      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-white/30 [&>*+*]:border-l [&>*+*]:pl-4"
+      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-l-white/30 [&>*+*]:border-l [&>*+*]:pl-4"
       variant="line"
     >
       {audiences.map((audience) => (
