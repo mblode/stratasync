@@ -12,12 +12,19 @@ import type {
   SyncId,
   TransactionBatch,
 } from "@stratasync/core";
+/*
+ * From the `/types` subpath, not the package root. The root re-exports
+ * `YjsDocumentManager`, which imports yjs, so every consumer of this transport
+ * loaded the whole CRDT library to get four message type guards, including
+ * apps with no collaborative text at all. These guards live in a module that
+ * imports nothing.
+ */
 import {
   isLiveEditingErrorMessage,
   isSessionStateMessage,
   isYjsSyncStep2Message,
   isYjsUpdateMessage,
-} from "@stratasync/y-doc";
+} from "@stratasync/y-doc/types";
 
 import { createBatchLoadStream, createBootstrapStream } from "./bootstrap.js";
 import { fetchDeltas } from "./deltas.js";

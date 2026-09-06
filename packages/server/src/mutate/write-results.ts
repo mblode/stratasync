@@ -23,9 +23,20 @@ export const getAffectedRowCount = (result: unknown): number | null => {
   return toAffectedRowCount((result as { rowCount?: unknown }).rowCount);
 };
 
-export const assertMutationTargetAffected = (result: unknown): void => {
+export const assertMutationTargetAffected = (
+  result: unknown,
+  target?: { id?: string; operation?: string }
+): void => {
   const affectedRows = getAffectedRowCount(result);
   if (affectedRows !== null && affectedRows < 1) {
-    throw new Error("Invalid mutation: record not found");
+    /*
+     * Same wording and the same parenthetical shape as `model-registry.ts`,
+     * which already appends `(name/id)` to this message. The bare sentence
+     * left the caller guessing which row in a batch that may carry many.
+     */
+    const detail = [target?.operation, target?.id].filter(Boolean).join(" ");
+    throw new Error(
+      `Invalid mutation: record not found${detail ? ` (${detail})` : ""}`
+    );
   }
 };
