@@ -1,6 +1,7 @@
 import Image from "next/image";
 
 import { siteConfig } from "@/lib/config";
+import { docsGroups } from "@/lib/docs-nav";
 import avatarSm from "@/public/avatar-sm.png";
 
 export const SiteFooter = () => (
@@ -30,6 +31,33 @@ export const SiteFooter = () => (
         Matthew Blode
       </a>
     </div>
+    {/* One link per docs section. The sitemap carries every page; this keeps
+        a crawl path into each section off the main content. */}
+    <nav aria-label="Documentation">
+      <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+        <li>
+          <a
+            className="transition-colors hover:text-foreground"
+            href={`${siteConfig.url}/guides`}
+          >
+            Guides
+          </a>
+        </li>
+        {docsGroups.map((group) => {
+          const [first] = group.pages;
+          return first ? (
+            <li key={group.group}>
+              <a
+                className="transition-colors hover:text-foreground"
+                href={first.url}
+              >
+                {group.group}
+              </a>
+            </li>
+          ) : null;
+        })}
+      </ul>
+    </nav>
     <div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground/30">
       <span className="text-muted-foreground">
         v{process.env.STRATASYNC_VERSION}
