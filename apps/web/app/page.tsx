@@ -4,7 +4,6 @@ import { getSingletonHighlighter } from "shiki";
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
 import { LandingComparison } from "@/components/landing/landing-comparison";
-import { LandingDocs } from "@/components/landing/landing-docs";
 import { LandingFaq } from "@/components/landing/landing-faq";
 import { LandingGap } from "@/components/landing/landing-gap";
 import { LandingHow } from "@/components/landing/landing-how";
@@ -23,49 +22,6 @@ class Todo extends Model {
   @Property() declare title: string
   @Property() declare completed: boolean
 }`;
-
-const CLIENT_SNIPPET = `import { createSyncClient } from "@stratasync/client"
-import { createMobXReactivity } from "@stratasync/mobx"
-import { createIndexedDbStorage } from "@stratasync/storage-idb"
-import { createGraphQLTransport } from "@stratasync/transport-graphql"
-
-const client = createSyncClient({
-  storage: createIndexedDbStorage(),
-  transport: createGraphQLTransport({
-    syncEndpoint: "/api/sync",
-    wsEndpoint: "wss://api.example.com/sync/ws",
-    auth: { getAccessToken: async () => "token" },
-  }),
-  reactivity: createMobXReactivity(),
-})`;
-
-const HOOKS_SNIPPET = `import { observer } from "mobx-react-lite"
-import { useQuery, useSyncClient } from "@stratasync/react"
-
-const TodoList = observer(() => {
-  const { data: todos } = useQuery("Todo", {
-    where: (t) => !t.completed,
-  })
-  const { client } = useSyncClient()
-
-  const addTodo = async () => {
-    const todo = await client.create("Todo", {
-      title: "New todo",
-      completed: false,
-    })
-    todo.title = "Actually, a better title"
-    await todo.save()
-  }
-
-  return (
-    <ul>
-      {todos.map((todo) => (
-        <li key={todo.id}>{todo.title}</li>
-      ))}
-      <button onClick={addTodo}>Add</button>
-    </ul>
-  )
-})`;
 
 const highlighterOptions = {
   langs: ["bash", "tsx"],
@@ -96,11 +52,7 @@ const shikiClassName =
   "overflow-x-auto pb-4 text-xs md:text-sm [&>pre]:m-0 [&>pre]:p-0 [&>pre]:!bg-transparent [&>pre]:!font-mono [&>pre>code]:!font-mono dark:[&>pre]:!text-[color:var(--shiki-dark)] dark:[&>pre_span]:!text-[color:var(--shiki-dark)]";
 
 const Home = async () => {
-  const [modelHtml, clientHtml, hooksHtml] = await Promise.all([
-    getCodeHtml(MODEL_SNIPPET, "tsx"),
-    getCodeHtml(CLIENT_SNIPPET, "tsx"),
-    getCodeHtml(HOOKS_SNIPPET, "tsx"),
-  ]);
+  const modelHtml = await getCodeHtml(MODEL_SNIPPET, "tsx");
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -200,22 +152,9 @@ const Home = async () => {
                   Get started in minutes
                 </h2>
 
-                <div className="flex justify-center">
-                  <code className="relative inline-flex items-center gap-2 rounded-lg bg-muted/50 px-4 py-2 font-mono text-sm">
-                    <span className="truncate">
-                      npx skills add mblode/stratasync
-                    </span>
-                    <CopyButton
-                      content="npx skills add mblode/stratasync"
-                      size="xs"
-                      variant="ghost"
-                    />
-                  </code>
-                </div>
-
                 <div className="space-y-3">
                   <h3 className="font-medium text-muted-foreground text-sm">
-                    1. Define your models ·{" "}
+                    Define a model ·{" "}
                     <code className="text-xs opacity-60">
                       lib/sync/models.ts
                     </code>
@@ -234,65 +173,16 @@ const Home = async () => {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <h3 className="font-medium text-muted-foreground text-sm">
-                    2. Create the client ·{" "}
-                    <code className="text-xs opacity-60">
-                      lib/sync/client.ts
-                    </code>
-                  </h3>
-                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                    <CopyButton
-                      className="absolute top-3 right-3"
-                      content={CLIENT_SNIPPET}
-                      size="xs"
-                      variant="ghost"
-                    />
-                    <div
-                      className={shikiClassName}
-                      dangerouslySetInnerHTML={{ __html: clientHtml }}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h3 className="font-medium text-muted-foreground text-sm">
-                    3. Build reactive components ·{" "}
-                    <code className="text-xs opacity-60">
-                      components/todo-list.tsx
-                    </code>
-                  </h3>
-                  <div className="relative rounded-2xl bg-muted/50 p-4 pr-14 pb-0">
-                    <CopyButton
-                      className="absolute top-3 right-3"
-                      content={HOOKS_SNIPPET}
-                      size="xs"
-                      variant="ghost"
-                    />
-                    <div
-                      className={shikiClassName}
-                      dangerouslySetInnerHTML={{ __html: hooksHtml }}
-                    />
-                  </div>
-                </div>
-
                 <p className="text-center">
                   <Button asChild variant="link">
-                    <a
-                      href="https://github.com/mblode/stratasync/tree/main/examples"
-                      rel="noopener noreferrer"
-                      target="_blank"
-                    >
-                      View full examples on GitHub
+                    <a href={`${siteConfig.links.docs}/quick-start`}>
+                      Full quick start, five steps
                     </a>
                   </Button>
                 </p>
               </div>
             </div>
           </section>
-
-          {/* WHAT — Docs index, and the crawl path into it */}
-          <LandingDocs />
 
           {/* WHAT — FAQ */}
           <LandingFaq />

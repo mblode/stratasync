@@ -13,7 +13,7 @@ export const siteConfig = {
    * (about 50 words) so an answer engine can quote it without the page.
    */
   answer:
-    "Strata Sync is an open-source TypeScript implementation of Linear's sync engine for React and Next.js. Reads come from a local copy, writes queue while offline, and every client replays one server-ordered log. It runs on your own Postgres. MIT.",
+    "Strata Sync is an open-source implementation of Linear's sync engine for TypeScript. Local reads, offline writes, one server-ordered log, on your own Postgres. MIT.",
   /** Search snippet. Under 160 characters. */
   description:
     "Open-source, local-first sync engine for TypeScript, React and Next.js: Linear's server-sequenced architecture on your own Postgres, with offline writes, Yjs and undo. MIT.",
