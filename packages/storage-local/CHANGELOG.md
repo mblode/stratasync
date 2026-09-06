@@ -1,5 +1,12 @@
 # @stratasync/storage-local
 
+## 2.4.1
+
+### Patch Changes
+
+- @stratasync/client@2.4.1
+  - @stratasync/core@2.4.1
+
 ## 2.4.0
 
 ### Patch Changes

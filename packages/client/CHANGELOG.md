@@ -1,5 +1,12 @@
 # @stratasync/client
 
+## 2.4.1
+
+### Patch Changes
+
+- @stratasync/core@2.4.1
+  - @stratasync/y-doc@2.4.1
+
 ## 2.4.0
 
 ### Minor Changes
