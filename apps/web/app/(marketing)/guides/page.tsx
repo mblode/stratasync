@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { H1, Lead } from "@/components/ui/typography";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
   breadcrumbSchema,
@@ -68,9 +67,9 @@ const Page = () => (
         trail={[{ href: url, name: "Guides" }]}
       />
 
-      <div className="mx-auto mt-8 max-w-3xl">
-        <H1>Sync engine guides</H1>
-        <Lead className="mt-6">
+      <div className="typeset typeset-guide mx-auto mt-8 max-w-3xl">
+        <h1>Sync engine guides</h1>
+        <p className="mt-6 text-lg text-muted-foreground">
           What a sync engine is, when the answer is no, and how the open-source
           options differ once you get past the feature lists. For building with
           Strata Sync specifically, read the{" "}
@@ -81,7 +80,7 @@ const Page = () => (
             documentation
           </a>
           .
-        </Lead>
+        </p>
 
         <ul className="mt-12 space-y-8">
           {guides.map((guide) => (
