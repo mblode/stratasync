@@ -23,20 +23,20 @@ describe(parseTemporalInput, () => {
 
   it("throws for non-number input (string)", () => {
     expect(() => parseTemporalInput("instant", "hello", "field")).toThrow(
-      "Invalid instant value for field"
+      "Invalid instant value for"
     );
   });
 
   it("throws for NaN", () => {
     expect(() => parseTemporalInput("instant", Number.NaN, "field")).toThrow(
-      "Invalid instant value for field"
+      "Invalid instant value for"
     );
   });
 
   it("throws for Infinity", () => {
     expect(() =>
       parseTemporalInput("instant", Number.POSITIVE_INFINITY, "field")
-    ).toThrow("Invalid instant value for field");
+    ).toThrow("Invalid instant value for");
   });
 
   it("parses a valid instant epoch to a Date", () => {
@@ -63,7 +63,7 @@ describe(parseTemporalInput, () => {
   it("throws for boolean input", () => {
     expect(() =>
       parseTemporalInput("instant", true as unknown as number, "field")
-    ).toThrow("Invalid instant value for field");
+    ).toThrow("Invalid instant value for");
   });
 });
 

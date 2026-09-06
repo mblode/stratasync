@@ -193,7 +193,10 @@ const handleUpdate = async (
   }
 
   const updateResult = await def.delegate.updateById(db, modelId, updateData);
-  assertMutationTargetAffected(updateResult);
+  assertMutationTargetAffected(updateResult, {
+    id: modelId,
+    operation: "update",
+  });
   return serializeSyncData(updateData, def.insertFields, {
     keys: Object.keys(updateData),
   });
@@ -214,7 +217,9 @@ const handleDelete = async (
       throw new Error("Composite delete delegate missing for this model");
     }
     const deleteResult = await def.delegate.deleteByPayload(db, payload);
-    assertMutationTargetAffected(deleteResult);
+    assertMutationTargetAffected(deleteResult, {
+      operation: "delete",
+    });
     return payload;
   }
 
@@ -223,7 +228,10 @@ const handleDelete = async (
   }
 
   const deleteResult = await def.delegate.deleteById(db, modelId);
-  assertMutationTargetAffected(deleteResult);
+  assertMutationTargetAffected(deleteResult, {
+    id: modelId,
+    operation: "delete",
+  });
   return payload;
 };
 

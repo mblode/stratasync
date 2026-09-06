@@ -233,6 +233,18 @@ export const filterUpstreamResponseHeaders = (
       out.set(key, rewriteDocsBody(value));
       continue;
     }
+    /*
+     * Drop two headers the docs host sets for itself.
+     *
+     * `x-powered-by` names the upstream stack and buys nothing. Its HSTS is
+     * weaker than the zone's (no `includeSubDomains`, no `preload`), and
+     * forwarding it here meant docs pages advertised the weaker policy for
+     * blode.co while every other page on the host advertised the stronger one.
+     * Dropping both lets `next.config.js` supply the zone's values.
+     */
+    if (lower === "x-powered-by" || lower === "strict-transport-security") {
+      continue;
+    }
     out.set(key, value);
   }
   out.set("cache-control", "no-store");

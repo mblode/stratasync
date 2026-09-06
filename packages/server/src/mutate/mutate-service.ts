@@ -311,7 +311,9 @@ export class MutateService {
       prepared.canonicalModelId
     );
     if (!row) {
-      throw new Error("Invalid mutation: record not found");
+      throw new Error(
+        `Invalid mutation: record not found (${tx.modelName}/${prepared.canonicalModelId})`
+      );
     }
 
     return row;

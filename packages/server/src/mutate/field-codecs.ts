@@ -30,7 +30,14 @@ export const parseTemporalInput = (
   }
 
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`Invalid ${kind} value for ${key}`);
+    /*
+     * Names the received type and the expected one, not the received value:
+     * this runs over user-supplied field data, and echoing it into an error
+     * puts that data in logs and in the client response.
+     */
+    throw new TypeError(
+      `Invalid ${kind} value for "${key}": expected a finite epoch-milliseconds number, received ${typeof value}`
+    );
   }
 
   const parsed =

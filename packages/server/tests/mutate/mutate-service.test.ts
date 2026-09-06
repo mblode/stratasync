@@ -811,7 +811,7 @@ describe("MutateService.mutate", () => {
     expect(result.success).toBeFalsy();
     expect(result.results[0]).toMatchObject({
       clientTxId: "tx-1",
-      error: "Invalid mutation: record not found",
+      error: expect.stringContaining("Invalid mutation: record not found"),
       success: false,
     });
   });
@@ -855,7 +855,7 @@ describe("MutateService.mutate", () => {
     expect(result.success).toBeFalsy();
     expect(result.results[0]).toMatchObject({
       clientTxId: "tx-1",
-      error: "Invalid mutation: record not found",
+      error: expect.stringContaining("Invalid mutation: record not found"),
       success: false,
     });
   });
@@ -929,7 +929,7 @@ describe("MutateService.mutate", () => {
     expect(result.success).toBeFalsy();
     expect(result.results[0]).toMatchObject({
       clientTxId: "tx-1",
-      error: "Invalid mutation: record not found",
+      error: expect.stringContaining("Invalid mutation: record not found"),
       success: false,
     });
   });

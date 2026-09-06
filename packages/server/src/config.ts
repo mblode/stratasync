@@ -1,5 +1,6 @@
 import type { SQL } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
+import type { FastifyInstance } from "fastify";
 import type {
   RedisClientType,
   RedisFunctions,
@@ -330,6 +331,19 @@ export interface WebSocketHooks {
 // ---------------------------------------------------------------------------
 
 export interface SyncServerConfig {
+  /**
+   * Your Drizzle database client, for example the return of
+   * `drizzle(postgres(url))`.
+   *
+   * Deliberately `unknown` rather than `SyncDb`. `SyncDb` describes the subset
+   * of the query builder this package calls, and a real Drizzle client does
+   * not satisfy it structurally: `insert().values().returning()` resolves to
+   * `unknown[]` in Drizzle against `Record<string, unknown>[]` here, so typing
+   * the field as `SyncDb` fails to compile for every real consumer. Narrowing
+   * it means either matching Drizzle's generic builder types exactly or
+   * widening `SyncDb`'s row types, and both are larger than a signature
+   * change. Internals cast to `SyncDb` at the point of use.
+   */
   db: unknown;
   tables: {
     syncActions: AnyPgTable;
@@ -353,7 +367,8 @@ export interface SyncServer {
   deltaPublisher: DeltaPublisherLike;
   deltaSubscriber: DeltaSubscriberLike;
   syncDao: SyncDao;
-  registerRoutes: (server: unknown) => void;
+  /** Registers the sync routes on your Fastify instance. */
+  registerRoutes: (server: FastifyInstance) => void;
   /**
    * Tells a user their sync-group membership changed.
    *
