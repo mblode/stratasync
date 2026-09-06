@@ -82,6 +82,85 @@ export const guides: Guide[] = [
   },
   {
     answer:
+      "Supabase Realtime broadcasts database changes to connected clients. It does not keep a local replica, queue writes made offline, or reconcile conflicting edits, so it is a live feed rather than a sync engine. Strata Sync adds those three things on top of the Postgres that Supabase already gives you.",
+    description:
+      "Supabase Realtime streams changes to connected clients but keeps no local replica and no offline write queue. How to add a sync engine to a Supabase Postgres, and what it costs you.",
+    faq: [
+      {
+        answer:
+          "Realtime pushes changes to clients that are connected right now, through Broadcast, Presence and Postgres Changes. A sync engine also keeps a replica on the client, applies writes to it before the server has seen them, queues those writes while offline, and reconciles them on reconnect. Realtime gives you the push. The replica and the reconciliation are the parts you would otherwise build.",
+        question: "Is Supabase Realtime a sync engine?",
+      },
+      {
+        answer:
+          "Yes. The sync log is three ordinary Postgres tables using bigserial, uuid, text, jsonb and timestamps, with no extensions, no logical replication and no LISTEN/NOTIFY. They run on a Supabase database unmodified, and the rest of your schema is untouched.",
+        question: "Can Strata Sync run on a Supabase database?",
+      },
+      {
+        answer:
+          "A Node process. Strata Sync's server is a set of Fastify routes, and Supabase does not host arbitrary Node servers: Edge Functions are Deno. You run that process wherever you already run one, on Fly, Railway, Render or a container, and point it at your Supabase connection string.",
+        question: "What do I still need to run alongside Supabase?",
+      },
+      {
+        answer:
+          "Use the session-mode connection or set `prepare: false` on postgres-js. Supabase's pooler in transaction mode does not support prepared statements, which postgres-js uses by default. This is the standard requirement for that combination rather than anything specific to Strata Sync.",
+        question: "Does Strata Sync work with the Supabase connection pooler?",
+      },
+      {
+        answer:
+          "Strata Sync authorises writes itself, through sync groups resolved server-side, and it connects as an ordinary Postgres role. If you rely on row level security for the same tables, decide which layer owns the rule rather than running both and hoping they agree.",
+        question: "How does this interact with Supabase row level security?",
+      },
+    ],
+    keywords: [
+      "supabase realtime",
+      "supabase offline",
+      "supabase sync",
+      "supabase local first",
+    ],
+    slug: "supabase-sync-engine",
+    title: "Adding a sync engine to Supabase",
+    updated: "2026-09-07",
+  },
+  {
+    answer:
+      "Convex and Supabase are both backends, and they disagree about ownership. Convex gives you a managed reactive database with server functions, and owns the data. Supabase gives you a Postgres you own, plus auth, storage and a realtime feed. Neither ships a full sync engine.",
+    description:
+      "Convex and Supabase compared on data ownership, queries, realtime, and what neither gives you: a local replica with offline writes and conflict resolution.",
+    faq: [
+      {
+        answer:
+          "Convex brings its own managed database with reactive queries and server-side mutation functions, using optimistic concurrency control and transaction atomicity. Supabase gives you a standard Postgres you can connect anything to, plus auth, storage and Realtime. The question underneath is whether you want to own the database.",
+        question: "What is the difference between Convex and Supabase?",
+      },
+      {
+        answer:
+          "Convex queries are reactive by default: they re-run and push to connected clients as the underlying data changes. Supabase pushes changes through Realtime, which you subscribe to separately from your queries. Convex integrates the two, Supabase keeps them apart, and the second is easier to reason about at the cost of more wiring.",
+        question: "How does reactivity differ between Convex and Supabase?",
+      },
+      {
+        answer:
+          "Neither. Both push changes to connected clients, and neither keeps a local replica you write to, queues writes made offline, or rebases them on reconnect. If you need those, you add them on top, which is what a sync engine is for.",
+        question: "Does Convex or Supabase give me offline support?",
+      },
+      {
+        answer:
+          "Supabase, because a standard Postgres is the easier thing to migrate away from and the easier thing to attach other tools to. Convex's data lives in Convex, so leaving means an export and a rewrite of every server function. That is a fair trade for what it gives you, but it is worth pricing before you start.",
+        question: "Which is easier to move off later?",
+      },
+    ],
+    keywords: [
+      "convex vs supabase",
+      "supabase vs convex",
+      "convex alternative",
+      "supabase realtime",
+    ],
+    slug: "convex-vs-supabase",
+    title: "Convex vs Supabase",
+    updated: "2026-09-07",
+  },
+  {
+    answer:
       "Convex and Strata Sync solve the same problem from opposite ends. Convex brings its own managed reactive database and runs your writes as server functions. Strata Sync syncs the Postgres you already run, from routes inside your own Fastify app. The choice is mostly about who owns the database.",
     description:
       "Convex and Strata Sync compared: managed reactive database against your own Postgres, server functions against a durable outbox, and where the two architectures actually agree.",
