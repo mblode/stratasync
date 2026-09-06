@@ -1,9 +1,15 @@
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { faq } from "@/lib/config";
 
 /**
- * The questions answer engines get asked about this category, answered in
- * the open rather than behind an accordion so the visible text and the
- * FAQPage node in `lib/config.ts` are the same words.
+ * The questions answer engines get asked about this category. The accordion
+ * keeps every answer in the served HTML (see `AccordionContent`), so the
+ * visible text and the FAQPage node in `lib/config.ts` stay the same words.
  */
 export const LandingFaq = () => (
   <section className="py-16 md:py-20" id="faq">
@@ -13,18 +19,23 @@ export const LandingFaq = () => (
           Questions people ask
         </h2>
 
-        <dl className="divide-y divide-border rounded-2xl border border-border bg-card">
+        <Accordion
+          className="rounded-2xl border border-border bg-card px-5 md:px-6"
+          collapsible
+          defaultValue={faq[0].question}
+          type="single"
+        >
           {faq.map((entry) => (
-            <div className="px-5 py-5 md:px-6" key={entry.question}>
-              <dt className="font-sans text-base font-semibold">
-                <h3>{entry.question}</h3>
-              </dt>
-              <dd className="mt-2 text-muted-foreground text-sm leading-relaxed">
+            <AccordionItem key={entry.question} value={entry.question}>
+              <AccordionTrigger className="text-base">
+                {entry.question}
+              </AccordionTrigger>
+              <AccordionContent className="text-muted-foreground">
                 {entry.answer}
-              </dd>
-            </div>
+              </AccordionContent>
+            </AccordionItem>
           ))}
-        </dl>
+        </Accordion>
       </div>
     </div>
   </section>

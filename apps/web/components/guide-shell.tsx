@@ -1,5 +1,11 @@
 import type React from "react";
 
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
   breadcrumbSchema,
@@ -108,14 +114,23 @@ export const GuideShell = ({ children, guide }: Props) => {
             <h2 className="font-sans text-2xl font-medium tracking-tight">
               Common questions
             </h2>
-            <dl className="mt-6 space-y-8">
+            <Accordion
+              className="mt-6"
+              collapsible
+              defaultValue={guide.faq[0]?.question}
+              type="single"
+            >
               {guide.faq.map((entry) => (
-                <div key={entry.question}>
-                  <dt className="font-medium">{entry.question}</dt>
-                  <dd className="mt-2 text-muted-foreground">{entry.answer}</dd>
-                </div>
+                <AccordionItem key={entry.question} value={entry.question}>
+                  <AccordionTrigger className="text-base">
+                    {entry.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-muted-foreground">
+                    {entry.answer}
+                  </AccordionContent>
+                </AccordionItem>
               ))}
-            </dl>
+            </Accordion>
           </section>
 
           <section className="mt-16 border-border/60 border-t pt-8">
