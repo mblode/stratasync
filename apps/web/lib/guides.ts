@@ -262,7 +262,7 @@ export const guides: Guide[] = [
       },
       {
         answer:
-          "None of them ship it. Record-level ordering handles text badly, because two people typing in one paragraph is the case a single ordering cannot merge sensibly. Strata Sync includes Yjs CRDT documents and presence for text fields; the others expect you to add a CRDT layer yourself.",
+          "None of them ship it. Record-level ordering handles text badly, because two people typing in one paragraph is the case a single ordering cannot merge sensibly. Strata Sync includes Yjs CRDT documents and presence for text fields. The others expect you to add a CRDT layer yourself.",
         question: "Which sync engines handle collaborative text editing?",
       },
     ],
