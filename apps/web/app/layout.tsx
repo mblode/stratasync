@@ -7,12 +7,16 @@ import { jsonLdScript, siteConfig, zoneRootJsonLd } from "@/lib/config";
 
 import "./globals.css";
 
+/*
+ * The italic face is not loaded. `next/font/local` preloads every `src` in a
+ * family, and the italic woff2 is 117 KB competing with the roman on the
+ * critical path for a face this app never renders: there is no `<em>`, `<i>`
+ * or `italic` class anywhere in it, and docs pages are served with Blode.md's
+ * own fonts rather than these. Add it back alongside the first italic text.
+ */
 const glide = localFont({
   display: "swap",
-  src: [
-    { path: "./fonts/glide-variable.woff2", style: "normal" },
-    { path: "./fonts/glide-variable-italic.woff2", style: "italic" },
-  ],
+  src: [{ path: "./fonts/glide-variable.woff2", style: "normal" }],
   variable: "--font-glide",
   weight: "100 950",
 });
