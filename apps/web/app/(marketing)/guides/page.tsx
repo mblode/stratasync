@@ -11,7 +11,7 @@ import { guides, guideUrl } from "@/lib/guides";
 
 const url = `${siteConfig.url}/guides`;
 const description =
-  "Guides to sync engines and local-first architecture: what a sync engine is, when you need one, and how the open-source options compare.";
+  "What a sync engine is, when you need one, and how the options compare.";
 
 export const metadata: Metadata = {
   alternates: { canonical: url },
@@ -70,9 +70,8 @@ const Page = () => (
       <div className="typeset typeset-guide mx-auto mt-8 max-w-3xl">
         <h1>Sync engine guides</h1>
         <p className="mt-6 text-lg text-muted-foreground">
-          What a sync engine is, when the answer is no, and how the open-source
-          options differ once you get past the feature lists. For building with
-          Strata Sync specifically, read the{" "}
+          What a sync engine is, when you need one, and how the options compare.
+          For building with Strata Sync, read the{" "}
           <a
             className="underline underline-offset-4"
             href={siteConfig.links.docs}

@@ -27,95 +27,73 @@ export const metadata: Metadata = {
 const Page = () => (
   <GuideShell guide={guide}>
     <p>
-      This one is not about Strata Sync. It is a comparison of two backends,
-      written because the choice comes up constantly and most of the pages about
-      it are trying to sell you one of them. The last section says where a sync
-      engine fits, and you can stop before it.
+      This page is not about Strata Sync until the last section. It is a
+      comparison of two backends, because most pages on this choice are selling
+      one of them.
     </p>
 
-    <h2>The question underneath</h2>
+    <h2>Who owns the database</h2>
     <p>
-      Both give you a database, a way to write to it from a client, and
-      authentication. The difference that determines everything else is whether
-      you own the database.
-    </p>
-    <p>
-      Convex brings its own. It is a managed reactive document store with a
-      relational data model, and your data lives inside Convex. Supabase gives
-      you a standard Postgres instance that happens to have auth, storage and a
-      realtime feed attached. Anything that speaks Postgres can connect to it.
+      Both give you a database, a way to write to it from a client, and auth.
+      The difference that decides everything else is ownership. Convex brings
+      its own managed reactive database, and your data lives inside it. Supabase
+      gives you a standard Postgres with auth, storage and a realtime feed
+      attached. Anything that speaks Postgres can connect.
     </p>
 
     <h2>Queries and reactivity</h2>
     <p>
-      Convex integrates the two. Queries are reactive by default: they re-run
-      and push to connected clients when the underlying data changes, and you do
-      not subscribe to anything separately. Writes are server-side mutation
-      functions with optimistic concurrency control and transaction atomicity.
-      It is a coherent model, and the coherence is the product.
+      Convex integrates them. Queries re-run and push to clients when data
+      changes, and writes are server functions with optimistic concurrency
+      control and transaction atomicity. Coherent, and the coherence is the
+      product.
     </p>
     <p>
-      Supabase keeps them apart. You query Postgres however you like, and
-      subscribe to Realtime separately when you want to know about changes. That
-      is more wiring, and it is also easier to reason about, because nothing is
-      re-running behind your back.
+      Supabase keeps them apart. You query Postgres however you like and
+      subscribe to Realtime separately. More wiring, and easier to reason about,
+      because nothing re-runs behind your back.
     </p>
 
     <h2>Neither gives you offline</h2>
     <p>
-      This is the part both comparisons usually skip. Convex pushes to connected
-      clients. Supabase pushes to connected clients. Neither keeps a replica on
-      the device that you write to, neither queues writes made while offline,
-      and neither reconciles those writes against what changed in the meantime.
-    </p>
-    <p>
-      For most applications that is completely fine. If yours needs to work on a
-      train, or needs reads that never wait, that gap is yours to fill either
-      way, and the choice of backend does not close it.
+      Both push to connected clients. Neither keeps a copy on the device that
+      you write to, queues writes made offline, or reconciles them later. For
+      most apps that is fine. If yours has to work on a train, the gap is yours
+      to fill either way.
     </p>
 
     <h2>Leaving</h2>
     <p>
-      Supabase is the easier one to walk away from, because a standard Postgres
-      is a standard Postgres. Convex data lives in Convex, so leaving means an
-      export plus a rewrite of every server function you wrote against it.
-    </p>
-    <p>
-      That is not a reason to avoid Convex. It is a cost worth pricing at the
-      start rather than discovering in year three.
+      Supabase is easier to walk away from, because a standard Postgres is a
+      standard Postgres. Leaving Convex means an export plus a rewrite of every
+      server function. Not a reason to avoid it. A cost to price at the start.
     </p>
 
     <h2>Choosing</h2>
     <ul>
       <li>
         <strong>Convex</strong> when you want one product to own the database,
-        the functions and the reactivity, and you would rather have coherence
-        than control.
+        the functions and the reactivity.
       </li>
       <li>
-        <strong>Supabase</strong> when you want a Postgres you own, other tools
-        connecting to it, and the freedom to replace any one piece.
+        <strong>Supabase</strong> when you want a Postgres you own and the
+        freedom to replace any piece.
       </li>
     </ul>
 
     <h2>Where a sync engine fits</h2>
     <p>
-      If you pick Supabase and later need the offline and instant-read behaviour
-      neither backend ships, that is what a sync engine does, and Strata Sync
-      runs on a Supabase Postgres without extensions or replication. There is a
-      page on{" "}
+      If you pick Supabase and later need offline and instant reads, that is
+      what a sync engine does, and Strata Sync runs on a Supabase Postgres
+      without extensions. See{" "}
       <a href={`${siteConfig.url}/guides/supabase-sync-engine`}>
         adding a sync engine to Supabase
-      </a>{" "}
-      covering what it takes, including the Node process you have to run.
-    </p>
-    <p>
-      If you pick Convex,{" "}
+      </a>
+      . If you pick Convex,{" "}
       <a href={`${siteConfig.url}/guides/strata-sync-vs-convex`}>
         Strata Sync vs Convex
       </a>{" "}
-      is the more relevant comparison, and it is honest about where the two
-      architectures agree.
+      is the relevant comparison.
     </p>
   </GuideShell>
 );

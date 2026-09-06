@@ -13,7 +13,7 @@ export const siteConfig = {
    * (about 50 words) so an answer engine can quote it without the page.
    */
   answer:
-    "Strata Sync is an open-source TypeScript implementation of Linear's server-sequenced sync engine for React and Next.js. Reads come from a local IndexedDB replica, writes queue offline, and every client converges on one server-ordered log. It runs on your own Postgres and Fastify. No hosted service, MIT licence.",
+    "Strata Sync is an open-source TypeScript implementation of Linear's sync engine for React and Next.js. Reads come from a local copy, writes queue while offline, and every client replays one server-ordered log. It runs on your own Postgres. MIT.",
   /** Search snippet. Under 160 characters. */
   description:
     "Open-source, local-first sync engine for TypeScript, React and Next.js: Linear's server-sequenced architecture on your own Postgres, with offline writes, Yjs and undo. MIT.",
@@ -65,39 +65,23 @@ export const proofPoints = {
 export const faq = [
   {
     answer:
-      "A sync engine keeps a local copy of application data on each client and reconciles it with the server. The UI reads and writes the local copy, so screens render at once and edits work offline. The engine ships changes to the server, applies other clients' changes, and resolves conflicts, so every client converges on the same state.",
+      "A sync engine keeps a copy of your data on each device and reconciles it with the server. Screens render at once, edits work offline, and every client ends up in the same state.",
     question: "What is a sync engine?",
   },
   {
     answer:
-      "Yes. Strata Sync is a clean-room implementation of the sync architecture Linear's engineers described publicly: a model registry with decorators, bootstrap keyed by a global lastSyncId, partial indexes with batch loading, a durable transaction queue, delta packets of sync actions, sync groups and undo from transaction history. It contains no Linear code, and Linear is not affiliated with the project.",
+      "Yes, a clean-room one. It follows the architecture Linear's engineers described publicly: decorated models, bootstrap keyed by a global sync id, a durable transaction queue, delta packets and sync groups. It contains no Linear code, and Linear is not affiliated with the project.",
     question: "Is Strata Sync an implementation of Linear's sync engine?",
   },
   {
     answer:
-      "Neither for records, Yjs CRDTs for text. Records use a server-sequenced log: the server assigns every change a monotonic syncId, and clients rebase pending writes on top of incoming deltas with field-level conflict detection. Collaborative text fields use Yjs CRDT documents through @stratasync/y-doc, so several people can type in one document without a central lock.",
-    question: "Is Strata Sync CRDT-based or OT-based?",
-  },
-  {
-    answer:
-      "No. Strata Sync has zero hosted dependencies. @stratasync/server registers the bootstrap, batch, deltas, mutate and WebSocket routes on your own Fastify instance and stores the sync log in your own Postgres through Drizzle. Redis is optional, for fanning deltas out across several server processes. Every package is MIT licensed.",
+      "No. The server is a set of Fastify routes that store the sync log in your own Postgres through Drizzle. Redis is optional, for fan-out across processes. Every package is MIT.",
     question: "Does Strata Sync need a hosted service?",
   },
   {
     answer:
-      "Yes. Reads come from an IndexedDB replica, so queries return without a network round-trip. Writes apply to the in-memory model immediately and sit in a durable outbox until the server confirms them. On reconnect the client fetches the deltas it missed after its stored lastSyncId, rebases the outbox on top and drains it in order, with idempotency keys so a retry never applies twice.",
+      "Yes. Reads come from an IndexedDB copy. Writes apply at once and wait in a durable outbox. On reconnect the client fetches what it missed, rebases the outbox on top and drains it, with idempotency keys so nothing applies twice.",
     question: "Does Strata Sync work offline?",
-  },
-  {
-    answer:
-      "Every mutation records an inverse operation in a history stack. client.undo() sends that inverse as a normal transaction, so it syncs to the server and other clients see it as an ordinary update, delete or insert. runAsUndoGroup() collapses several mutations into one undoable step, and a server rejection drops the entry from both stacks.",
-    question: "How does undo and redo work in Strata Sync?",
-  },
-  {
-    answer:
-      "Zero and ElectricSQL run a sync service beside your Postgres and stream query results down; Replicache is a client library where you write the push and pull endpoints. Strata Sync is a full client and server pair built on Linear's server-sequenced log: it ships the outbox, the write path, rebase, sync groups, undo and Yjs text, and runs inside your own Fastify app.",
-    question:
-      "How does Strata Sync compare to Zero, ElectricSQL and Replicache?",
   },
 ] as const;
 
