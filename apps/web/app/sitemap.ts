@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/lib/config";
 import { docsPages } from "@/lib/docs-nav";
+import { guides, guideUrl } from "@/lib/guides";
 
 /*
  * `priority` and `changeFrequency` are ignored by Google, so they are not
@@ -15,6 +16,14 @@ const sitemap = (): MetadataRoute.Sitemap => [
     lastModified: new Date(siteConfig.updatedAt),
     url: siteConfig.url,
   },
+  {
+    lastModified: new Date(siteConfig.updatedAt),
+    url: `${siteConfig.url}/guides`,
+  },
+  ...guides.map((guide) => ({
+    lastModified: new Date(guide.updated),
+    url: guideUrl(guide.slug),
+  })),
   ...docsPages.map((page) => ({ url: page.url })),
 ];
 

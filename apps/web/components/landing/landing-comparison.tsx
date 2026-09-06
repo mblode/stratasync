@@ -27,6 +27,7 @@ interface ComparisonRow {
 const competitorKeys = [
   { key: "electricsql", name: "ElectricSQL" },
   { key: "zero", name: "Zero" },
+  { key: "convex", name: "Convex" },
   { key: "instantdb", name: "InstantDB" },
   { key: "powersync", name: "PowerSync" },
 ];
@@ -40,6 +41,7 @@ const competitorKeys = [
 const rows: ComparisonRow[] = [
   {
     competitors: {
+      convex: { icon: "neutral", text: "Convex's own managed database" },
       electricsql: {
         icon: "neutral",
         text: "Your Postgres + Electric service",
@@ -56,6 +58,7 @@ const rows: ComparisonRow[] = [
   },
   {
     competitors: {
+      convex: { icon: "neutral", text: "Convex cloud, self-hosting available" },
       electricsql: { icon: "neutral", text: "Self-host or Electric Cloud" },
       instantdb: { icon: "neutral", text: "Hosted by default" },
       powersync: { icon: "neutral", text: "Cloud or self-hosted" },
@@ -66,6 +69,7 @@ const rows: ComparisonRow[] = [
   },
   {
     competitors: {
+      convex: { icon: "neutral", text: "Server-side mutation functions" },
       electricsql: { icon: "neutral", text: "Bring your own write API" },
       instantdb: { icon: "check", text: "Built in" },
       powersync: { icon: "neutral", text: "Bring your own upload handler" },
@@ -79,6 +83,10 @@ const rows: ComparisonRow[] = [
   },
   {
     competitors: {
+      convex: {
+        icon: "neutral",
+        text: "Optimistic concurrency, transactional",
+      },
       electricsql: { icon: "neutral", text: "Postgres replication stream" },
       instantdb: { icon: "neutral", text: "Server-authoritative" },
       powersync: { icon: "neutral", text: "Replication checkpoints" },
@@ -92,6 +100,7 @@ const rows: ComparisonRow[] = [
   },
   {
     competitors: {
+      convex: { icon: "neutral", text: "Bring your own CRDT" },
       electricsql: { icon: "neutral", text: "Bring your own CRDT" },
       instantdb: { icon: "neutral", text: "Bring your own CRDT" },
       powersync: { icon: "neutral", text: "Bring your own CRDT" },
@@ -102,6 +111,7 @@ const rows: ComparisonRow[] = [
   },
   {
     competitors: {
+      convex: { icon: "neutral", text: "Bring your own" },
       electricsql: { icon: "neutral", text: "Bring your own" },
       instantdb: { icon: "neutral", text: "Bring your own" },
       powersync: { icon: "neutral", text: "Bring your own" },

@@ -9,8 +9,12 @@
  * 2. Plain `<a>` via `BreadcrumbLink`, never `next/link`.
  * 3. Visible trail matches `BreadcrumbList`: Matthew Blode → Projects → product.
  *
- * Root page only. Inner pages have their own navigation.
+ * Pass `trail` for pages below the zone root. The product then becomes a link
+ * and the last trail entry is the current page, so the rendered trail still
+ * matches `breadcrumbSchema(trail)` item for item.
  */
+
+import { Fragment } from "react";
 
 import {
   Breadcrumb,
@@ -24,22 +28,54 @@ import {
 const HOME = "https://blode.co";
 const PROJECTS = `${HOME}/projects`;
 
-export const ZoneBreadcrumb = ({ product }: { product: string }) => (
-  <Breadcrumb aria-label="Breadcrumb">
-    <BreadcrumbList>
-      <BreadcrumbItem>
-        <BreadcrumbLink href={HOME} rel="author">
-          Matthew Blode
-        </BreadcrumbLink>
-      </BreadcrumbItem>
-      <BreadcrumbSeparator />
-      <BreadcrumbItem>
-        <BreadcrumbLink href={PROJECTS}>Projects</BreadcrumbLink>
-      </BreadcrumbItem>
-      <BreadcrumbSeparator />
-      <BreadcrumbItem>
-        <BreadcrumbPage>{product}</BreadcrumbPage>
-      </BreadcrumbItem>
-    </BreadcrumbList>
-  </Breadcrumb>
-);
+interface Crumb {
+  href: string;
+  name: string;
+}
+
+interface Props {
+  product: string;
+  productHref?: string;
+  trail?: Crumb[];
+}
+
+export const ZoneBreadcrumb = ({ product, productHref, trail = [] }: Props) => {
+  const deeper = trail.length > 0;
+  const last = trail.at(-1);
+
+  return (
+    <Breadcrumb aria-label="Breadcrumb">
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          <BreadcrumbLink href={HOME} rel="author">
+            Matthew Blode
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem>
+          <BreadcrumbLink href={PROJECTS}>Projects</BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator />
+        <BreadcrumbItem>
+          {deeper && productHref ? (
+            <BreadcrumbLink href={productHref}>{product}</BreadcrumbLink>
+          ) : (
+            <BreadcrumbPage>{product}</BreadcrumbPage>
+          )}
+        </BreadcrumbItem>
+        {trail.map((crumb) => (
+          <Fragment key={crumb.href}>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {crumb === last ? (
+                <BreadcrumbPage>{crumb.name}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbLink href={crumb.href}>{crumb.name}</BreadcrumbLink>
+              )}
+            </BreadcrumbItem>
+          </Fragment>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+};

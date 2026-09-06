@@ -14,7 +14,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
-import { siteConfig } from "@/lib/config";
+import { jsonLdScript, siteConfig, zoneRootJsonLd } from "@/lib/config";
 
 const MODEL_SNIPPET = `import { ClientModel, Model, Property } from "@stratasync/core"
 
@@ -104,6 +104,18 @@ const Home = async () => {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/*
+        One JSON-LD graph per page. This used to sit in the root layout, which
+        meant every route under it also claimed the zone's WebPage, its
+        BreadcrumbList and its seven FAQ answers, none of which those pages
+        render. A FAQPage whose answers never appear in the DOM is a
+        structured-data policy violation, and two BreadcrumbLists on one page
+        contradict each other.
+      */}
+      <script
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(zoneRootJsonLd) }}
+        type="application/ld+json"
+      />
       <main className="flex flex-1 flex-col">
         <div className="flex flex-1 flex-col">
           {/* WHY — Hero */}

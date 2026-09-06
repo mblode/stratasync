@@ -22,6 +22,18 @@ export const SiteHeader = ({ className }: { className?: string }) => (
           >
             Docs
           </a>
+          {/*
+            Nav rather than footer on purpose. Google discounts footer
+            boilerplate, and a section linked only from the footer can sit at
+            "URL is unknown" for months while nav-linked pages beside it get
+            crawled daily.
+          */}
+          <a
+            className="underline-offset-2 hover:underline"
+            href={`${siteConfig.url}/guides`}
+          >
+            Guides
+          </a>
           <a
             className="underline-offset-2 hover:underline"
             href={siteConfig.links.github}
