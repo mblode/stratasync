@@ -50,12 +50,9 @@ import { createGraphQLTransport } from "@stratasync/transport-graphql";
 // Import the model so it registers with ModelRegistry
 import "../models/task";
 
-const storage = createIndexedDbStorage({
-  name: "my-app",
-});
+const storage = createIndexedDbStorage();
 
 const transport = createGraphQLTransport({
-  endpoint: "/api/graphql",
   syncEndpoint: "/api/sync",
   wsEndpoint: "wss://api.example.com/sync/ws",
   auth: { getAccessToken: async () => "token" },

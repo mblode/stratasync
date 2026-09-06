@@ -4,6 +4,7 @@ import { getSingletonHighlighter } from "shiki";
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
 import { LandingComparison } from "@/components/landing/landing-comparison";
+import { LandingDocs } from "@/components/landing/landing-docs";
 import { LandingFaq } from "@/components/landing/landing-faq";
 import { LandingGap } from "@/components/landing/landing-gap";
 import { LandingHow } from "@/components/landing/landing-how";
@@ -31,7 +32,6 @@ import { createGraphQLTransport } from "@stratasync/transport-graphql"
 const client = createSyncClient({
   storage: createIndexedDbStorage(),
   transport: createGraphQLTransport({
-    endpoint: "/api/graphql",
     syncEndpoint: "/api/sync",
     wsEndpoint: "wss://api.example.com/sync/ws",
     auth: { getAccessToken: async () => "token" },
@@ -282,6 +282,9 @@ const Home = async () => {
               </div>
             </div>
           </section>
+
+          {/* WHAT — Docs index, and the crawl path into it */}
+          <LandingDocs />
 
           {/* WHAT — FAQ */}
           <LandingFaq />

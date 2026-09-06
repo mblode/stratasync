@@ -31,6 +31,7 @@ Models, adapters, and the sync protocol, with a full API reference.
 
 ```bash
 npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql
+npm install react mobx mobx-react-lite
 ```
 
 ## Quickstart
@@ -61,7 +62,6 @@ import { createGraphQLTransport } from "@stratasync/transport-graphql";
 const client = createSyncClient({
   storage: createIndexedDbStorage(),
   transport: createGraphQLTransport({
-    endpoint: "/api/graphql",
     syncEndpoint: "/api/sync",
     wsEndpoint: "wss://api.example.com/sync/ws",
     auth: { getAccessToken: async () => "token" },

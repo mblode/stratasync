@@ -16,8 +16,13 @@ export interface AuthProvider {
  * Transport adapter options
  */
 export interface TransportOptions {
-  /** GraphQL endpoint URL */
-  endpoint: string;
+  /**
+   * GraphQL endpoint URL. Required only alongside `mutationBuilder`: without
+   * one, `mutate()` posts to `<syncEndpoint>/mutate` over REST and never
+   * reads this. It used to be required regardless, which is why both
+   * quickstarts carried a `/api/graphql` placeholder that pointed at nothing.
+   */
+  endpoint?: string;
   /** Base REST sync endpoint (e.g., https://api.example.com/sync) */
   syncEndpoint: string;
   /** WebSocket endpoint for subscriptions */

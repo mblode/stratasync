@@ -207,7 +207,6 @@ export function Providers({
       schema,
       storage: createIndexedDbStorage({ name: "my-app" }),
       transport: createGraphQLTransport({
-        endpoint: "/api/graphql",
         syncEndpoint: "/api/sync",
         wsEndpoint: "wss://api.example.com/sync/ws",
         auth: { getAccessToken: async () => "token" },

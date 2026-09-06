@@ -18,9 +18,9 @@ const posthogOrigin =
 /** @type {import('next').NextConfig} */
 const contentSecurityPolicy = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""} https://www.googletagmanager.com ${posthogOrigin}`,
-  `connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com ${posthogOrigin}`,
-  "img-src 'self' data: https://www.google-analytics.com https://images.unsplash.com",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""} ${posthogOrigin}`,
+  `connect-src 'self' ${posthogOrigin}`,
+  "img-src 'self' data: https://images.unsplash.com",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "object-src 'none'",

@@ -17,10 +17,10 @@ This installs a Claude Code skill that generates a working client and server wit
 
 ## Requirements
 
-- **Node.js** >= 18
+- **Node.js** >= 22
 - **TypeScript** 5.9+ with `experimentalDecorators` enabled
 - **React** 18 or 19
-- **Next.js** 14 or 15 (if using `@stratasync/next`)
+- **Next.js** 14, 15 or 16 (if using `@stratasync/next`)
 
 ## Install
 
@@ -38,14 +38,15 @@ npm install @stratasync/y-doc
 ## Peer dependencies
 
 ```bash
-npm install react mobx yjs
+# `yjs` only if you use collaborative editing
+npm install react mobx mobx-react-lite
 ```
 
-| Package             | Required versions                         |
-| ------------------- | ----------------------------------------- |
-| `@stratasync/react` | `react ^18 \|\| ^19`, `yjs ^13.6`         |
-| `@stratasync/next`  | `next ^14 \|\| ^15`, `react ^18 \|\| ^19` |
-| `@stratasync/mobx`  | `mobx ^6.0`                               |
+| Package             | Required versions                                  |
+| ------------------- | -------------------------------------------------- |
+| `@stratasync/react` | `react ^18 \|\| ^19`, `yjs ^13.6` (optional)       |
+| `@stratasync/next`  | `next ^14 \|\| ^15 \|\| ^16`, `react ^18 \|\| ^19` |
+| `@stratasync/mobx`  | `mobx ^6.0`                                        |
 
 ## TypeScript configuration
 

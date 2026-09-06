@@ -212,3 +212,15 @@ export const zoneRootJsonLd = {
     faqSchema(),
   ],
 };
+
+/**
+ * Serialise JSON-LD for a `<script>` tag.
+ *
+ * `JSON.stringify` does not escape `<`, so a value containing `</script>`
+ * would close the tag and turn a copy edit into script injection. Escaping
+ * unconditionally is the rule the Next.js JSON-LD guide gives; deciding field
+ * by field whether HTML could appear is how that regression gets introduced
+ * later.
+ */
+export const jsonLdScript = (data: unknown): string =>
+  JSON.stringify(data).replaceAll("<", "\\u003c");
