@@ -26,101 +26,73 @@ export const metadata: Metadata = {
 
 const Page = () => (
   <GuideShell guide={guide}>
-    <h2>What Realtime does, and where it stops</h2>
+    <h2>Where Realtime stops</h2>
     <p>
-      Supabase Realtime has three parts. Broadcast sends ephemeral messages
-      between clients, Presence tracks who is connected, and Postgres Changes
-      streams row-level changes out of your database as they commit. All three
-      are useful and all three do what they say.
+      Supabase Realtime has three parts. Broadcast sends messages between
+      clients, Presence tracks who is online, and Postgres Changes streams row
+      changes out of your database as they commit. All three do what they say.
     </p>
     <p>
-      What none of them do is hold state on the client. When a change arrives,
-      it is your code that decides where to put it. When the connection drops,
-      the messages that would have arrived are gone rather than queued. When the
-      user edits something while offline, there is nowhere for that edit to live
-      until the network returns, and nothing to reconcile it against when it
-      does.
-    </p>
-    <p>
-      That is the line between a live feed and a sync engine. Realtime gives you
-      the push. The replica, the write queue and the reconciliation rule are the
-      parts you build yourself, and they are most of the work.
+      None of them hold state on the device. When the connection drops, the
+      changes you missed are gone rather than queued. When someone edits
+      offline, there is nowhere for the edit to live and nothing to reconcile it
+      against later. Realtime is the push. The local copy, the write queue and
+      the conflict rule are the rest of the work.
     </p>
 
     <h2>What Strata Sync adds</h2>
     <p>
-      Reads come from an IndexedDB replica, so screens render without a round
-      trip. Writes apply to the local model immediately and sit in a durable
-      outbox until the server confirms them, with idempotency keys so a retry
-      never applies twice. On reconnect the client asks for everything after the
-      sync id it last saw, rebases its queued writes on top, and drains them in
-      order.
-    </p>
-    <p>
-      Conflicts resolve per field rather than per record, so two people editing
-      different columns of the same row never collide. Rich text uses Yjs
-      documents instead, because a single server ordering handles two people
-      typing in one paragraph badly.
+      Reads come from an IndexedDB copy, so screens render without a round trip.
+      Writes apply at once and wait in a durable outbox until the server
+      confirms them, with idempotency keys so a retry never applies twice. On
+      reconnect the client asks for everything after the last sync id it saw and
+      rebases its queued writes on top. Conflicts resolve per field, and rich
+      text uses Yjs.
     </p>
 
     <h2>It runs on your Supabase database as it is</h2>
     <p>
-      The sync log is three ordinary Postgres tables. They use{" "}
-      <code>bigserial</code>, <code>uuid</code>, <code>text</code>,{" "}
-      <code>jsonb</code> and timestamps, with a couple of unique indexes. There
-      are no extensions to install, no logical replication to configure, and no{" "}
-      <code>LISTEN</code>/<code>NOTIFY</code>. Your existing schema is not
-      touched, and anything else reading that database keeps working.
+      The sync log is three plain Postgres tables using <code>bigserial</code>,{" "}
+      <code>uuid</code>, <code>text</code>, <code>jsonb</code> and timestamps.
+      No extensions, no logical replication, no <code>LISTEN</code>/
+      <code>NOTIFY</code>. Your existing schema is untouched.
     </p>
 
     <h2>What you still have to run</h2>
     <p>
-      A Node process. Strata Sync&#8217;s server is a set of Fastify routes, and
-      Supabase does not host arbitrary Node servers: Edge Functions are Deno.
-      You run that process wherever you already run one, then point it at your
-      Supabase connection string.
-    </p>
-    <p>
-      This is the honest cost of the approach, and it is worth saying plainly
-      rather than burying. If the appeal of Supabase is that you do not operate
-      a backend, adding a sync engine means you now operate one process.
+      A Node process. The server is a set of Fastify routes, and Supabase Edge
+      Functions are Deno. Run it wherever you already run one and point it at
+      your Supabase connection string. If the appeal of Supabase is not
+      operating a backend, this is the cost: you now operate one process.
     </p>
 
     <h2>Two things to get right</h2>
     <p>
-      <strong>Connection pooling.</strong> Use the session-mode connection, or
-      set <code>prepare: false</code> on postgres-js. Supabase&#8217;s pooler in
-      transaction mode does not support prepared statements, which postgres-js
-      uses by default. This is the standard requirement for that combination
-      rather than anything specific to this library.
+      <strong>Pooling.</strong> Use the session-mode connection, or set{" "}
+      <code>prepare: false</code> on postgres-js. The pooler in transaction mode
+      does not support prepared statements.
     </p>
     <p>
-      <strong>Where authorisation lives.</strong> Strata Sync resolves sync
-      groups server-side and authorises writes itself, connecting as an ordinary
-      Postgres role. If you also use row level security on the same tables, pick
-      which layer owns the rule. Running both and assuming they agree is how a
-      permission bug gets shipped.
+      <strong>Authorisation.</strong> Strata Sync resolves sync groups
+      server-side and authorises writes itself. If you also use row level
+      security on the same tables, decide which layer owns the rule rather than
+      running both and hoping they agree.
     </p>
 
     <h2>When not to bother</h2>
     <p>
-      If your app is online-only, one user writes each record, and a spinner is
-      acceptable, Realtime plus optimistic updates gets you most of the feel for
-      none of the commitment. A sync engine is a data-model decision, not a
-      dependency. The{" "}
+      If your app is online-only and a spinner is fine, Realtime plus optimistic
+      updates gets you most of the feel for none of the commitment.{" "}
       <a href={`${siteConfig.url}/guides/what-is-a-sync-engine`}>
-        sync engine guide
+        What a sync engine is
       </a>{" "}
-      goes through when the answer should be no.
-    </p>
-    <p>
-      If you are still choosing a backend,{" "}
+      covers when the answer should be no. Still choosing a backend?{" "}
       <a href={`${siteConfig.url}/guides/convex-vs-supabase`}>
         Convex vs Supabase
-      </a>{" "}
-      covers that decision, and the{" "}
+      </a>
+      . Ready to build? The{" "}
       <a href={`${siteConfig.links.docs}/quick-start`}>quick start</a> is five
-      steps to a working client.
+      steps.
     </p>
   </GuideShell>
 );

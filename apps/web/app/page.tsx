@@ -129,10 +129,6 @@ const Home = async () => {
                 <p className="mx-auto mt-6 max-w-2xl text-balance text-center font-sans text-lg text-white/85 md:text-xl">
                   {siteConfig.answer}
                 </p>
-                <p className="mx-auto mt-3 max-w-xl text-balance text-center font-sans text-base text-white/65">
-                  An open-source implementation of Linear&#8217;s sync engine,
-                  on your own Postgres.
-                </p>
 
                 <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
                   <Button

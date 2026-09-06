@@ -315,19 +315,33 @@ export const LandingComparison = () => {
           </div>
 
           <p className="mx-auto max-w-2xl text-center text-muted-foreground text-sm">
+            In detail:{" "}
             <a
               className="underline underline-offset-2 hover:text-foreground"
               href={`${siteConfig.url}/guides/strata-sync-vs-zero`}
             >
-              Strata Sync vs Zero, in detail
+              vs Zero
             </a>
-            , including when to pick Zero instead.
+            ,{" "}
+            <a
+              className="underline underline-offset-2 hover:text-foreground"
+              href={`${siteConfig.url}/guides/strata-sync-vs-convex`}
+            >
+              vs Convex
+            </a>
+            ,{" "}
+            <a
+              className="underline underline-offset-2 hover:text-foreground"
+              href={`${siteConfig.url}/guides/sync-engine-comparison`}
+            >
+              all five
+            </a>
+            .
           </p>
 
           <p className="mx-auto max-w-2xl text-center text-muted-foreground text-xs">
-            Other columns summarise each project&#8217;s documented default
-            architecture as of September 2026. If one has moved on, open a pull
-            request and it will be corrected.
+            Columns describe each project&#8217;s documented defaults as of
+            September 2026.
           </p>
         </div>
       </div>

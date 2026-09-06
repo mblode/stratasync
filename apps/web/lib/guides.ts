@@ -4,10 +4,9 @@ import { siteConfig } from "@/lib/config";
  * Marketing guides at `/stratasync/guides`, separate from the reference docs
  * on Blode.md at `/stratasync/docs`.
  *
- * The split is by job, not by topic. Docs guides tell someone already using
- * the library how to do a thing with it. These answer the category questions
- * a person asks before they have chosen anything, which is where the search
- * demand sits: `sync engine` runs 170 a month against 70 for
+ * Docs tell someone already using the library how to do a thing with it.
+ * These answer the questions asked before choosing anything, which is where
+ * the search demand sits: `sync engine` runs 170 a month against 70 for
  * `linear sync engine` (DataForSEO, US, September 2026).
  *
  * One entry per guide. The index page, the sitemap and `llms.txt` all read
@@ -20,53 +19,43 @@ export interface GuideFaq {
 }
 
 export interface Guide {
-  /** The 40-to-70-word passage under the H1, quotable without the page. */
+  /** The passage under the H1, quotable without the page. */
   answer: string;
   description: string;
   faq: GuideFaq[];
-  /** Primary query first; used for internal reasoning, never stuffed on-page. */
+  /** Primary query first. Never stuffed on-page. */
   keywords: string[];
   slug: string;
   title: string;
-  /** Content revision date. Bump when the prose changes, not on every deploy. */
+  /** Content revision date. Bump when the prose changes, not on deploy. */
   updated: string;
 }
 
 export const guides: Guide[] = [
   {
     answer:
-      "A sync engine keeps a local copy of your data on every client and reconciles it with the server. Your interface reads and writes that local copy, so screens render immediately and edits survive going offline. The engine ships changes up, applies everyone else's changes down, and resolves conflicts so all clients converge.",
+      "A sync engine keeps a copy of your data on each device and reconciles it with the server. Screens render at once, edits work offline, and every client ends up in the same state.",
     description:
-      "A sync engine keeps a local copy of your data on every client and reconciles it with the server. How the mechanism works, the two families of conflict resolution, and when you should not use one.",
+      "What a sync engine does, the two ways it resolves conflicts, and when you should not use one.",
     faq: [
       {
         answer:
-          "A cache stores an answer the server already gave you, and the server stays the source of truth for reads and writes. A sync engine holds a replica you also write to, so it has to reconcile your local writes with everyone else's. That reconciliation rule is the part a cache does not have.",
+          "A cache holds answers the server already gave you. A sync engine holds a copy you also write to, so it has to reconcile your writes with everyone else's.",
         question: "How is a sync engine different from a cache?",
       },
       {
         answer:
-          "Optimistic updates are enough when one screen writes one record and a failure can be resolved by refetching. You need a sync engine once writes must survive a reload, several screens read the same record and have to agree, or a client can be offline long enough that replaying its writes needs an ordering rule rather than a retry.",
+          "Optimistic updates are enough when one screen writes one record and a refetch fixes any failure. You need a sync engine once writes must survive a reload or a long stretch offline.",
         question: "Do I need a sync engine, or just optimistic updates?",
       },
       {
         answer:
-          "That depends on the reconciliation family. A CRDT merges both edits without a coordinator, at the cost of per-value metadata. A server-ordered log gives the server the final say: it assigns each change a number, and clients rebase their pending writes on top of what arrives. Field-level rebase means two people editing different fields of one record do not collide at all.",
+          "With a server-ordered log the server decides, and clients rebase their pending writes on top. Field-level rebase means two people editing different fields never collide.",
         question: "What happens when two people edit the same record?",
       },
       {
         answer:
-          "With a server-ordered log the client stores the sequence number it last saw, asks for everything after that integer, and replays its queued writes on top. The catch-up cost is proportional to what changed, not to the size of the dataset, which is the main practical reason to order changes centrally.",
-        question: "What happens when a client has been offline for a week?",
-      },
-      {
-        answer:
-          "No. CRDTs are one way to reconcile, and they are the right one for text, where two people type into the same paragraph. For records, a server-ordered log is usually simpler: there is no merge function to reason about, and partial replication and per-row permissions fall out of the same mechanism.",
-        question: "Does a sync engine mean I have to use CRDTs?",
-      },
-      {
-        answer:
-          "A data-model commitment. Every synced type needs a stable identity, a defined conflict rule, and a decision about which clients are allowed to see it. You also carry a local store to migrate as your schema changes. It is not a library you swap in behind an existing fetch layer.",
+          "A data-model commitment. Every synced type needs a stable id, a conflict rule and a decision about who can see it, plus a local store you migrate as the schema changes.",
         question: "What does a sync engine cost me in practice?",
       },
     ],
@@ -78,37 +67,32 @@ export const guides: Guide[] = [
     ],
     slug: "what-is-a-sync-engine",
     title: "What a sync engine is, and when you need one",
-    updated: "2026-09-06",
+    updated: "2026-09-07",
   },
   {
     answer:
-      "Strata Sync is an open-source TypeScript implementation of the sync engine behind Linear. Linear's engineers described the architecture publicly but never released the code. This page maps each part of that design, models, bootstrap, partial indexes, the transaction queue, delta packets, sync groups and undo, onto the module here that implements it.",
+      "Strata Sync is an open-source TypeScript implementation of the sync engine behind Linear. This page maps each part of Linear's published design onto the module here that implements it.",
     description:
-      "How Strata Sync implements Linear's sync engine architecture in TypeScript, mapped chapter by chapter onto the modules that implement it, and what it adds on top.",
+      "Linear's sync engine architecture mapped, part by part, onto the Strata Sync modules that implement it.",
     faq: [
       {
         answer:
-          "No. It is a clean-room implementation of the architecture Linear's engineers described in public talks and posts, written against those descriptions and the community reverse-engineering notes. It contains no Linear code, and Linear is not affiliated with or endorsing the project.",
+          "No. It is a clean-room implementation of the architecture Linear's engineers described publicly. It contains no Linear code, and Linear is not affiliated with the project.",
         question: "Is Strata Sync Linear's actual code?",
       },
       {
         answer:
-          "One server assigns every change a monotonically increasing number, and every client replays changes in that order. There is no merge function for records because the server already decided. Partial replication and per-row permissions fall out of the same mechanism, since a client only receives the sync groups it subscribes to.",
+          "One server numbers every change, and every client replays changes in that order. There is no merge step for records, because the server already decided.",
         question: "What is a server-sequenced log?",
       },
       {
         answer:
-          "It stores the last sync id it saw, asks the server for everything after that integer, applies those deltas, then rebases its own queued writes on top and drains them in order. The catch-up cost is proportional to what changed while it was away, not to the size of the dataset.",
+          "It asks for everything after the last sync id it saw, applies those changes, then rebases its own queued writes on top. The cost scales with what changed, not with the dataset.",
         question: "How does a client catch up after a week offline?",
       },
       {
         answer:
-          "Records use the server-ordered log, and conflicts resolve per field, so two people editing different fields of one row never collide. Text is the exception. Two people typing in one paragraph is the case a single ordering handles badly, so rich text fields use Yjs CRDT documents instead.",
-        question: "Why not use CRDTs for everything?",
-      },
-      {
-        answer:
-          "Three things Linear's published design does not cover. Collaborative text through Yjs documents and presence. Swappable storage, transport and reactivity adapters behind one interface each, so the core runs in Node with no browser. And a server you own: Fastify routes and a Postgres log through Drizzle, with no hosted dependency.",
+          "Collaborative text through Yjs, swappable storage, transport and reactivity adapters, and a server you own: Fastify routes and a Postgres log, with no hosted dependency.",
         question: "What does Strata Sync add beyond Linear's design?",
       },
     ],
@@ -124,34 +108,29 @@ export const guides: Guide[] = [
   },
   {
     answer:
-      "Supabase Realtime broadcasts database changes to connected clients. It does not keep a local replica, queue writes made offline, or reconcile conflicting edits, so it is a live feed rather than a sync engine. Strata Sync adds those three things on top of the Postgres that Supabase already gives you.",
+      "Supabase Realtime pushes database changes to connected clients. It keeps no local copy, no offline write queue and no conflict resolution. Strata Sync adds those three on top of the Postgres Supabase already gives you.",
     description:
-      "Supabase Realtime streams changes to connected clients but keeps no local replica and no offline write queue. How to add a sync engine to a Supabase Postgres, and what it costs you.",
+      "Supabase Realtime is a live feed, not a sync engine. How to add one to a Supabase Postgres, and what it costs you.",
     faq: [
       {
         answer:
-          "Realtime pushes changes to clients that are connected right now, through Broadcast, Presence and Postgres Changes. A sync engine also keeps a replica on the client, applies writes to it before the server has seen them, queues those writes while offline, and reconciles them on reconnect. Realtime gives you the push. The replica and the reconciliation are the parts you would otherwise build.",
+          "No. Realtime pushes changes to clients that are connected right now. A sync engine also keeps a local copy, queues writes made offline and reconciles them on reconnect.",
         question: "Is Supabase Realtime a sync engine?",
       },
       {
         answer:
-          "Yes. The sync log is three ordinary Postgres tables using bigserial, uuid, text, jsonb and timestamps, with no extensions, no logical replication and no LISTEN/NOTIFY. They run on a Supabase database unmodified, and the rest of your schema is untouched.",
+          "Yes. The sync log is three plain Postgres tables with no extensions, no logical replication and no LISTEN/NOTIFY. Your existing schema is untouched.",
         question: "Can Strata Sync run on a Supabase database?",
       },
       {
         answer:
-          "A Node process. Strata Sync's server is a set of Fastify routes, and Supabase does not host arbitrary Node servers: Edge Functions are Deno. You run that process wherever you already run one, on Fly, Railway, Render or a container, and point it at your Supabase connection string.",
+          "A Node process. The server is a set of Fastify routes, and Supabase Edge Functions are Deno. Run it on Fly, Railway, Render or a container and point it at your connection string.",
         question: "What do I still need to run alongside Supabase?",
       },
       {
         answer:
-          "Use the session-mode connection or set `prepare: false` on postgres-js. Supabase's pooler in transaction mode does not support prepared statements, which postgres-js uses by default. This is the standard requirement for that combination rather than anything specific to Strata Sync.",
+          "Use the session-mode connection, or set prepare: false on postgres-js. The pooler in transaction mode does not support prepared statements.",
         question: "Does Strata Sync work with the Supabase connection pooler?",
-      },
-      {
-        answer:
-          "Strata Sync authorises writes itself, through sync groups resolved server-side, and it connects as an ordinary Postgres role. If you rely on row level security for the same tables, decide which layer owns the rule rather than running both and hoping they agree.",
-        question: "How does this interact with Supabase row level security?",
       },
     ],
     keywords: [
@@ -166,28 +145,28 @@ export const guides: Guide[] = [
   },
   {
     answer:
-      "Convex and Supabase are both backends, and they disagree about ownership. Convex gives you a managed reactive database with server functions, and owns the data. Supabase gives you a Postgres you own, plus auth, storage and a realtime feed. Neither ships a full sync engine.",
+      "Convex owns the database and runs your writes as server functions. Supabase gives you a Postgres you own, plus auth, storage and a realtime feed. Neither ships a full sync engine.",
     description:
-      "Convex and Supabase compared on data ownership, queries, realtime, and what neither gives you: a local replica with offline writes and conflict resolution.",
+      "Convex and Supabase compared on ownership, reactivity, leaving, and the offline gap neither one closes.",
     faq: [
       {
         answer:
-          "Convex brings its own managed database with reactive queries and server-side mutation functions, using optimistic concurrency control and transaction atomicity. Supabase gives you a standard Postgres you can connect anything to, plus auth, storage and Realtime. The question underneath is whether you want to own the database.",
+          "Convex brings its own managed reactive database. Supabase gives you a standard Postgres you can connect anything to. The real question is whether you want to own the database.",
         question: "What is the difference between Convex and Supabase?",
       },
       {
         answer:
-          "Convex queries are reactive by default: they re-run and push to connected clients as the underlying data changes. Supabase pushes changes through Realtime, which you subscribe to separately from your queries. Convex integrates the two, Supabase keeps them apart, and the second is easier to reason about at the cost of more wiring.",
+          "Convex queries re-run and push to clients on their own. Supabase pushes through Realtime, which you subscribe to separately. More wiring, and easier to reason about.",
         question: "How does reactivity differ between Convex and Supabase?",
       },
       {
         answer:
-          "Neither. Both push changes to connected clients, and neither keeps a local replica you write to, queues writes made offline, or rebases them on reconnect. If you need those, you add them on top, which is what a sync engine is for.",
+          "Neither. Both push to connected clients. Neither keeps a local copy you write to, queues offline writes, or rebases them on reconnect.",
         question: "Does Convex or Supabase give me offline support?",
       },
       {
         answer:
-          "Supabase, because a standard Postgres is the easier thing to migrate away from and the easier thing to attach other tools to. Convex's data lives in Convex, so leaving means an export and a rewrite of every server function. That is a fair trade for what it gives you, but it is worth pricing before you start.",
+          "Supabase. A standard Postgres is easy to move and easy to attach tools to. Leaving Convex means an export and a rewrite of every server function.",
         question: "Which is easier to move off later?",
       },
     ],
@@ -203,34 +182,29 @@ export const guides: Guide[] = [
   },
   {
     answer:
-      "Convex and Strata Sync solve the same problem from opposite ends. Convex brings its own managed reactive database and runs your writes as server functions. Strata Sync syncs the Postgres you already run, from routes inside your own Fastify app. The choice is mostly about who owns the database.",
+      "Convex brings its own managed database and runs writes as server functions. Strata Sync syncs the Postgres you already run, from routes inside your own app. The choice is mostly about who owns the database.",
     description:
-      "Convex and Strata Sync compared: managed reactive database against your own Postgres, server functions against a durable outbox, and where the two architectures actually agree.",
+      "Convex and Strata Sync compared: a managed database against your own Postgres, and where the two designs agree.",
     faq: [
       {
         answer:
-          "Convex brings its own managed database, so your data lives in Convex rather than in a Postgres you operate. Strata Sync never owns your data: it reads and writes the database you already run, through routes registered on your existing Fastify app. If the database has other consumers or has to stay where it is, that difference decides it.",
+          "Convex owns the data. Strata Sync never does: it reads and writes the database you already run. If that database has other consumers, that decides it.",
         question: "What is the main difference between Convex and Strata Sync?",
       },
       {
         answer:
-          "Yes, self-hosting is available, though the managed cloud deployment is the default path and the one most of the documentation assumes. Strata Sync has no hosted option at all, because there is nothing to host: it is a library that runs inside your app and stores its sync log in your Postgres.",
+          "Yes, though the managed cloud is the default path. Strata Sync has nothing to host: it is a library inside your app, with its log in your Postgres.",
         question: "Can you self-host Convex?",
       },
       {
         answer:
-          "More than the surface suggests. Convex uses optimistic concurrency control with transaction atomicity and a strictly increasing sequence identifier. Strata Sync assigns every change a monotonic syncId and has clients replay that order. Both are server-authoritative and both let a client catch up by asking for everything after a number, rather than merging without a coordinator.",
+          "They are closer than they look. Both are server-authoritative, and both let a client catch up by asking for everything after a number. Strata Sync also resolves conflicts per field.",
         question:
           "How do Convex and Strata Sync differ on ordering and conflicts?",
       },
       {
         answer:
-          "Neither ships it. Record-level ordering handles text badly, because two people typing in one paragraph is the case a single ordering cannot merge sensibly. Strata Sync includes Yjs documents and presence for text fields through @stratasync/y-doc. With Convex you add a CRDT layer yourself.",
-        question: "Does Convex support collaborative text editing?",
-      },
-      {
-        answer:
-          "Choose Convex when you are starting fresh and want one product to own the database, the server functions and the sync, and you are happy for that product to be the backend. Choose Strata Sync when the Postgres already exists, has other consumers, or has to stay yours, and you want Linear's architecture rather than a new backend.",
+          "Choose Convex when you are starting fresh and want one product to own the backend. Choose Strata Sync when the Postgres already exists and has to stay yours.",
         question: "When should I choose Convex over Strata Sync?",
       },
     ],
@@ -246,28 +220,28 @@ export const guides: Guide[] = [
   },
   {
     answer:
-      "Zero and Strata Sync are both server-authoritative sync engines over your own Postgres. Zero runs zero-cache beside the database and gives you ZQL, its own query language. Strata Sync registers routes on your existing Fastify app and has you declare model classes instead.",
+      "Both are server-authoritative sync engines over your own Postgres. Zero runs zero-cache beside the database and gives you ZQL, its own query language. Strata Sync registers routes on your app and has you declare model classes.",
     description:
-      "Zero and Strata Sync compared: an extra cache process against routes in your own app, ZQL against model classes, and when Zero is the better pick.",
+      "Zero and Strata Sync compared: an extra process against routes in your own app, ZQL against model classes, and when Zero is the better pick.",
     faq: [
       {
         answer:
-          "Zero introduces zero-cache, a process between your client and Postgres that holds the replica the server reasons about, and which you run, scale and monitor. Strata Sync introduces routes: @stratasync/server registers bootstrap, mutate and a WebSocket on the Fastify app you already deploy. Redis is optional and only for fan-out across instances.",
+          "Yes. zero-cache sits between your client and Postgres, and you run, scale and monitor it. Strata Sync adds routes to the Fastify app you already deploy.",
         question: "Does Zero require running an extra service?",
       },
       {
         answer:
-          "Zero ships ZQL, a query language of its own, and queries are subscriptions that update as the underlying data changes. Strata Sync follows Linear: you declare model classes with decorators and read them back through typed queries and React hooks, against a local replica, with no new query language to learn.",
+          "ZQL is a query language of its own, and queries are subscriptions. Strata Sync has you declare model classes and read them through typed queries and hooks, with nothing new to learn.",
         question: "What is the difference between ZQL and Strata Sync queries?",
       },
       {
         answer:
-          "Both are server-authoritative and both rebase, so neither asks you to reason about CRDT merge semantics for records. Strata Sync resolves conflicts per field rather than per record, so two people editing different fields of the same row do not collide at all.",
+          "Both are server-authoritative and both rebase. Strata Sync resolves conflicts per field, so two people editing different fields of one row never collide.",
         question: "How do Zero and Strata Sync handle conflicts?",
       },
       {
         answer:
-          "Pick Zero if you want queries as the primary abstraction, you like ZQL, and you are happy to operate zero-cache. Pick Zero too if you want the backing of a team whose whole product this is: Strata Sync is one author plus contributors, in production on one product.",
+          "When you want queries as the main abstraction, you are happy to operate zero-cache, or you want a team whose whole product this is.",
         question: "When should I choose Zero over Strata Sync?",
       },
     ],
@@ -283,28 +257,28 @@ export const guides: Guide[] = [
   },
   {
     answer:
-      "The open-source sync engines differ on three things: whether they own your database, whether you run an extra service, and whether writes go through them or through your own API. Convex owns the database. Electric and Zero sit beside your Postgres. Strata Sync runs inside your Fastify app.",
+      "The open-source sync engines differ on three things: whether they own your database, whether you run an extra service, and whether writes go through them or your own API.",
     description:
-      "Strata Sync, Zero, ElectricSQL, Convex, InstantDB and PowerSync compared on database ownership, services to operate, the write path, conflict resolution, and collaborative text.",
+      "Strata Sync, Zero, ElectricSQL, Convex, InstantDB and PowerSync on the three questions that actually separate them.",
     faq: [
       {
         answer:
-          "Convex brings its own managed database rather than syncing your Postgres. Queries are reactive and mutations run as server-side functions with optimistic concurrency control and transaction atomicity. Pick it when you want one product to own the backend. Pick a Postgres-based engine when the database already exists and has to stay yours.",
+          "Convex brings its own database and runs writes as server functions. Pick it to have one product own the backend. Pick a Postgres-based engine when the database is already yours.",
         question: "How does Convex compare to a Postgres-based sync engine?",
       },
       {
         answer:
-          "Zero runs zero-cache beside your Postgres and gives you ZQL, its own query language, with server-authoritative rebasing. Strata Sync registers routes on your existing Fastify app instead of adding a process, and you declare model classes rather than write queries in a new language. Zero is the better pick if you want queries as the primary abstraction.",
+          "Zero adds zero-cache and its own query language. Strata Sync adds routes to your app and uses model classes. Zero is the better pick if you want queries as the main abstraction.",
         question: "What is the difference between Strata Sync and Zero?",
       },
       {
         answer:
-          "ElectricSQL streams filtered subsets of Postgres to clients in real time and deliberately leaves the write path to your own API. That keeps its architecture small. It also means the outbox, retry and conflict handling are yours to build, which is the part a full sync engine ships for you.",
+          "It streams filtered Postgres data to clients and leaves writes to your own API. The outbox, retries and conflict handling are yours to build.",
         question: "Is ElectricSQL a full sync engine?",
       },
       {
         answer:
-          "None of them ship it. Record-level ordering handles text badly, because two people typing in one paragraph is the case a single ordering cannot merge sensibly. Strata Sync includes Yjs CRDT documents and presence for text fields. The others expect you to add a CRDT layer yourself.",
+          "None of them ship it. Strata Sync includes Yjs documents and presence for text fields. The others expect you to add a CRDT layer.",
         question: "Which sync engines handle collaborative text editing?",
       },
     ],
@@ -316,7 +290,7 @@ export const guides: Guide[] = [
     ],
     slug: "sync-engine-comparison",
     title: "Sync engines compared: Strata Sync, Zero, Electric, Convex",
-    updated: "2026-09-06",
+    updated: "2026-09-07",
   },
 ];
 

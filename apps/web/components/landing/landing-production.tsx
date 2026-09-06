@@ -32,10 +32,8 @@ export const LandingProduction = () => (
             >
               Done Bear
             </a>{" "}
-            is a task manager by the same author. Six clients read and write one
-            Postgres through Strata Sync&#8217;s bootstrap, delta and mutate
-            endpoints, and every one of them converges on the same
-            server-ordered log.
+            is a task manager by the same author. Six clients share one Postgres
+            through Strata Sync.
           </p>
         </div>
 
