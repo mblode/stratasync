@@ -60,7 +60,7 @@
   "dependencies": {
     "@stratasync/client": "*",
     "@stratasync/core": "*",
-    "@stratasync/y-doc": "*"
+    "@stratasync/y-doc": "^2.4.0"
   },
   "engines": {
     "node": ">=22"
