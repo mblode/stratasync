@@ -1,6 +1,5 @@
 import type React from "react";
 
-import { H1, Lead } from "@/components/ui/typography";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
   breadcrumbSchema,
@@ -91,15 +90,15 @@ export const GuideShell = ({ children, guide }: Props) => {
           ]}
         />
 
-        <article className="mx-auto mt-8 max-w-3xl">
-          <H1>{guide.title}</H1>
+        <article className="typeset typeset-guide mx-auto mt-8 max-w-3xl">
+          <h1>{guide.title}</h1>
 
           {/*
             The answer sits directly under the H1 as plain text, self-contained
             enough to quote without the rest of the page. That is what an
             answer engine lifts, and what a reader who bounces still gets.
           */}
-          <Lead className="mt-6">{guide.answer}</Lead>
+          <p className="mt-6 text-muted-foreground text-xl">{guide.answer}</p>
 
           <div className="mt-10 [&_a]:underline [&_a]:underline-offset-4">
             {children}

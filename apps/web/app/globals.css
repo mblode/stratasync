@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
+@import "./typeset.css";
 
 @theme inline {
   --breakpoint-3xl: 1600px;
@@ -229,4 +230,20 @@
 
 @utility container-wrapper {
   @apply mx-auto w-full max-w-screen-2xl px-6 lg:px-8;
+}
+
+/*
+ * shadcn/typeset preset for the guides. Typeset is one CSS file (app/
+ * typeset.css, from ui.shadcn.com/typeset.css) that styles every element
+ * inside a `.typeset` container through zero-specificity `:where()` rules, so
+ * Tailwind utilities still win. Three controls drive everything else: size,
+ * leading and flow.
+ */
+.typeset-guide {
+  --typeset-font-body: var(--font-sans);
+  --typeset-font-heading: var(--font-sans);
+  --typeset-font-mono: var(--font-mono);
+  --typeset-size: 1rem;
+  --typeset-leading: 1.75;
+  --typeset-flow: 1.25em;
 }

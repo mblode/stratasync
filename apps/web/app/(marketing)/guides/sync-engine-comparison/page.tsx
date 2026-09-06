@@ -1,18 +1,6 @@
 import type { Metadata } from "next";
 
 import { GuideShell } from "@/components/guide-shell";
-import {
-  H2,
-  List,
-  ListItem,
-  P,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-} from "@/components/ui/typography";
 import { siteConfig } from "@/lib/config";
 import { getGuide, guideUrl } from "@/lib/guides";
 
@@ -109,88 +97,88 @@ const columns = [
 
 const Page = () => (
   <GuideShell guide={guide}>
-    <H2>The three questions that actually separate them</H2>
-    <P>
+    <h2>The three questions that actually separate them</h2>
+    <p>
       Feature lists make these projects look similar, because they all sync data
       to a client and keep it fresh. Three questions pull them apart, and the
       answers tend to decide the choice on their own.
-    </P>
-    <List>
-      <ListItem>
+    </p>
+    <ul>
+      <li>
         <strong>Does it own your database?</strong> Convex and InstantDB bring
         their own. Electric, Zero, PowerSync and Strata Sync read the database
         you already have.
-      </ListItem>
-      <ListItem>
+      </li>
+      <li>
         <strong>Does it add a process to operate?</strong> Zero runs zero-cache,
         Electric runs its sync service, PowerSync runs its service. Strata Sync
         registers routes on the Fastify app you already deploy.
-      </ListItem>
-      <ListItem>
+      </li>
+      <li>
         <strong>Do writes go through it, or through your own API?</strong>{" "}
         Electric deliberately leaves the write path to you. Convex, Zero and
         Strata Sync each ship one.
-      </ListItem>
-    </List>
+      </li>
+    </ul>
 
-    <H2>Side by side</H2>
-    <Table className="text-sm">
+    <h2>Side by side</h2>
+    <table className="text-sm">
       <caption className="sr-only">
         Sync engines compared on data ownership, services to run, write path,
         conflict resolution, collaborative text and undo
       </caption>
-      <Thead>
-        <Tr>
-          <Th scope="col">&nbsp;</Th>
+      <thead>
+        <tr>
+          <th scope="col">&nbsp;</th>
           {columns.map((column) => (
-            <Th key={column.key} scope="col">
+            <th key={column.key} scope="col">
               {column.name}
-            </Th>
+            </th>
           ))}
-        </Tr>
-      </Thead>
-      <Tbody>
+        </tr>
+      </thead>
+      <tbody>
         {rows.map((row) => (
-          <Tr key={row.feature}>
-            <Th scope="row">{row.feature}</Th>
+          <tr key={row.feature}>
+            <th scope="row">{row.feature}</th>
             {columns.map((column) => (
-              <Td key={column.key}>{row[column.key]}</Td>
+              <td key={column.key}>{row[column.key]}</td>
             ))}
-          </Tr>
+          </tr>
         ))}
-      </Tbody>
-    </Table>
-    <P className="text-muted-foreground text-sm">
+      </tbody>
+    </table>
+    <p className="text-muted-foreground text-sm">
       Other columns summarise each project&#8217;s documented default
       architecture as of September 2026. If one has moved on, open a pull
       request and it will be corrected.
-    </P>
+    </p>
 
-    <H2>Convex</H2>
-    <P>
+    <h2>Convex</h2>
+    <p>
       Convex is the one that changes the shape of your backend rather than
       attaching to it. It brings a managed reactive database, queries that
       update automatically as underlying data changes, and mutations written as
       server-side functions with optimistic concurrency control and transaction
       atomicity. Self-hosting exists, but the cloud deployment is the default
       path.
-    </P>
-    <P>
+    </p>
+    <p>
       That is a genuine strength when you are starting fresh and would rather
       one product owned the database, the functions and the sync. It is the
       wrong fit when the Postgres already exists, has other consumers, and has
       to stay where it is. Strata Sync sits at the opposite end: it never owns
       your data, it reads the database you run.
-    </P>
+    </p>
 
-    <H2>Zero</H2>
-    <P>
+    <h2>Zero</h2>
+    <p>
       Zero runs zero-cache beside your Postgres and gives you ZQL, a query
       language of its own, with server-authoritative ordering and rebasing on
       conflict. Queries are the primary abstraction and they are subscriptions,
       so they update as data changes.
-    </P>
-    <P>
+    </p>
+    <p>
       Pick Zero if you want to think in queries and are happy to operate the
       cache. Pick Strata Sync if you would rather declare model classes and not
       add a process. The{" "}
@@ -198,45 +186,45 @@ const Page = () => (
         detailed Zero comparison
       </a>{" "}
       goes further, including when Zero is the better answer.
-    </P>
+    </p>
 
-    <H2>ElectricSQL</H2>
-    <P>
+    <h2>ElectricSQL</h2>
+    <p>
       Electric streams filtered subsets of Postgres, which it calls shapes, to
       clients in real time. Writes go through your existing backend API. That is
       a deliberate scoping decision and it keeps the system small and easy to
       reason about.
-    </P>
-    <P>
+    </p>
+    <p>
       It also means the durable outbox, retry, idempotency and conflict handling
       are yours to build. If you want the read path solved and are happy owning
       the write path, Electric is the cleanest option here.
-    </P>
+    </p>
 
-    <H2>InstantDB and PowerSync</H2>
-    <P>
+    <h2>InstantDB and PowerSync</h2>
+    <p>
       InstantDB pairs a hosted database with a built-in write path, aimed at
       getting a collaborative app running quickly. PowerSync syncs an existing
       Postgres or MongoDB to on-device SQLite through sync rules and buckets,
       with strong React Native support, and is the most mobile-oriented of the
       group.
-    </P>
+    </p>
 
-    <H2>Where Strata Sync fits</H2>
-    <P>
+    <h2>Where Strata Sync fits</h2>
+    <p>
       It implements the architecture Linear described: one server, one monotonic
       counter, and a total order every client replays, with conflicts resolved
       per field rather than per record. It ships the parts that are usually left
       to you, including the outbox, rebase, sync groups, undo from transaction
       history, and Yjs documents for collaborative text. It runs inside your
       Fastify app against your Postgres, with no hosted dependency.
-    </P>
-    <P>
+    </p>
+    <p>
       The honest limits: it is one author plus contributors, in production on
       one product, and it is younger than Electric or Convex. If you want a
       vendor whose entire company is this, that is a real argument for the
       others.
-    </P>
+    </p>
   </GuideShell>
 );
 
