@@ -191,6 +191,11 @@ const nextConfig = {
         permanent: true,
         source: "/docs/comparisons/zero",
       },
+      {
+        destination: "/guides/linear-sync-engine",
+        permanent: true,
+        source: "/docs/architecture/linear-sync-engine",
+      },
     ];
 
     return [...apexRedirects, ...moved];

@@ -218,7 +218,7 @@ export const LandingLineage = () => (
             chapter in TypeScript, on your own Postgres.{" "}
             <a
               className="underline underline-offset-2 hover:text-foreground"
-              href={`${siteConfig.links.docs}/architecture/linear-sync-engine`}
+              href={`${siteConfig.url}/guides/linear-sync-engine`}
             >
               Read the full mapping
             </a>

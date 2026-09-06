@@ -9,7 +9,7 @@ The server assigns a monotonically increasing `syncId` to every committed change
 
 Strata Sync is an open-source implementation of the sync engine Linear described but never released. The protocol below follows that architecture: a global `syncId`, bootstrap in three modes, partial indexes, a durable transaction queue, delta packets of sync actions, and sync groups as the permission boundary.
 
-[Linear's sync engine, open-sourced](/architecture/linear-sync-engine) maps each part of Linear's published design onto the module that implements it, and lists what Strata Sync adds on top (Yjs collaboration, undo/redo, swappable adapters).
+[Linear's sync engine, open-sourced](https://blode.co/stratasync/guides/linear-sync-engine) maps each part of Linear's published design onto the module that implements it, and lists what Strata Sync adds on top (Yjs collaboration, undo/redo, swappable adapters).
 
 ## The sync log
 

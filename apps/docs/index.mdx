@@ -7,7 +7,7 @@ Strata Sync is an open-source implementation of the sync engine behind [Linear](
 
 Reads come from a local IndexedDB replica, so the UI stays fast. Writes queue offline and drain in order when you reconnect. A server-sequenced log means every client converges on the same state.
 
-Linear's engineers described their architecture but never released it. [Linear's sync engine, open-sourced](/architecture/linear-sync-engine) maps each part of that design onto the module here that implements it, and covers what Strata Sync adds: Yjs CRDT collaboration, undo/redo and swappable adapters. Strata Sync is a clean-room implementation; it contains no Linear code, and Linear is not affiliated with the project.
+Linear's engineers described their architecture but never released it. [Linear's sync engine, open-sourced](https://blode.co/stratasync/guides/linear-sync-engine) maps each part of that design onto the module here that implements it, and covers what Strata Sync adds: Yjs CRDT collaboration, undo/redo and swappable adapters. Strata Sync is a clean-room implementation; it contains no Linear code, and Linear is not affiliated with the project.
 
 It runs on your own Postgres and Fastify. There is no hosted service, and every package is MIT licensed.
 

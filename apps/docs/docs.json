@@ -27,7 +27,6 @@
         "group": "Architecture",
         "pages": [
           "architecture",
-          "architecture/linear-sync-engine",
           "architecture/sync-protocol",
           "architecture/data-flow"
         ]
