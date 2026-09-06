@@ -17,8 +17,11 @@ const audiences = [
  * foreground tokens would be dark on dark.
  */
 export const HeroInstall = () => (
-  <Tabs className="gap-4" defaultValue="humans">
-    <TabsList className="h-auto gap-4 p-0" variant="line">
+  <Tabs className="flex flex-col gap-4" defaultValue="humans">
+    <TabsList
+      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-white/30 [&>*+*]:border-l [&>*+*]:pl-4"
+      variant="line"
+    >
       {audiences.map((audience) => (
         <TabsTrigger
           className="px-0 text-base text-white/60 after:bg-white hover:text-white data-active:text-white"
@@ -31,7 +34,7 @@ export const HeroInstall = () => (
     </TabsList>
     {audiences.map((audience) => (
       <TabsContent key={audience.value} keepMounted value={audience.value}>
-        <div className="flex max-w-xl items-center gap-3 rounded-full border border-white/25 bg-white/10 py-2 pr-2 pl-5 font-mono text-sm">
+        <div className="flex w-full max-w-xl min-w-0 items-center gap-3 rounded-full border border-white/25 bg-white/10 py-2 pr-2 pl-5 font-mono text-sm">
           <span aria-hidden="true" className="text-white/50">
             $
           </span>
