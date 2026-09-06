@@ -3,12 +3,14 @@ import { getSingletonHighlighter } from "shiki";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Showcase } from "@/components/demo/showcase";
+import { HeroInstall } from "@/components/landing/hero-install";
 import { LandingComparison } from "@/components/landing/landing-comparison";
 import { LandingFaq } from "@/components/landing/landing-faq";
 import { LandingGap } from "@/components/landing/landing-gap";
 import { LandingHow } from "@/components/landing/landing-how";
 import { LandingLineage } from "@/components/landing/landing-lineage";
 import { LandingProduction } from "@/components/landing/landing-production";
+import { Logo } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -73,43 +75,29 @@ const Home = async () => {
           {/* WHY — Hero */}
           <div className="bg-[#2E6F40] text-white">
             <SiteHeader />
-            <section className="py-16 text-center md:py-32">
+            <section className="py-16 md:py-28">
               <div className="container-wrapper">
-                <h1 className="mx-auto max-w-5xl text-balance font-light font-sans text-5xl tracking-tight md:text-7xl">
-                  {siteConfig.heading}
-                </h1>
-                <p className="mx-auto mt-6 max-w-2xl text-balance text-center font-sans text-lg text-white/85 md:text-xl">
-                  {siteConfig.answer}
-                </p>
-
-                <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-                  <Button
-                    asChild
-                    className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
-                    size="lg"
-                  >
-                    <a href={siteConfig.links.docs}>Get started</a>
-                  </Button>
-                  <Button
-                    asChild
-                    className="border-white bg-clip-border bg-transparent text-white hover:bg-white/10 active:bg-white/20"
-                    size="lg"
-                    variant="outline"
-                  >
-                    <a href={siteConfig.links.github}>GitHub</a>
-                  </Button>
-                </div>
-
-                <code className="relative mt-8 inline-flex items-center gap-2 font-mono text-sm">
-                  <div className="max-w-100 truncate">
-                    npx skills add mblode/stratasync
+                <div className="max-w-3xl">
+                  <Logo aria-hidden="true" className="h-10 w-auto" />
+                  <h1 className="mt-8 text-balance font-light font-sans text-5xl tracking-tight md:text-7xl">
+                    {siteConfig.heading}
+                  </h1>
+                  <div className="mt-8">
+                    <HeroInstall />
                   </div>
-                  <CopyButton
-                    content="npx skills add mblode/stratasync"
-                    size="xs"
-                    variant="ghost"
-                  />
-                </code>
+                  <div className="mt-6">
+                    <Button
+                      asChild
+                      className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
+                      size="lg"
+                    >
+                      <a href={siteConfig.links.docs}>Read the docs</a>
+                    </Button>
+                  </div>
+                  <p className="mt-8 max-w-2xl text-balance font-sans text-lg text-white/85 md:text-xl">
+                    {siteConfig.answer}
+                  </p>
+                </div>
               </div>
             </section>
           </div>

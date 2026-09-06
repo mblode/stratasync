@@ -24,6 +24,12 @@ export const siteConfig = {
   disambiguation:
     "A developer library for application data sync. Not a strata-management or network-management product.",
   heading: "The local-first sync engine Linear never open-sourced",
+  /** The two ways in, one per audience. The hero switches between them. */
+  install: {
+    agents: "npx skills add mblode/stratasync",
+    humans:
+      "npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql",
+  },
   links: {
     author: "https://blode.co",
     docs: "https://blode.co/stratasync/docs",
