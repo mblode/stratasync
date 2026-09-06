@@ -21,7 +21,7 @@
     "groups": [
       {
         "group": "Getting Started",
-        "pages": ["index", "installation", "quick-start"]
+        "pages": ["index", "getting-started", "installation", "quick-start"]
       },
       {
         "group": "Architecture",

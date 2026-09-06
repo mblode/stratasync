@@ -27,13 +27,13 @@ export const siteConfig = {
   /** The two ways in, one per audience. The hero switches between them. */
   install: {
     agents: "npx skills add mblode/stratasync",
-    humans:
-      "npm install @stratasync/core @stratasync/client @stratasync/react @stratasync/mobx @stratasync/storage-idb @stratasync/transport-graphql",
+    humans: "npx stratasync init my-app",
   },
   links: {
     author: "https://blode.co",
     docs: "https://blode.co/stratasync/docs",
     doneBear: "https://donebear.com",
+    gettingStarted: "https://blode.co/stratasync/docs/getting-started",
     github: "https://github.com/mblode/stratasync",
     linearReference: "https://github.com/wzhudev/reverse-linear-sync-engine",
     npm: "https://www.npmjs.com/package/@stratasync/core",

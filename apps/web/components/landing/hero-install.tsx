@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { siteConfig } from "@/lib/config";
@@ -10,16 +12,18 @@ const audiences = [
 ] as const;
 
 /*
- * One command per audience, behind a two-tab switch. Panels stay mounted so
+ * One command per audience behind a two-tab switch, with the primary action
+ * beside the command from md up, as in the reference. Panels stay mounted so
  * both commands are in the served HTML: the agents one is the line an agent
  * reading this page is looking for, and it should not depend on a click.
  * Colours are overridden for the green hero, where the tab component's
- * foreground tokens would be dark on dark.
+ * foreground tokens would be dark on dark. The Tabs root stacks through a
+ * data-horizontal variant nothing sets, so the column layout is explicit.
  */
-export const HeroInstall = () => (
+export const HeroInstall = ({ action }: { action?: ReactNode }) => (
   <Tabs className="flex flex-col gap-4" defaultValue="humans">
     <TabsList
-      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-l-white/30 [&>*+*]:border-l [&>*+*]:pl-4"
+      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-l [&>*+*]:border-l-white/30 [&>*+*]:pl-4"
       variant="line"
     >
       {audiences.map((audience) => (
@@ -32,21 +36,26 @@ export const HeroInstall = () => (
         </TabsTrigger>
       ))}
     </TabsList>
-    {audiences.map((audience) => (
-      <TabsContent key={audience.value} keepMounted value={audience.value}>
-        <div className="flex w-full max-w-xl min-w-0 items-center gap-3 rounded-full border border-white/25 bg-white/10 py-2 pr-2 pl-5 font-mono text-sm">
-          <span aria-hidden="true" className="text-white/50">
-            $
-          </span>
-          <span className="min-w-0 flex-1 truncate">{audience.command}</span>
-          <CopyButton
-            className="text-white hover:bg-white/15 hover:text-white"
-            content={audience.command}
-            size="xs"
-            variant="ghost"
-          />
-        </div>
-      </TabsContent>
-    ))}
+    <div className="flex flex-col gap-4 md:flex-row md:items-center">
+      <div className="min-w-0">
+        {audiences.map((audience) => (
+          <TabsContent key={audience.value} keepMounted value={audience.value}>
+            <div className="flex w-fit max-w-full items-center gap-3 rounded-full border border-white/25 bg-white/10 py-2 pr-2 pl-5 font-mono text-sm">
+              <span aria-hidden="true" className="text-white/50">
+                $
+              </span>
+              <span className="min-w-0 truncate">{audience.command}</span>
+              <CopyButton
+                className="text-white hover:bg-white/15 hover:text-white"
+                content={audience.command}
+                size="xs"
+                variant="ghost"
+              />
+            </div>
+          </TabsContent>
+        ))}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
   </Tabs>
 );

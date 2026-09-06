@@ -1,0 +1,22 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../examples/api/**",
+        "../../examples/web/**",
+        "../../tsconfig.base.json",
+        "!../../examples/**/node_modules/**",
+        "!../../examples/**/dist/**",
+        "!../../examples/**/.turbo/**"
+      ],
+      "outputs": ["dist/**", "template/**"]
+    },
+    "test": {
+      "dependsOn": ["build"]
+    }
+  }
+}

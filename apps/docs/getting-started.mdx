@@ -1,0 +1,41 @@
+---
+title: Getting started
+description: "Scaffold a runnable Strata Sync app with one command: a Fastify and Postgres sync server, a React client, and the tables to sync."
+---
+
+One command creates a working app. Everything it generates is yours to edit.
+
+## Create an app
+
+```bash
+npx stratasync init my-app
+cd my-app
+npm install
+```
+
+You get two npm workspaces. `api/` is a Fastify server with the sync routes registered and a Drizzle schema for the sync log and a `todos` table. `web/` is a React client that reads from IndexedDB, queues writes offline, and converges on the server's log.
+
+## Run it
+
+Postgres runs in Docker. The API reads its connection string from `api/.env`, which `init` seeds for you.
+
+```bash
+npm run db:up      # start Postgres
+npm run db:push    # create the tables
+npm run dev:api    # the sync server
+npm run dev:web    # the client, in a second terminal
+```
+
+Open the client, add a todo, then turn the network off and add another. Both are there when it comes back, in order.
+
+## What to change first
+
+- Models live in `web/src/lib/sync/models.ts`. Add a class with `@ClientModel` and `@Property`, and the client syncs it. See [Models](/packages/core/models).
+- The server allows each model in `api/src/server.ts`. Add yours to the `models` map with the fields it may write.
+- Tables are in `api/src/db/schema.ts`. Add a table, run `npm run db:push`.
+
+## Doing it by hand
+
+If you are adding Strata Sync to an app that already exists, [Installation](/installation) lists the packages and [Quick start](/quick-start) builds the client in five steps.
+
+Working with an agent instead? `npx skills add mblode/stratasync` installs a skill that scaffolds or extends an app from a prompt.

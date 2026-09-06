@@ -83,16 +83,19 @@ const Home = async () => {
                     {siteConfig.heading}
                   </h1>
                   <div className="mt-8">
-                    <HeroInstall />
-                  </div>
-                  <div className="mt-6">
-                    <Button
-                      asChild
-                      className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
-                      size="lg"
-                    >
-                      <a href={siteConfig.links.docs}>Read the docs</a>
-                    </Button>
+                    <HeroInstall
+                      action={
+                        <Button
+                          asChild
+                          className="border-white bg-clip-border bg-white text-[#2E6F40] hover:bg-white/90 active:bg-white/95"
+                          size="lg"
+                        >
+                          <a href={siteConfig.links.gettingStarted}>
+                            Read the docs
+                          </a>
+                        </Button>
+                      }
+                    />
                   </div>
                   <p className="mt-8 max-w-2xl text-balance font-sans text-lg text-white/85 md:text-xl">
                     {siteConfig.answer}
@@ -187,7 +190,7 @@ const Home = async () => {
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   <Button asChild size="lg">
-                    <a href={siteConfig.links.docs}>Get started</a>
+                    <a href={siteConfig.links.gettingStarted}>Get started</a>
                   </Button>
                   <Button asChild size="lg" variant="secondary">
                     <a href={siteConfig.links.github}>GitHub</a>
