@@ -41,73 +41,47 @@ const competitorKeys = [
 const rows: ComparisonRow[] = [
   {
     competitors: {
-      convex: { icon: "neutral", text: "Convex's own managed database" },
-      electricsql: {
-        icon: "neutral",
-        text: "Your Postgres + Electric service",
-      },
-      instantdb: { icon: "neutral", text: "Instant's hosted database" },
-      powersync: { icon: "neutral", text: "Your database + PowerSync Service" },
-      zero: { icon: "neutral", text: "Your Postgres + zero-cache" },
+      convex: { icon: "neutral", text: "Convex's database" },
+      electricsql: { icon: "neutral", text: "Your Postgres" },
+      instantdb: { icon: "neutral", text: "Instant's database" },
+      powersync: { icon: "neutral", text: "Your database" },
+      zero: { icon: "neutral", text: "Your Postgres" },
     },
-    feature: "Backend",
-    strataSync: {
-      icon: "check",
-      text: "Your Postgres, inside your Fastify app",
-    },
+    feature: "Your data",
+    strataSync: { icon: "check", text: "Your Postgres, in your app" },
   },
   {
     competitors: {
-      convex: { icon: "neutral", text: "Convex cloud, self-hosting available" },
-      electricsql: { icon: "neutral", text: "Self-host or Electric Cloud" },
-      instantdb: { icon: "neutral", text: "Hosted by default" },
-      powersync: { icon: "neutral", text: "Cloud or self-hosted" },
-      zero: { icon: "neutral", text: "Self-hosted zero-cache" },
+      convex: { icon: "neutral", text: "Convex cloud" },
+      electricsql: { icon: "neutral", text: "Electric" },
+      instantdb: { icon: "neutral", text: "Instant cloud" },
+      powersync: { icon: "neutral", text: "PowerSync" },
+      zero: { icon: "neutral", text: "zero-cache" },
     },
-    feature: "Extra service to run",
-    strataSync: { icon: "check", text: "None. Optional Redis for fan-out" },
+    feature: "Extra service",
+    strataSync: { icon: "check", text: "None" },
   },
   {
     competitors: {
-      convex: { icon: "neutral", text: "Server-side mutation functions" },
-      electricsql: { icon: "neutral", text: "Bring your own write API" },
+      convex: { icon: "neutral", text: "Server functions" },
+      electricsql: { icon: "neutral", text: "Your own API" },
       instantdb: { icon: "check", text: "Built in" },
-      powersync: { icon: "neutral", text: "Bring your own upload handler" },
+      powersync: { icon: "neutral", text: "Your own handler" },
       zero: { icon: "neutral", text: "Custom mutators" },
     },
-    feature: "Write path",
-    strataSync: {
-      icon: "check",
-      text: "Built in: durable outbox, /sync/mutate",
-    },
+    feature: "Writes",
+    strataSync: { icon: "check", text: "Built in" },
   },
   {
     competitors: {
-      convex: {
-        icon: "neutral",
-        text: "Optimistic concurrency, transactional",
-      },
-      electricsql: { icon: "neutral", text: "Postgres replication stream" },
+      convex: { icon: "neutral", text: "Transactional" },
+      electricsql: { icon: "neutral", text: "Replication stream" },
       instantdb: { icon: "neutral", text: "Server-authoritative" },
-      powersync: { icon: "neutral", text: "Replication checkpoints" },
-      zero: { icon: "neutral", text: "Server-authoritative, rebased" },
+      powersync: { icon: "neutral", text: "Checkpoints" },
+      zero: { icon: "neutral", text: "Server-authoritative" },
     },
-    feature: "Ordering and conflicts",
-    strataSync: {
-      icon: "check",
-      text: "Server-sequenced log, field-level rebase",
-    },
-  },
-  {
-    competitors: {
-      convex: { icon: "neutral", text: "Bring your own CRDT" },
-      electricsql: { icon: "neutral", text: "Bring your own CRDT" },
-      instantdb: { icon: "neutral", text: "Bring your own CRDT" },
-      powersync: { icon: "neutral", text: "Bring your own CRDT" },
-      zero: { icon: "neutral", text: "Bring your own CRDT" },
-    },
-    feature: "Collaborative text",
-    strataSync: { icon: "check", text: "Yjs, built in" },
+    feature: "Conflicts",
+    strataSync: { icon: "check", text: "Server log, per-field rebase" },
   },
   {
     competitors: {
@@ -117,8 +91,8 @@ const rows: ComparisonRow[] = [
       powersync: { icon: "neutral", text: "Bring your own" },
       zero: { icon: "neutral", text: "Bring your own" },
     },
-    feature: "Undo and redo",
-    strataSync: { icon: "check", text: "Built in, from transaction history" },
+    feature: "Text and undo",
+    strataSync: { icon: "check", text: "Both built in" },
   },
 ];
 

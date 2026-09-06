@@ -60,37 +60,29 @@ const Page = () => (
       </thead>
       <tbody>
         <tr>
-          <td>A model registry populated by decorators at startup</td>
+          <td>Decorators register models at startup</td>
           <td>
-            <code>ModelRegistry</code> in <code>@stratasync/core</code>,
-            populated by <code>@ClientModel</code>, <code>@Property</code>,{" "}
-            <code>@Reference</code>, <code>@BackReference</code>,{" "}
-            <code>@OneToMany</code> and <code>@ReferenceArray</code>
+            <code>ModelRegistry</code>, filled by <code>@ClientModel</code> and
+            the property decorators
           </td>
         </tr>
         <tr>
-          <td>Load strategies deciding when a model hydrates</td>
+          <td>Load strategies</td>
           <td>
-            <code>loadStrategy</code>: <code>instant</code>, <code>lazy</code>,{" "}
-            <code>partial</code>, <code>explicitlyRequested</code> or{" "}
-            <code>local</code>
+            <code>loadStrategy</code>: instant, lazy, partial,
+            explicitlyRequested or local
           </td>
         </tr>
         <tr>
+          <td>A reference holds an id and a resolved model</td>
           <td>
-            An id and a resolved model per reference (<code>assigneeId</code>{" "}
-            and <code>assignee</code>)
-          </td>
-          <td>
-            <code>@Reference</code> stores the key. <code>@OneToMany</code> and{" "}
-            <code>@ReferenceArray</code> hydrate on access
+            <code>@Reference</code> holds the key. Collections hydrate on access
           </td>
         </tr>
         <tr>
-          <td>A schema hash that triggers a migration</td>
+          <td>A schema hash triggers migration</td>
           <td>
-            <code>computeSchemaHash()</code>. A mismatch forces a full
-            re-bootstrap
+            <code>computeSchemaHash()</code>. A mismatch re-bootstraps
           </td>
         </tr>
       </tbody>
@@ -122,34 +114,29 @@ const Page = () => (
       <tbody>
         <tr>
           <td>
-            <code>lastSyncId</code>, an integer that orders every change
+            <code>lastSyncId</code> orders every change
           </td>
           <td>
-            <code>SyncId</code>, a string on the wire so it can pass{" "}
-            <code>Number.MAX_SAFE_INTEGER</code>
-          </td>
-        </tr>
-        <tr>
-          <td>Full, partial and local bootstrapping</td>
-          <td>
-            <code>
-              bootstrapMode: &quot;auto&quot; | &quot;full&quot; |
-              &quot;local&quot;
-            </code>
+            <code>SyncId</code>, a string so it can grow past 2^53
           </td>
         </tr>
         <tr>
-          <td>Bootstrap streamed as newline-delimited JSON</td>
+          <td>Full, partial or local bootstrap</td>
           <td>
-            NDJSON from <code>/sync/bootstrap</code>, ending in{" "}
-            <code>BootstrapMetadata</code>
+            <code>bootstrapMode</code>: auto, full or local
+          </td>
+        </tr>
+        <tr>
+          <td>Streamed as newline-delimited JSON</td>
+          <td>
+            NDJSON from <code>/sync/bootstrap</code>
           </td>
         </tr>
         <tr>
           <td>
             Only <code>instant</code> models load at bootstrap
           </td>
-          <td>Same. Everything else waits for first access</td>
+          <td>Same. The rest load on first access</td>
         </tr>
       </tbody>
     </table>
@@ -183,30 +170,23 @@ const Page = () => (
           </td>
         </tr>
         <tr>
-          <td>
-            Model updates in memory at once. The transaction exists for sync and
-            undo
-          </td>
-          <td>
-            Optimistic state lands in the identity map. The outbox entry is what
-            reaches the server
-          </td>
+          <td>Updates apply in memory first</td>
+          <td>Same. The outbox entry is what reaches the server</td>
         </tr>
         <tr>
-          <td>Queue states from created to completed-but-unsynced</td>
+          <td>Queue states</td>
           <td>
-            <code>queued -&gt. Sent -&gt. AwaitingSync -&gt. Completed</code>
+            <code>queued -&gt; sent -&gt; awaitingSync -&gt; completed</code>
           </td>
         </tr>
         <tr>
-          <td>Transactions persisted so a restart replays them</td>
-          <td>A durable outbox that survives reload and re-bootstrap</td>
+          <td>Persisted so a restart replays them</td>
+          <td>A durable outbox</td>
         </tr>
         <tr>
-          <td>Idempotency is a caveat</td>
+          <td>Idempotency left to you</td>
           <td>
-            <code>clientId + clientTxId</code> is the key. A retry after a crash
-            cannot apply twice
+            <code>clientId + clientTxId</code>. A retry cannot apply twice
           </td>
         </tr>
       </tbody>

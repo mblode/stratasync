@@ -27,57 +27,48 @@ export const metadata: Metadata = {
 /** Each project's documented default architecture, as of September 2026. */
 const rows = [
   {
-    convex: "Convex's managed database",
-    electric: "Your Postgres + Electric service",
-    feature: "Where your data lives",
-    instant: "Instant's hosted database",
-    powersync: "Your database + PowerSync Service",
-    strata: "Your Postgres, in your Fastify app",
-    zero: "Your Postgres + zero-cache",
+    convex: "Convex's database",
+    electric: "Your Postgres",
+    feature: "Your data",
+    instant: "Instant's database",
+    powersync: "Your database",
+    strata: "Your Postgres, in your app",
+    zero: "Your Postgres",
   },
   {
-    convex: "Convex cloud, self-hosting available",
-    electric: "Self-host or Electric Cloud",
-    feature: "Extra service to run",
-    instant: "Hosted by default",
-    powersync: "Cloud or self-hosted",
-    strata: "None. Optional Redis",
-    zero: "Self-hosted zero-cache",
+    convex: "Convex cloud",
+    electric: "Electric",
+    feature: "Extra service",
+    instant: "Instant cloud",
+    powersync: "PowerSync",
+    strata: "None",
+    zero: "zero-cache",
   },
   {
     convex: "Server functions",
-    electric: "Your own write API",
-    feature: "Write path",
+    electric: "Your own API",
+    feature: "Writes",
     instant: "Built in",
-    powersync: "Your own upload handler",
-    strata: "Built in: durable outbox",
+    powersync: "Your own handler",
+    strata: "Built in",
     zero: "Custom mutators",
   },
   {
-    convex: "Optimistic concurrency, transactional",
-    electric: "Postgres replication stream",
-    feature: "Ordering and conflicts",
+    convex: "Transactional",
+    electric: "Replication stream",
+    feature: "Conflicts",
     instant: "Server-authoritative",
-    powersync: "Replication checkpoints",
-    strata: "Server-sequenced log, field-level rebase",
-    zero: "Server-authoritative, rebased",
-  },
-  {
-    convex: "Bring your own CRDT",
-    electric: "Bring your own CRDT",
-    feature: "Collaborative text",
-    instant: "Bring your own CRDT",
-    powersync: "Bring your own CRDT",
-    strata: "Yjs, built in",
-    zero: "Bring your own CRDT",
+    powersync: "Checkpoints",
+    strata: "Server log, per-field rebase",
+    zero: "Server-authoritative",
   },
   {
     convex: "Bring your own",
     electric: "Bring your own",
-    feature: "Undo and redo",
+    feature: "Text and undo",
     instant: "Bring your own",
     powersync: "Bring your own",
-    strata: "Built in",
+    strata: "Both built in",
     zero: "Bring your own",
   },
 ];
@@ -113,8 +104,8 @@ const Page = () => (
     <h2>Side by side</h2>
     <table className="text-sm">
       <caption className="sr-only">
-        Sync engines compared on data ownership, services to run, write path,
-        conflicts, collaborative text and undo
+        Sync engines compared on data, extra services, writes, conflicts, and
+        text and undo
       </caption>
       <thead>
         <tr>
