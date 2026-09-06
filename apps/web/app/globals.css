@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "./typeset.css";
 @import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 @plugin "@tailwindcss/typography";
 
 @theme inline {
@@ -57,10 +59,54 @@
   --color-code-foreground: var(--code-foreground);
   --color-code-highlight: var(--code-highlight);
   --color-code-number: var(--code-number);
-  --shadow-xs: var(--custom-shadow-xs);
-  --shadow-sm: var(--custom-shadow-sm);
-  --shadow-md: var(--custom-shadow-md);
-  --shadow-lg: var(--custom-shadow-lg);
+  --shadow-xs:
+    0 0 0 1px rgba(51, 51, 51, 0.04), 0 4px 8px -2px rgba(51, 51, 51, 0.06),
+    0 2px 4px rgba(51, 51, 51, 0.04), 0 1px 2px rgba(51, 51, 51, 0.04),
+    inset 0 -1px 1px -0.5px rgba(51, 51, 51, 0.06);
+  --shadow-sm:
+    0 0 0 1px rgba(51, 51, 51, 0.04), 0 16px 8px -8px rgba(51, 51, 51, 0.01),
+    0 12px 6px -6px rgba(51, 51, 51, 0.02),
+    0 5px 5px -2.5px rgba(51, 51, 51, 0.08),
+    0 1px 3px -1.5px rgba(51, 51, 51, 0.16),
+    inset 0 -0.5px 0.5px rgba(51, 51, 51, 0.08);
+  --shadow-md:
+    0 0 0 1px rgba(51, 51, 51, 0.04), 0 1px 1px 0.5px rgba(51, 51, 51, 0.04),
+    0 3px 3px -1.5px rgba(51, 51, 51, 0.02),
+    0 6px 6px -3px rgba(51, 51, 51, 0.04),
+    0 12px 12px -6px rgba(51, 51, 51, 0.04),
+    0 24px 24px -12px rgba(51, 51, 51, 0.04),
+    0 48px 48px -24px rgba(51, 51, 51, 0.04),
+    inset 0 -1px 1px -0.5px rgba(51, 51, 51, 0.06);
+  --shadow-lg:
+    0 0 0 1px rgba(51, 51, 51, 0.04), 0 1px 1px 0.5px rgba(51, 51, 51, 0.04),
+    0 3px 3px -1.5px rgba(51, 51, 51, 0.02),
+    0 6px 6px -3px rgba(51, 51, 51, 0.04),
+    0 12px 12px -6px rgba(51, 51, 51, 0.04),
+    0 24px 24px -12px rgba(51, 51, 51, 0.04),
+    0 48px 48px -24px rgba(51, 51, 51, 0.04),
+    0 96px 96px -32px rgba(51, 51, 51, 0.06),
+    inset 0 -1px 1px -0.5px rgba(51, 51, 51, 0.06);
+  --field-height: 48px;
+  --field-height-sm: 40px;
+  --field-padding-x: 1rem;
+  --field-padding-y: 12px;
+  --field-radius: var(--radius-2xl);
+  --shadow-input: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-popover:
+    0 24px 40px -12px oklch(0.255 0.078 116.06 / 0.08),
+    0 16px 28px -8px oklch(0.255 0.078 116.06 / 0.04),
+    0 4px 6px -2px oklch(0.255 0.078 116.06 / 0.04),
+    0 0 2px 0 oklch(0.255 0.078 116.06 / 0.04),
+    0 0 0 1px oklch(0.255 0.078 116.06 / 0.04);
+  --shadow-soft: 0 15px 50px 0 rgba(27, 32, 50, 0.1);
+  --textarea-min-height: 70px;
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-placeholder-foreground: var(--placeholder-foreground);
+  --color-overlay: var(--overlay);
+  --color-input-hover: var(--input-hover);
 }
 
 :root {
@@ -136,10 +182,10 @@
   --sidebar-accent-foreground: oklch(0.18 0 0);
   --sidebar-border: oklch(0.18 0 0 / 0.16);
   --sidebar-ring: oklch(0.487 0.1 150.2);
-  --surface: oklch(0.96 0 0);
-  --surface-foreground: var(--foreground);
-  --code: var(--surface);
-  --code-foreground: var(--surface-foreground);
+  --surface: oklch(0.98 0 0);
+  --surface-foreground: oklch(0.145 0 0);
+  --code: oklch(0.98 0 0);
+  --code-foreground: oklch(0.145 0 0);
   /* A step off --code, or a highlighted line is invisible against it. */
   --code-highlight: oklch(0.92 0 0);
   --code-number: oklch(0.52 0 0);
@@ -210,6 +256,20 @@
       inset 0 -1px 1px -0.5px rgba(0, 0, 0, 0.3);
     --packet-glow: 0 0 8px 2px oklch(0.55 0.15 130 / 0.5);
   }
+
+  --input-hover: oklch(0.87 0 0);
+
+  --overlay: oklch(0.832 0.015 251.2 / 0.7);
+
+  --placeholder-foreground: oklch(0.556 0 0);
+
+  --success: oklch(0.527 0.154 150.069);
+
+  --success-foreground: oklch(1 0 0);
+
+  --warning: oklch(0.681 0.162 75.834);
+
+  --warning-foreground: oklch(0.286 0.066 53.813);
 }
 
 @layer base {
@@ -246,4 +306,34 @@
   --typeset-size: 1rem;
   --typeset-leading: 1.75;
   --typeset-flow: 1.25em;
+}
+
+.dark {
+  --code: oklch(0.2 0 0);
+  --code-foreground: oklch(0.708 0 0);
+  --input-hover: oklch(1 0 0 / 25%);
+  --overlay: oklch(0.326 0.03 258.3 / 0.7);
+  --placeholder-foreground: oklch(0.708 0 0);
+  --success: oklch(0.723 0.219 149.579);
+  --success-foreground: oklch(0.266 0.065 152.934);
+  --surface: oklch(0.2 0 0);
+  --surface-foreground: oklch(0.708 0 0);
+  --warning: oklch(0.795 0.184 86.047);
+  --warning-foreground: oklch(0.286 0.066 53.813);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@utility tabular-figures {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
