@@ -82,6 +82,48 @@ export const guides: Guide[] = [
   },
   {
     answer:
+      "Strata Sync is an open-source TypeScript implementation of the sync engine behind Linear. Linear's engineers described the architecture publicly but never released the code. This page maps each part of that design, models, bootstrap, partial indexes, the transaction queue, delta packets, sync groups and undo, onto the module here that implements it.",
+    description:
+      "How Strata Sync implements Linear's sync engine architecture in TypeScript, mapped chapter by chapter onto the modules that implement it, and what it adds on top.",
+    faq: [
+      {
+        answer:
+          "No. It is a clean-room implementation of the architecture Linear's engineers described in public talks and posts, written against those descriptions and the community reverse-engineering notes. It contains no Linear code, and Linear is not affiliated with or endorsing the project.",
+        question: "Is Strata Sync Linear's actual code?",
+      },
+      {
+        answer:
+          "One server assigns every change a monotonically increasing number, and every client replays changes in that order. There is no merge function for records because the server already decided. Partial replication and per-row permissions fall out of the same mechanism, since a client only receives the sync groups it subscribes to.",
+        question: "What is a server-sequenced log?",
+      },
+      {
+        answer:
+          "It stores the last sync id it saw, asks the server for everything after that integer, applies those deltas, then rebases its own queued writes on top and drains them in order. The catch-up cost is proportional to what changed while it was away, not to the size of the dataset.",
+        question: "How does a client catch up after a week offline?",
+      },
+      {
+        answer:
+          "Records use the server-ordered log, and conflicts resolve per field, so two people editing different fields of one row never collide. Text is the exception. Two people typing in one paragraph is the case a single ordering handles badly, so rich text fields use Yjs CRDT documents instead.",
+        question: "Why not use CRDTs for everything?",
+      },
+      {
+        answer:
+          "Three things Linear's published design does not cover. Collaborative text through Yjs documents and presence. Swappable storage, transport and reactivity adapters behind one interface each, so the core runs in Node with no browser. And a server you own: Fastify routes and a Postgres log through Drizzle, with no hosted dependency.",
+        question: "What does Strata Sync add beyond Linear's design?",
+      },
+    ],
+    keywords: [
+      "linear sync engine",
+      "linear sync engine github",
+      "linear sync engine example",
+      "open source sync engine",
+    ],
+    slug: "linear-sync-engine",
+    title: "Linear's sync engine, open-sourced",
+    updated: "2026-09-07",
+  },
+  {
+    answer:
       "Supabase Realtime broadcasts database changes to connected clients. It does not keep a local replica, queue writes made offline, or reconcile conflicting edits, so it is a live feed rather than a sync engine. Strata Sync adds those three things on top of the Postgres that Supabase already gives you.",
     description:
       "Supabase Realtime streams changes to connected clients but keeps no local replica and no offline write queue. How to add a sync engine to a Supabase Postgres, and what it costs you.",

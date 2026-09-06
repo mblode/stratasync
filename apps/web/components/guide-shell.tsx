@@ -1,5 +1,6 @@
 import type React from "react";
 
+import { H1, Lead } from "@/components/ui/typography";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
   breadcrumbSchema,
@@ -91,18 +92,16 @@ export const GuideShell = ({ children, guide }: Props) => {
         />
 
         <article className="mx-auto mt-8 max-w-3xl">
-          <h1 className="text-balance font-sans text-4xl font-medium tracking-tight md:text-5xl">
-            {guide.title}
-          </h1>
+          <H1>{guide.title}</H1>
 
           {/*
             The answer sits directly under the H1 as plain text, self-contained
             enough to quote without the rest of the page. That is what an
             answer engine lifts, and what a reader who bounces still gets.
           */}
-          <p className="mt-6 text-lg text-muted-foreground">{guide.answer}</p>
+          <Lead className="mt-6">{guide.answer}</Lead>
 
-          <div className="mt-10 space-y-6 text-base leading-relaxed [&_a]:underline [&_a]:underline-offset-4 [&_h2]:mt-12 [&_h2]:font-sans [&_h2]:text-2xl [&_h2]:font-medium [&_h2]:tracking-tight [&_h3]:mt-8 [&_h3]:font-sans [&_h3]:text-lg [&_h3]:font-medium [&_li]:ml-5 [&_li]:list-disc [&_ul]:space-y-2">
+          <div className="mt-10 [&_a]:underline [&_a]:underline-offset-4">
             {children}
           </div>
 
@@ -124,9 +123,7 @@ export const GuideShell = ({ children, guide }: Props) => {
             <h2 className="font-sans text-lg font-medium">Keep reading</h2>
             <ul className="mt-4 space-y-2 text-sm">
               <li>
-                <a
-                  href={`${siteConfig.links.docs}/architecture/linear-sync-engine`}
-                >
+                <a href={`${siteConfig.url}/guides/linear-sync-engine`}>
                   Linear&#8217;s sync engine, open-sourced
                 </a>
               </li>
