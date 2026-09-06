@@ -44,8 +44,31 @@ export class GraphQLTransportAdapter implements TransportAdapter {
   constructor(options: TransportOptions) {
     this.options = options;
     this.retryConfig = options.retry ?? DEFAULT_RETRY_CONFIG;
+    /*
+     * Validate at the boundary rather than at first use. These used to surface
+     * as a failed fetch to `undefined/sync/bootstrap` or an immediate
+     * WebSocket error, minutes into a session and nowhere near the config that
+     * caused them.
+     */
     if (!options.syncEndpoint) {
-      throw new Error("syncEndpoint is required");
+      throw new Error(
+        'createGraphQLTransport: `syncEndpoint` is required. Pass the base REST sync URL, e.g. syncEndpoint: "/api/sync".'
+      );
+    }
+    if (!options.wsEndpoint) {
+      throw new Error(
+        'createGraphQLTransport: `wsEndpoint` is required. Pass the WebSocket URL deltas stream over, e.g. wsEndpoint: "wss://api.example.com/sync/ws".'
+      );
+    }
+    if (!options.auth) {
+      throw new Error(
+        "createGraphQLTransport: `auth` is required. Pass an auth provider, e.g. auth: { getAccessToken: async () => token }."
+      );
+    }
+    if (options.mutationBuilder && !options.endpoint) {
+      throw new Error(
+        "createGraphQLTransport: `endpoint` is required when `mutationBuilder` is set, because mutations are sent as GraphQL. Pass the GraphQL URL, or drop `mutationBuilder` to post mutations to `<syncEndpoint>/mutate` over REST."
+      );
     }
     this.syncEndpoint = options.syncEndpoint;
     this.wsManager = new WebSocketManager(
@@ -104,11 +127,20 @@ export class GraphQLTransportAdapter implements TransportAdapter {
       });
     }
 
-    // Otherwise use GraphQL
+    // Otherwise use GraphQL. The constructor rejects a `mutationBuilder`
+    // without an `endpoint`, so this narrowing never actually throws; it is
+    // here so the optional type stays honest rather than being asserted away.
+    const { endpoint } = this.options;
+    if (!endpoint) {
+      throw new Error(
+        "createGraphQLTransport: `endpoint` is required when `mutationBuilder` is set."
+      );
+    }
+
     return sendMutations({
       auth: this.options.auth,
       batch,
-      endpoint: this.options.endpoint,
+      endpoint,
       headers: this.options.headers,
       mutationBuilder: this.options.mutationBuilder,
       retryConfig: this.retryConfig,

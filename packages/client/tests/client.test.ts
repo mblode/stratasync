@@ -955,3 +955,53 @@ describe("createSyncClient model factories", () => {
     }
   });
 });
+
+describe("createSyncClient config validation", () => {
+  const storage = () =>
+    new DelayedOpenStorage(new ModelRegistry(schema).getSchemaHash(), []);
+
+  it("defaults reactivity to the no-op adapter", () => {
+    // `reactivity` used to be required even though core exports a no-op, so
+    // every non-reactive host had to pass one to say "no reactivity".
+    expect(() =>
+      createSyncClient({
+        schema,
+        storage: storage(),
+        transport: new NoopTransport(),
+      })
+    ).not.toThrow();
+  });
+
+  it("still accepts an explicit reactivity adapter", () => {
+    expect(() =>
+      createSyncClient({
+        reactivity: noopReactivityAdapter,
+        schema,
+        storage: storage(),
+        transport: new NoopTransport(),
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects a missing storage adapter at the boundary, naming the fix", () => {
+    expect(() =>
+      createSyncClient({
+        schema,
+        transport: new NoopTransport(),
+      } as unknown as Parameters<typeof createSyncClient>[0])
+    ).toThrow(
+      /createSyncClient: `storage` is required\. Pass a storage adapter/
+    );
+  });
+
+  it("rejects a missing transport adapter at the boundary, naming the fix", () => {
+    expect(() =>
+      createSyncClient({
+        schema,
+        storage: storage(),
+      } as unknown as Parameters<typeof createSyncClient>[0])
+    ).toThrow(
+      /createSyncClient: `transport` is required\. Pass a transport adapter/
+    );
+  });
+});

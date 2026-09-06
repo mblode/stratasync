@@ -1,20 +1,21 @@
 import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/lib/config";
+import { docsPages } from "@/lib/docs-nav";
 
+/*
+ * `priority` and `changeFrequency` are ignored by Google, so they are not
+ * emitted. `lastModified` is only set where a real revision date exists:
+ * `new Date()` marked every URL as changed on every deploy, which is how a
+ * site teaches Google to ignore its `lastmod` altogether. Docs pages carry no
+ * revision date yet, and no date beats a false one.
+ */
 const sitemap = (): MetadataRoute.Sitemap => [
   {
-    changeFrequency: "weekly",
-    lastModified: new Date(),
-    priority: 1,
+    lastModified: new Date(siteConfig.updatedAt),
     url: siteConfig.url,
   },
-  {
-    changeFrequency: "weekly",
-    lastModified: new Date(),
-    priority: 0.8,
-    url: `${siteConfig.url}/docs`,
-  },
+  ...docsPages.map((page) => ({ url: page.url })),
 ];
 
 export default sitemap;

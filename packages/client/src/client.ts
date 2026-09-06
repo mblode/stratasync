@@ -13,6 +13,7 @@ import {
   deserializeModelRecord,
   generateUUID,
   getOrCreateClientId,
+  noopReactivityAdapter,
   readArchivedAt,
   serializeModelRecord,
 } from "@stratasync/core";
@@ -58,10 +59,30 @@ const MUTATION_PRIVACY_RECONCILE_ERROR =
  * history replay delegate to it lazily, so no self-reference is needed.
  */
 export const createSyncClient = (options: SyncClientOptions): SyncClient => {
-  const resolvedOptions: SyncClientOptions = { ...options };
+  /*
+   * Validate at the boundary. A missing adapter used to surface much later and
+   * far from its cause: no storage failed on the first hydrate, and no
+   * transport failed on the first bootstrap, both as errors that named an
+   * internal call rather than the option that was never passed.
+   */
+  if (!options.storage) {
+    throw new Error(
+      "createSyncClient: `storage` is required. Pass a storage adapter, e.g. storage: createIndexedDbStorage()."
+    );
+  }
+  if (!options.transport) {
+    throw new Error(
+      "createSyncClient: `transport` is required. Pass a transport adapter, e.g. transport: createGraphQLTransport({ syncEndpoint, wsEndpoint, auth })."
+    );
+  }
+
+  // Kept as its own binding: reading it back off `resolvedOptions` widens it to
+  // `ReactivityAdapter | undefined` again, since the option is optional.
+  const reactivity = options.reactivity ?? noopReactivityAdapter;
+  const resolvedOptions: SyncClientOptions = { ...options, reactivity };
 
   const identityMaps = new IdentityMapRegistry(
-    resolvedOptions.reactivity,
+    reactivity,
     undefined,
     resolvedOptions.identityMapMaxSize,
     // Emit an "update" (not "delete") when the LRU cache evicts an entry: hooks

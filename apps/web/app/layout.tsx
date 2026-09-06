@@ -1,10 +1,9 @@
-import { GoogleAnalytics } from "@next/third-parties/google";
 import { Agentation } from "agentation";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type React from "react";
 
-import { siteConfig, zoneRootJsonLd } from "@/lib/config";
+import { jsonLdScript, siteConfig, zoneRootJsonLd } from "@/lib/config";
 
 import "./globals.css";
 
@@ -99,14 +98,13 @@ const RootLayout = ({
       {/* oxlint-disable react/no-danger -- JSON-LD structured data requires dangerouslySetInnerHTML */}
       <script
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(zoneRootJsonLd),
+          __html: jsonLdScript(zoneRootJsonLd),
         }}
         type="application/ld+json"
       />
       {/* oxlint-enable react/no-danger */}
       {children}
       {process.env.NODE_ENV === "development" && <Agentation />}
-      <GoogleAnalytics gaId="G-5EQKSBTWY6" />
     </body>
   </html>
 );

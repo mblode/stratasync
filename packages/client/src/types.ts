@@ -286,8 +286,13 @@ export interface SyncClientOptions {
   storage: StorageAdapter;
   /** Transport adapter (e.g., GraphQL) */
   transport: TransportAdapter;
-  /** Reactivity adapter (e.g., MobX) */
-  reactivity: ReactivityAdapter;
+  /**
+   * Reactivity adapter (e.g. MobX). Defaults to core's `noopReactivityAdapter`,
+   * which reads and writes without notifying observers: correct for a
+   * non-reactive host, and the right default because passing the no-op
+   * explicitly was previously mandatory boilerplate.
+   */
+  reactivity?: ReactivityAdapter;
   /** Schema definition or registry snapshot */
   schema?: SchemaDefinition | ModelRegistrySnapshot;
   /** Optional model factory (or factory builder) */
