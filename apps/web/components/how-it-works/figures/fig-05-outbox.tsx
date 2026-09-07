@@ -282,12 +282,10 @@ export const Fig05Outbox = () => {
     <Figure
       caption={
         <>
-          Press the checkbox and watch two things move: the tick, immediately,
-          and the transaction, through <code>queued</code> and <code>sent</code>{" "}
-          to <code>awaitingSync</code>. The server has already answered by then.
-          What the transaction is still waiting for is this device’s own cursor
-          to pass the <code>syncIdNeededForCompletion</code> the server handed
-          back, which is what Deliver delta does.
+          Press the checkbox. The tick moves at once. The queued write takes
+          longer, and it does not finish when the server answers. It finishes
+          when this device reaches the number the server gave it back, which is
+          what Deliver delta does. Watch the cursor, not the reply.
         </>
       }
       controls={
