@@ -80,3 +80,13 @@ export const offlineScenario: Scenario = {
   latencyMs: 600,
   seed: oneTask,
 };
+
+/**
+ * Section 8 — a device that has never connected. Two rows, so a bootstrap
+ * visibly carries more than the single change that follows it.
+ */
+export const catchUpScenario: Scenario = {
+  id: "fig-08-catch-up",
+  latencyMs: 0,
+  seed: twoTasks,
+};

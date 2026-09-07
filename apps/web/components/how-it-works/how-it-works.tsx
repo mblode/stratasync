@@ -1,3 +1,5 @@
+import { siteConfig } from "@/lib/config";
+
 import { EngineProvider } from "./engine";
 import { Fig01RoundTrip } from "./figures/fig-01-round-trip";
 import { Fig02LocalReplica } from "./figures/fig-02-local-replica";
@@ -6,6 +8,10 @@ import { Fig04Log } from "./figures/fig-04-log";
 import { Fig05Outbox } from "./figures/fig-05-outbox";
 import { Fig06Offline } from "./figures/fig-06-offline";
 import { Fig07Rebase } from "./figures/fig-07-rebase";
+import { Fig08CatchUp } from "./figures/fig-08-catch-up";
+import { Fig09Text } from "./figures/fig-09-text";
+
+const { docs } = siteConfig.links;
 
 /**
  * The article.
@@ -134,6 +140,65 @@ export const HowItWorks = () => (
       collision, yours is discarded, and your field goes back to where it
       started, because the server never touched it. Off costs you the edit and
       buys you nothing.
+    </p>
+
+    <h2>8. Cold start and catching up</h2>
+    <p>
+      All of that assumes a device that already has the rows. A phone signing in
+      for the first time has nothing, and no number. It cannot ask what came
+      after, because for it there is no after yet.
+    </p>
+
+    <Fig08CatchUp />
+
+    <p>
+      So the first answer is unlike every answer after it. The server sends the
+      rows as they stand and the number they stand at, and the log is never
+      replayed. From then on the phone is on the same footing as every other
+      device. A device that falls behind further than the server still keeps is
+      told to start over the same way.
+    </p>
+
+    <h2>9. Where ordering isn’t enough</h2>
+    <p>
+      Numbering settles a checkbox. It settles a sentence two people are typing
+      into badly. Order those two writes and one of them wins whole, so the
+      other person’s words are gone even though the two of you were nowhere near
+      each other.
+    </p>
+
+    <Fig09Text />
+
+    <p>
+      So that text never goes in the log. It goes in a Yjs document, where an
+      edit is not “the title is now this” but “put these characters after that
+      character”. Two of those compose without a referee. Strata Sync runs both:
+      the log for rows, and a Yjs document for any field that needs one, keyed
+      by the model, the row and the field name.
+    </p>
+
+    <h2>10. The whole loop</h2>
+    <p>
+      Reads are instant because the data is local. Two local copies drift, so
+      the server numbers every change. Writes apply at once and wait in a queue
+      instead of holding the screen. The queue is on disk, so offline is not a
+      special case, and every entry carries an id the device made up, so a retry
+      is not a second write. Coming back means applying what you missed, then
+      re-authoring your own changes on top, field by field. A new device pays
+      once for everything and after that only for what changed. And the one case
+      ordering handles badly is handled by something else.
+    </p>
+    <p>
+      Two things this page left out. A sync group is the permission boundary: it
+      decides which rows a device is entitled to, so a phone syncs your
+      workspace and not the company’s. A load strategy decides which of those
+      arrive at sign-in and which wait until something asks for them. Both are
+      in the docs, along with the{" "}
+      <a href={`${docs}/architecture/sync-protocol`}>protocol itself</a>, the{" "}
+      <a href={`${docs}/guides/conflict-resolution`}>rebase settings</a>, the{" "}
+      <a href={`${docs}/guides/load-strategies`}>load strategies</a> and{" "}
+      <a href={`${docs}/guides/collaborative-editing`}>collaborative editing</a>
+      .
     </p>
   </EngineProvider>
 );

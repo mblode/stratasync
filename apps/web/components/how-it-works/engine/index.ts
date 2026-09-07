@@ -15,6 +15,7 @@ export {
 } from "./rebase-preview";
 export type { Scenario, Task } from "./scenarios";
 export {
+  catchUpScenario,
   divergeScenario,
   howItWorksSchema,
   logScenario,
@@ -26,6 +27,7 @@ export type { Telemetry } from "./use-client-telemetry";
 export { useClientTelemetry } from "./use-client-telemetry";
 export type { EngineCheckout } from "./use-engine-scenario";
 export { useEngineScenario } from "./use-engine-scenario";
+export { until } from "./until";
 export { useOutbox } from "./use-outbox";
 export { useServerLog } from "./use-server-log";
 export { useWire } from "./use-wire";
