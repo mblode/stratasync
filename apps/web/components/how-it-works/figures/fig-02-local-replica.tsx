@@ -108,12 +108,16 @@ export const Fig02LocalReplica = () => {
         <WireLane packets={packetsFor(step)} />
 
         <ServerBox status={step >= 2 ? "1 change" : "0 changes"}>
-          <FieldCell
-            name="done"
-            note={step >= 2 ? "stored" : undefined}
-            tone={step >= 2 ? "synced" : "neutral"}
-            value={step >= 2 ? "true" : "false"}
-          />
+          {/* Bottom-aligned, so the two `done` cells sit on one line and the
+              comparison the figure exists to make is read across, not hunted. */}
+          <div className="flex h-full flex-col justify-end">
+            <FieldCell
+              name="done"
+              note={step >= 2 ? "stored" : undefined}
+              tone={step >= 2 ? "synced" : "neutral"}
+              value={step >= 2 ? "true" : "false"}
+            />
+          </div>
         </ServerBox>
       </div>
     </Figure>

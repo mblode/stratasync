@@ -345,7 +345,6 @@ export const Fig06Offline = () => {
           </Button>
         </>
       }
-      stageClassName="min-h-64"
       state={state}
       status={status}
       title="A queue that survives the app"

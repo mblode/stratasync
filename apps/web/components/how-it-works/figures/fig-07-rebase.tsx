@@ -148,7 +148,6 @@ export const Fig07Rebase = () => {
           />
         </>
       }
-      stageClassName="min-h-64"
       state={state}
       status={status}
       title="Re-authoring your change on what you missed"

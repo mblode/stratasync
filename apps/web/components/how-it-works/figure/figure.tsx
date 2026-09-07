@@ -2,8 +2,6 @@
 
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
-
 import { FigurePlayback } from "./figure-controls";
 import { FigureStatus } from "./figure-status";
 import type { FigureState } from "./use-figure-state";
@@ -15,8 +13,7 @@ interface Props {
   children: ReactNode;
   /** Controls specific to this figure. Playback is added for you. */
   controls?: ReactNode;
-  /** Fixed height, so nothing reflows as the state changes. */
-  stageClassName?: string;
+  /** Steps, autoplay and the in-view ref. */
   state: FigureState;
   /** The one spoken line. Rewritten on step boundaries only. */
   status: string;
@@ -44,7 +41,6 @@ export const Figure = ({
   caption,
   children,
   controls,
-  stageClassName,
   state,
   status,
   title,
@@ -55,7 +51,7 @@ export const Figure = ({
     className="@container/figure my-12"
     data-not-typeset
   >
-    <div className={cn(stageClassName)}>{children}</div>
+    {children}
 
     <div className="mt-5 flex flex-col gap-3">
       {controls ? (
@@ -64,7 +60,9 @@ export const Figure = ({
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2">
+      {/* Two lines are reserved until the container is wide enough that no
+          status string wraps, so stepping never shifts the prose below. */}
+      <div className="flex min-h-12 items-center gap-2 @2xl/figure:min-h-0">
         <FigurePlayback state={state} />
         <FigureStatus text={status} />
       </div>

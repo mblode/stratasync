@@ -291,7 +291,6 @@ export const Fig05Outbox = () => {
           Deliver delta
         </Button>
       }
-      stageClassName="min-h-56"
       state={state}
       status={status}
       title="A write that doesn’t block the screen"

@@ -2,6 +2,8 @@
 
 import * as Y from "yjs";
 
+import { cn } from "@/lib/utils";
+
 import { Figure, useFigureState } from "../figure";
 import { Device } from "../parts";
 
@@ -152,7 +154,6 @@ export const Fig09Text = () => {
   return (
     <Figure
       caption="Watch two people type into the same sentence at once."
-      stageClassName="min-h-36"
       state={state}
       status={status}
       title="Two edits inside one sentence"
@@ -167,12 +168,17 @@ export const Fig09Text = () => {
           </Device>
         </div>
 
-        {step >= 2 ? (
-          <div className="grid gap-4 @md/figure:grid-cols-2">
-            <Merged label="Last write wins" lost />
-            <Merged label="Yjs" />
-          </div>
-        ) : null}
+        {/* Always in the DOM, so the reveal costs no reflow and the space it
+            needs is the space it already occupies, at any width. */}
+        <div
+          className={cn(
+            "grid gap-4 @md/figure:grid-cols-2",
+            step < 2 && "invisible"
+          )}
+        >
+          <Merged label="Last write wins" lost />
+          <Merged label="Yjs" />
+        </div>
       </div>
     </Figure>
   );
