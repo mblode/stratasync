@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { GuideShell } from "@/components/guide-shell";
-import { siteConfig } from "@/lib/config";
+import { howItWorks, siteConfig } from "@/lib/config";
 import { getGuide, guideUrl } from "@/lib/guides";
 
 const guide = getGuide("what-is-a-sync-engine");
@@ -88,6 +88,11 @@ const Page = () => (
     </p>
 
     <h2>Next</h2>
+    <p>
+      To see the mechanism rather than read about it,{" "}
+      <a href={howItWorks.url}>how a sync engine works</a> builds one from a
+      single checkbox across ten figures you operate yourself.
+    </p>
     <p>
       If the server-ordered approach sounds right, read{" "}
       <a href={`${siteConfig.links.docs}/architecture/sync-protocol`}>

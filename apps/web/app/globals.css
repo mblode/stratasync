@@ -40,6 +40,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-figure-accent: var(--figure-accent);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -145,6 +146,13 @@
     0 96px 96px -32px rgba(51, 51, 51, 0.06),
     inset 0 -1px 1px -0.5px rgba(51, 51, 51, 0.06);
   --packet-glow: 0 0 6px 1px oklch(0.45 0.12 130 / 0.4);
+  /* Brand green, legible as *text* on either ground. --primary is #2e6f40 in
+     both schemes and too dark to read on --card in dark mode; this is the same
+     lift already applied to --ring below. Chrome and bars keep --primary;
+     green text uses this. Defined in all three blocks (:root, the
+     prefers-color-scheme override, and .dark) so it cannot drift the way
+     --widget-shadow did. */
+  --figure-accent: var(--primary);
   --primary-color: #3b82f6;
   --danger-color: #ef4444;
   --radius: 0.625rem;
@@ -255,6 +263,7 @@
       0 96px 96px -32px rgba(0, 0, 0, 0.2),
       inset 0 -1px 1px -0.5px rgba(0, 0, 0, 0.3);
     --packet-glow: 0 0 8px 2px oklch(0.55 0.15 130 / 0.5);
+    --figure-accent: oklch(0.68 0.13 150.2);
   }
 
   --input-hover: oklch(0.87 0 0);
@@ -311,6 +320,7 @@
 .dark {
   --code: oklch(0.2 0 0);
   --code-foreground: oklch(0.708 0 0);
+  --figure-accent: oklch(0.68 0.13 150.2);
   --input-hover: oklch(1 0 0 / 25%);
   --overlay: oklch(0.326 0.03 258.3 / 0.7);
   --placeholder-foreground: oklch(0.708 0 0);

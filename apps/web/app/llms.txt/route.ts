@@ -1,4 +1,4 @@
-import { siteConfig } from "@/lib/config";
+import { howItWorks, siteConfig } from "@/lib/config";
 import { docsGroups } from "@/lib/docs-nav";
 import { guides, guideUrl } from "@/lib/guides";
 
@@ -49,6 +49,7 @@ ${siteConfig.disambiguation}
 ## Links
 
 - Website: ${siteConfig.url}
+- How it works: ${howItWorks.url} — ${howItWorks.description}
 - Documentation: ${siteConfig.links.docs}
 - Full documentation text: ${siteConfig.links.docs}/llms-full.txt
 - Source: ${siteConfig.links.github}
