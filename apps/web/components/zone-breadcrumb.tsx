@@ -47,7 +47,7 @@ export const ZoneBreadcrumb = ({ product, productHref, trail = [] }: Props) => {
   const last = trail.at(-1);
 
   return (
-    <Breadcrumb aria-label="Breadcrumb">
+    <Breadcrumb>
       <BreadcrumbList>
         {deeper ? null : (
           <>
