@@ -64,9 +64,9 @@ export const siteConfig = {
 export const howItWorks = {
   /** The passage under the H1, quotable without the page. */
   answer:
-    "A sync engine keeps the data on the device and reconciles it with a server that numbers every change. This page builds one from a single checkbox: local reads, an ordered log, an offline write queue, a rebase step for what you missed, and a CRDT for text.",
+    "A sync engine keeps the data on the device and reconciles it with a server that numbers every change. This page builds one from a single checkbox: local reads, an ordered log, an offline write queue, and a rebase step for what you missed.",
   description:
-    "A sync engine built up from nothing: local reads, a server-numbered log, an offline outbox, field-level rebase, and Yjs for text. Ten figures, one idea each.",
+    "A sync engine built up from nothing: local reads, a server-numbered log, an offline outbox, and field-level rebase. One idea per figure, each one live.",
   /** Primary query first. Nothing in `/guides` currently targets it. */
   keywords: [
     "how does a sync engine work",

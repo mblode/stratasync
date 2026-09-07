@@ -91,7 +91,7 @@ const Page = () => (
     <p>
       To see the mechanism rather than read about it,{" "}
       <a href={howItWorks.url}>how a sync engine works</a> builds one from a
-      single checkbox across ten figures you operate yourself.
+      single checkbox, in figures you operate yourself.
     </p>
     <p>
       If the server-ordered approach sounds right, read{" "}
