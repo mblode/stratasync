@@ -55,6 +55,31 @@ export const siteConfig = {
   url: "https://blode.co/stratasync",
 } as const;
 
+/**
+ * The `/how-it-works` explainer. Top-level rather than a guide: it argues one
+ * mechanism across ten figures instead of answering a question, so it carries
+ * its own shell. The page, the sitemap, `llms.txt` and the nav all read this,
+ * so the page reaches every surface by being described here once.
+ */
+export const howItWorks = {
+  /** The passage under the H1, quotable without the page. */
+  answer:
+    "A sync engine keeps the data on the device and reconciles it with a server that numbers every change. This page builds one from a single checkbox: local reads, an ordered log, an offline write queue, a rebase step for what you missed, and a CRDT for text.",
+  description:
+    "A sync engine built up from nothing: local reads, a server-numbered log, an offline outbox, field-level rebase, and Yjs for text. Ten figures, one idea each.",
+  /** Primary query first. Nothing in `/guides` currently targets it. */
+  keywords: [
+    "how does a sync engine work",
+    "sync engine explained",
+    "optimistic updates offline queue",
+    "server sequenced sync log",
+  ],
+  title: "How a sync engine works, built from one checkbox",
+  /** Content revision date. Bump when the prose changes, not on deploy. */
+  updated: "2026-09-07",
+  url: `${siteConfig.url}/how-it-works`,
+} as const;
+
 /** Numbers the copy leans on. Keep them true or delete the claim. */
 export const proofPoints = {
   hostedDependencies: 0,

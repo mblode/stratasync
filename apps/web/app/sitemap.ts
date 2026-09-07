@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { siteConfig } from "@/lib/config";
+import { howItWorks, siteConfig } from "@/lib/config";
 import { docsPages } from "@/lib/docs-nav";
 import { guides, guideUrl } from "@/lib/guides";
 
@@ -15,6 +15,10 @@ const sitemap = (): MetadataRoute.Sitemap => [
   {
     lastModified: new Date(siteConfig.updatedAt),
     url: siteConfig.url,
+  },
+  {
+    lastModified: new Date(howItWorks.updated),
+    url: howItWorks.url,
   },
   {
     lastModified: new Date(siteConfig.updatedAt),

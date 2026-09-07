@@ -1,9 +1,9 @@
 "use client";
 
-import { motion, useInView, useReducedMotion } from "motion/react";
+import { motion, useInView } from "motion/react";
 import { useRef } from "react";
 
-const EASE_ENTER = [0.22, 1, 0.36, 1] as const;
+import { EASE_ENTER, useMotionTiming } from "@/lib/motion";
 
 const BrokenAppMock = () => (
   <div
@@ -114,10 +114,7 @@ const BrokenAppMock = () => (
 export const LandingGap = () => {
   const sectionRef = useRef<HTMLElement>(null);
   const isInView = useInView(sectionRef, { amount: 0.15, once: true });
-  const reducedMotion = useReducedMotion();
-
-  const dur = (ms: number) => (reducedMotion ? 0 : ms / 1000);
-  const del = (ms: number) => (reducedMotion ? 0 : ms / 1000);
+  const { del, dur } = useMotionTiming();
 
   return (
     <section ref={sectionRef} className="py-24 md:py-32">

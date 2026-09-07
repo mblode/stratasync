@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
-import { siteConfig } from "@/lib/config";
+import { howItWorks, siteConfig } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 export const SiteHeader = ({ className }: { className?: string }) => (
@@ -16,6 +16,12 @@ export const SiteHeader = ({ className }: { className?: string }) => (
           <span>Strata Sync</span>
         </Link>
         <nav className="flex items-center gap-6">
+          <a
+            className="underline-offset-2 hover:underline"
+            href={howItWorks.url}
+          >
+            How it works
+          </a>
           <a
             className="underline-offset-2 hover:underline"
             href={siteConfig.links.docs}

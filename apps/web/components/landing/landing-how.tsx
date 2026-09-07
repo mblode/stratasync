@@ -1,10 +1,11 @@
 "use client";
 
 import { ArrowMergeRightIcon, BoltIcon, OfflineIcon } from "blode-icons-react";
-import { motion, useInView, useReducedMotion } from "motion/react";
+import { motion, useInView } from "motion/react";
 import { useRef } from "react";
 
-const EASE_ENTER = [0.22, 1, 0.36, 1] as const;
+import { howItWorks } from "@/lib/config";
+import { EASE_ENTER, useMotionTiming } from "@/lib/motion";
 
 const howPillars = [
   {
@@ -27,10 +28,7 @@ const howPillars = [
 export const LandingHow = () => {
   const sectionRef = useRef<HTMLElement>(null);
   const isInView = useInView(sectionRef, { amount: 0.15, once: true });
-  const reducedMotion = useReducedMotion();
-
-  const dur = (ms: number) => (reducedMotion ? 0 : ms / 1000);
-  const del = (ms: number) => (reducedMotion ? 0 : ms / 1000);
+  const { del, dur } = useMotionTiming();
 
   return (
     <section ref={sectionRef} className="py-24 md:py-32">
@@ -74,6 +72,26 @@ export const LandingHow = () => {
               </motion.div>
             ))}
           </div>
+
+          {/*
+            These three cards state the claims; `/how-it-works` is where a
+            reader can operate the mechanism behind them.
+          */}
+          <motion.p
+            className="text-center text-sm text-muted-foreground"
+            initial={{ opacity: 0 }}
+            animate={isInView ? { opacity: 1 } : { opacity: 0 }}
+            transition={{
+              delay: del(300),
+              duration: dur(500),
+              ease: EASE_ENTER,
+            }}
+          >
+            <a className="underline underline-offset-4" href={howItWorks.url}>
+              See how it works
+            </a>{" "}
+            — ten figures, built up one idea at a time.
+          </motion.p>
         </div>
       </div>
     </section>
