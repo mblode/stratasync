@@ -7,11 +7,14 @@
  * Constraints still apply:
  * 1. Absolute `https://blode.co` hrefs (preview deploys + basePath).
  * 2. Plain `<a>` via `BreadcrumbLink`, never `next/link`.
- * 3. Visible trail matches `BreadcrumbList`: Matthew Blode → Projects → product.
+ * 3. The visible trail matches `BreadcrumbList` item for item.
  *
- * Pass `trail` for pages below the zone root. The product then becomes a link
- * and the last trail entry is the current page, so the rendered trail still
- * matches `breadcrumbSchema(trail)` item for item.
+ * Without `trail` this is the zone root, and it shows the hub trail back to
+ * blode.co: Matthew Blode -> Projects -> product. With `trail` it is a page
+ * below the root, and the hub crumbs give way to a site-local trail — product
+ * (now a link) -> ... -> current page. Four crumbs, two of them leaving the
+ * site, is more chrome than orientation on a page that is one hop from home.
+ * `breadcrumbSchema` in `lib/config.ts` splits the same way.
  */
 
 import { Fragment } from "react";
@@ -46,16 +49,20 @@ export const ZoneBreadcrumb = ({ product, productHref, trail = [] }: Props) => {
   return (
     <Breadcrumb aria-label="Breadcrumb">
       <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink href={HOME} rel="author">
-            Matthew Blode
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbLink href={PROJECTS}>Projects</BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
+        {deeper ? null : (
+          <>
+            <BreadcrumbItem>
+              <BreadcrumbLink href={HOME} rel="author">
+                Matthew Blode
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink href={PROJECTS}>Projects</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+          </>
+        )}
         <BreadcrumbItem>
           {deeper && productHref ? (
             <BreadcrumbLink href={productHref}>{product}</BreadcrumbLink>
