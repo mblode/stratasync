@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { GetStarted } from "@/components/get-started";
 import { HowItWorks } from "@/components/how-it-works/how-it-works";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
@@ -63,7 +64,7 @@ const Page = () => (
     />
     {/* oxlint-enable react/no-danger */}
 
-    <div className="container-wrapper py-8 md:py-12">
+    <div className="container-wrapper pt-4 pb-8 md:pt-6 md:pb-12">
       {/*
         Not `GuideShell`: that hardcodes a `Guides` crumb and a
         `/guides/<slug>` URL, and the visible trail has to match the
@@ -87,6 +88,8 @@ const Page = () => (
         <div className="mt-10 [&_a]:underline [&_a]:underline-offset-4">
           <HowItWorks />
         </div>
+
+        <GetStarted />
       </article>
     </div>
   </>

@@ -7,49 +7,40 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * Step state for one figure.
  *
- * The governing rule of the page is that step controls are the interface and
- * animation is a tween between two states the reader could have reached by
- * pressing a button. So the step index is the whole model: every figure
- * derives its stage from `step`, and nothing is encoded in motion alone.
+ * The figure runs itself. It starts when it scrolls into view, holds a beat on
+ * each stage, and loops, so a reader who does nothing still sees the whole
+ * mechanism. Every transition between stages is a tween, so what they watch is
+ * continuous even though the model underneath is a small integer.
  *
- * Autoplay is one beat, never a loop. It fires once when the figure first
- * comes into view, and never after the reader has touched anything — silently
- * rewinding someone mid-experiment is the classic scrollytelling bug.
+ * Looping past the end is a replay, not a rewind. A syncId the server has
+ * handed out is never handed out again, so the live figures reseed and run
+ * their sequence from the top.
  */
 export interface FigureState {
-  atEnd: boolean;
-  atStart: boolean;
-  back: () => void;
-  /** True once the reader has pressed anything. Autoplay never fires again. */
-  hasInteracted: boolean;
+  /** Pause and resume. The only control the shell renders. */
+  handleToggle: () => void;
   inView: boolean;
-  next: () => void;
-  /** True while the run loop is advancing steps on its own. */
+  /** The reader's intent, not whether a beat is currently elapsing. */
   playing: boolean;
-  /** `prefers-reduced-motion`. Read it; do not animate around it. */
-  reduced: boolean;
   ref: RefObject<HTMLElement | null>;
-  reset: () => void;
   step: number;
   stepCount: number;
-  /** Start or stop the run loop. Never rendered under reduced motion. */
-  togglePlay: () => void;
-  /** Jump to a step. For controls that are not Back or Next. */
+  /** Jump to a step. Figure controls go through this. */
   to: (step: number) => void;
 }
 
 interface Options {
-  /** How long after entering view the single autoplay beat fires. */
-  autoplayMs?: number;
-  /** Seconds-ish between steps while `Play` is held down by the run loop. */
-  playMs?: number;
+  /** How long one stage is held. */
+  beatMs?: number;
   /** Total steps, including step 0. */
   stepCount: number;
 }
 
+/** The end of the loop is held longer, so the last stage is readable. */
+const LOOP_HOLD = 1.8;
+
 export const useFigureState = ({
-  autoplayMs = 900,
-  playMs = 1200,
+  beatMs = 1800,
   stepCount,
 }: Options): FigureState => {
   const ref = useRef<HTMLElement>(null);
@@ -57,88 +48,31 @@ export const useFigureState = ({
   const reduced = useReducedMotion() ?? false;
 
   const [step, setStep] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
-  const hasAutoplayed = useRef(false);
+  // Reduced motion opts out of the loop, not out of the figure: the button
+  // still runs it, and every stage is a state the DOM reaches at rest.
+  const [playing, setPlaying] = useState(!reduced);
 
   const to = useCallback(
-    (next: number) => {
-      setHasInteracted(true);
-      setPlaying(false);
-      setStep(Math.min(Math.max(next, 0), stepCount - 1));
-    },
+    (next: number) => setStep(Math.min(Math.max(next, 0), stepCount - 1)),
     [stepCount]
   );
 
-  const next = useCallback(() => {
-    to(step + 1);
-  }, [step, to]);
+  const handleToggle = useCallback(() => setPlaying((current) => !current), []);
 
-  const back = useCallback(() => {
-    to(step - 1);
-  }, [step, to]);
-
-  const reset = useCallback(() => {
-    setHasInteracted(true);
-    setPlaying(false);
-    setStep(0);
-  }, []);
-
-  const togglePlay = useCallback(() => {
-    setHasInteracted(true);
-    setPlaying((current) => !current);
-  }, []);
-
-  /*
-   * The run loop. Scrolling away pauses it and leaves the figure exactly where
-   * it stands; it never rewinds work the reader started.
-   */
+  /* Scrolling away holds the figure exactly where it stands. */
   useEffect(() => {
     if (!(playing && inView)) {
       return;
     }
 
-    if (step >= stepCount - 1) {
-      setPlaying(false);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setStep((current) => Math.min(current + 1, stepCount - 1));
-    }, playMs);
+    const last = step >= stepCount - 1;
+    const timer = setTimeout(
+      () => setStep((current) => (current >= stepCount - 1 ? 0 : current + 1)),
+      last ? beatMs * LOOP_HOLD : beatMs
+    );
 
     return () => clearTimeout(timer);
-  }, [inView, playMs, playing, step, stepCount]);
+  }, [beatMs, inView, playing, step, stepCount]);
 
-  useEffect(() => {
-    if (reduced || hasInteracted || hasAutoplayed.current || !inView) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      hasAutoplayed.current = true;
-      // Not `to`: autoplay must not count as an interaction, or a figure that
-      // autoplays could never autoplay a second figure's worth of beats.
-      setStep((current) => (current === 0 ? 1 : current));
-    }, autoplayMs);
-
-    return () => clearTimeout(timer);
-  }, [autoplayMs, hasInteracted, inView, reduced]);
-
-  return {
-    atEnd: step >= stepCount - 1,
-    atStart: step === 0,
-    back,
-    hasInteracted,
-    inView,
-    next,
-    playing,
-    reduced,
-    ref,
-    reset,
-    step,
-    stepCount,
-    to,
-    togglePlay,
-  };
+  return { handleToggle, inView, playing, ref, step, stepCount, to };
 };

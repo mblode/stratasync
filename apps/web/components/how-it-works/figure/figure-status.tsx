@@ -21,7 +21,7 @@ export const FigureStatus = ({ text }: { text: string }) => {
   return (
     <p
       aria-live="polite"
-      className="text-muted-foreground text-xs tabular-figures"
+      className="text-muted-foreground text-xs tabular-nums"
       role="status"
     >
       {announced}

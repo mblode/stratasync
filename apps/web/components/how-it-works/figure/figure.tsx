@@ -1,11 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useId } from "react";
 
 import { cn } from "@/lib/utils";
 
-import { FigureControls } from "./figure-controls";
+import { FigurePlayback } from "./figure-controls";
 import { FigureStatus } from "./figure-status";
 import type { FigureState } from "./use-figure-state";
 
@@ -14,20 +13,24 @@ interface Props {
   caption: ReactNode;
   /** The stage. */
   children: ReactNode;
-  /** Controls specific to this figure. The step group is added for you. */
+  /** Controls specific to this figure. Playback is added for you. */
   controls?: ReactNode;
-  /** Matches the section number. */
-  n: number;
   /** Fixed height, so nothing reflows as the state changes. */
   stageClassName?: string;
   state: FigureState;
   /** The one spoken line. Rewritten on step boundaries only. */
   status: string;
+  /** The figure's accessible name. Not rendered: the prose introduces it. */
   title: string;
 }
 
 /**
- * The frame every figure on this page sits in.
+ * The frame every figure on this page sits in, which is no frame at all.
+ *
+ * There was a card here once, with a border, a titled header bar and a tinted
+ * control shelf, and it made every figure a nested box inside a box. The
+ * diagram is the thing worth looking at, so it sits on the page like a
+ * paragraph does and the pause button sits quietly under it.
  *
  * `data-not-typeset` is load-bearing, not decoration: `.typeset` restyles
  * arbitrary descendants, so without it the article's own margins and type
@@ -41,46 +44,34 @@ export const Figure = ({
   caption,
   children,
   controls,
-  n,
   stageClassName,
   state,
   status,
   title,
-}: Props) => {
-  const titleId = useId();
+}: Props) => (
+  <figure
+    ref={state.ref}
+    aria-label={title}
+    className="@container/figure my-12"
+    data-not-typeset
+  >
+    <div className={cn(stageClassName)}>{children}</div>
 
-  return (
-    <figure
-      ref={state.ref}
-      aria-labelledby={titleId}
-      className="@container/figure my-10"
-      data-not-typeset
-    >
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <header className="flex items-baseline gap-2.5 border-border border-b px-4 py-2.5">
-          <span className="font-mono text-muted-foreground text-xs tabular-figures">
-            Fig. {n}
-          </span>
-          <h3 className="font-sans font-medium text-sm" id={titleId}>
-            {title}
-          </h3>
-        </header>
-
-        <div className={cn("px-4 py-5", stageClassName)}>{children}</div>
-
-        {/*
-          The surface step is what makes the shelf read as chrome the reader
-          operates rather than content they read.
-        */}
-        <div className="space-y-2 border-border border-t bg-surface px-4 py-3">
-          <FigureControls state={state}>{controls}</FigureControls>
-          <FigureStatus text={status} />
+    <div className="mt-5 flex flex-col gap-3">
+      {controls ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {controls}
         </div>
-      </div>
+      ) : null}
 
-      <figcaption className="mt-3 text-muted-foreground text-sm">
-        {caption}
-      </figcaption>
-    </figure>
-  );
-};
+      <div className="flex items-center gap-2">
+        <FigurePlayback state={state} />
+        <FigureStatus text={status} />
+      </div>
+    </div>
+
+    <figcaption className="mt-5 text-muted-foreground text-sm">
+      {caption}
+    </figcaption>
+  </figure>
+);

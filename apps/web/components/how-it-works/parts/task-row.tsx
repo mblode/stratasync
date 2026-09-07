@@ -1,7 +1,9 @@
 "use client";
 
-import { CheckIcon } from "blode-icons-react";
+import { useCallback, useId } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 import type { Tone } from "./tone";
@@ -9,9 +11,10 @@ import type { Tone } from "./tone";
 /**
  * The checkbox the whole page is built from.
  *
- * Always a real `<button>` with `aria-pressed`, so every figure that asks the
- * reader to tick something is reachable from the keyboard and announces its
- * state, whether or not the tick has reached the server yet.
+ * The house checkbox, not a hand-rolled one, so the tick draws itself the way
+ * every other checkbox on the site does. Amber is not a second style: the
+ * component paints itself from `--primary`, so a pending row reassigns that
+ * one token locally and the fill, the border and the tick all follow.
  */
 export const TaskRow = ({
   className,
@@ -30,44 +33,42 @@ export const TaskRow = ({
   /** The tick's colour: whether the server knows about this yet. */
   tone?: Tone;
 }) => {
-  const boxTone =
-    tone === "pending"
-      ? "border-warning bg-warning text-warning-foreground"
-      : "border-primary bg-primary text-primary-foreground";
+  const id = useId();
+  const handleCheckedChange = useCallback(() => onToggle?.(), [onToggle]);
 
   return (
     <div
       className={cn(
-        "flex min-h-9 items-center gap-2.5 rounded-md border border-border bg-background px-2.5 py-1.5",
+        "flex min-h-9 items-center gap-2.5 rounded-lg bg-background px-2.5 py-1.5",
         className
       )}
     >
-      <button
-        aria-label={title}
-        aria-pressed={done}
+      <Checkbox
+        checked={done}
         className={cn(
-          "flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
-          done ? boxTone : "border-input bg-background hover:border-ring",
+          "size-4 rounded-[4px]",
+          tone === "pending" &&
+            "[--primary-foreground:var(--warning-foreground)] [--primary:var(--warning)]",
           onToggle ? "cursor-pointer" : "cursor-default"
         )}
         disabled={!onToggle}
-        onClick={onToggle}
-        type="button"
-      >
-        {done ? <CheckIcon className="size-3" /> : null}
-      </button>
+        id={id}
+        onCheckedChange={handleCheckedChange}
+      />
 
-      <span
+      <Label
         className={cn(
-          "truncate font-sans text-sm",
-          done && "text-muted-foreground line-through"
+          "truncate font-normal text-sm",
+          done && "text-muted-foreground line-through",
+          onToggle ? "cursor-pointer" : "cursor-default"
         )}
+        htmlFor={id}
       >
         {title}
-      </span>
+      </Label>
 
       {note ? (
-        <span className="ml-auto shrink-0 font-mono text-[0.6875rem] text-muted-foreground tabular-figures">
+        <span className="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
           {note}
         </span>
       ) : null}

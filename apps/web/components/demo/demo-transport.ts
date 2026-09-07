@@ -82,13 +82,6 @@ export class DemoServer {
    */
   private readonly logListeners = new Set<() => void>();
   private logSnapshot: readonly SyncAction[] = [];
-  /*
-   * Ids allocated but not yet published. Off by default and `Showcase` never
-   * turns it on; `/how-it-works` uses it to run the failure `bigserial` alone
-   * cannot prevent, where a lower id commits after a higher one.
-   */
-  private deferCommits = false;
-  private readonly deferred: { action: SyncAction; source: string }[] = [];
   onSyncFlow: SyncFlowCallback | null = null;
 
   constructor(seedRows: ModelRow[]) {
@@ -124,33 +117,7 @@ export class DemoServer {
       ...seedRows.map((row) => ({ ...row, data: { ...row.data } }))
     );
     this.syncLog.length = 0;
-    this.deferCommits = false;
-    this.deferred.length = 0;
     this.publishLog();
-  }
-
-  /**
-   * Allocate a syncId when the write arrives but publish it only on
-   * `commitDeferred` — which is what a `bigserial` does without
-   * `acquireInsertOrderLock` holding the gap closed.
-   */
-  setDeferCommits(on: boolean): void {
-    this.deferCommits = on;
-  }
-
-  /** Allocated and unpublished, in allocation order. */
-  getDeferred(): readonly SyncAction[] {
-    return this.deferred.map((entry) => entry.action);
-  }
-
-  /** Publish one held write. The index is what lets a figure commit out of order. */
-  commitDeferred(index: number): void {
-    const entry = this.deferred[index];
-    if (!entry) {
-      return;
-    }
-    this.deferred.splice(index, 1);
-    this.commit(entry.action, entry.source);
   }
 
   private publishLog(): void {
@@ -219,11 +186,7 @@ export class DemoServer {
         modelName: tx.modelName,
       };
 
-      if (this.deferCommits) {
-        this.deferred.push({ action, source: sourceTransportId });
-      } else {
-        this.commit(action, sourceTransportId);
-      }
+      this.commit(action, sourceTransportId);
 
       return {
         clientTxId: tx.clientTxId,
@@ -243,11 +206,9 @@ export class DemoServer {
     clientId: string,
     clientTxId: string
   ): SyncAction | undefined {
-    const match = (action: SyncAction) =>
-      action.clientId === clientId && action.clientTxId === clientTxId;
-    return (
-      this.syncLog.find(match) ??
-      this.deferred.find((entry) => match(entry.action))?.action
+    return this.syncLog.find(
+      (action) =>
+        action.clientId === clientId && action.clientTxId === clientTxId
     );
   }
 

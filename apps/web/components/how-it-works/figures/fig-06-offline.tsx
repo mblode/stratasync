@@ -101,7 +101,7 @@ const Stage = ({
 }) => (
   <div className="grid items-stretch gap-3 @md/figure:grid-cols-[1fr_auto_1fr]">
     <Device label="Your laptop" offline={offline} status={`cursor ${cursor}`}>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <TaskRow
           done={row.done}
           note={outbox.length > 0 ? "this device only" : undefined}
@@ -137,12 +137,9 @@ const Stage = ({
 
 const LiveStage = ({
   engine,
-  onResend,
   state,
 }: {
   engine: Engine;
-  /** Reports what the resend got back, for the status line. */
-  onResend: (result: { grew: boolean; syncId: string } | null) => void;
   state: FigureState;
 }) => {
   const { step } = state;
@@ -153,12 +150,6 @@ const LiveStage = ({
   const wire = useWire(engine.transportA);
   const [offline, setOffline] = useState(false);
 
-  /*
-   * The first write, kept as the client itself created it. Sending this exact
-   * object again is the only honest version of a retry: same `clientTxId`,
-   * same payload, so the server has to be the thing that refuses it twice.
-   */
-  const first = useRef<Transaction | null>(null);
   const task = tasks.find((entry) => entry.id === TASK_ID);
 
   const goOffline = useCallback(() => {
@@ -167,16 +158,10 @@ const LiveStage = ({
   }, [engine]);
 
   const write = useCallback(async () => {
-    await engine.clientA.update(
-      "Task",
-      TASK_ID,
-      { done: true, updatedAt: Date.now() },
-      {
-        onTransactionCreated: (tx) => {
-          first.current = tx;
-        },
-      }
-    );
+    await engine.clientA.update("Task", TASK_ID, {
+      done: true,
+      updatedAt: Date.now(),
+    });
     await engine.clientA.update("Task", TASK_ID, {
       title: RENAMED,
       updatedAt: Date.now(),
@@ -203,23 +188,6 @@ const LiveStage = ({
     await until(() => engine.storageA.getOutboxSnapshot().length === 0);
   }, [engine]);
 
-  const resend = useCallback(async () => {
-    const tx = first.current;
-    if (!tx) {
-      return;
-    }
-    const before = engine.server.getLog().length;
-    const result = await engine.transportA.mutate({
-      batchId: `replay-${tx.clientTxId}`,
-      createdAt: Date.now(),
-      transactions: [tx],
-    });
-    onResend({
-      grew: engine.server.getLog().length > before,
-      syncId: result.results[0]?.syncId ?? "",
-    });
-  }, [engine, onResend]);
-
   const advance = useCallback(
     async (n: number) => {
       if (n === 1) {
@@ -228,13 +196,11 @@ const LiveStage = ({
         await write();
       } else if (n === 3) {
         await restart();
-      } else if (n === 4) {
-        await goOnline();
       } else {
-        await resend();
+        await goOnline();
       }
     },
-    [goOffline, goOnline, resend, restart, write]
+    [goOffline, goOnline, restart, write]
   );
 
   /*
@@ -296,7 +262,7 @@ const Poster = () => (
 );
 
 export const Fig06Offline = () => {
-  const state = useFigureState({ stepCount: 6 });
+  const state = useFigureState({ stepCount: 5 });
   const { engine, generation, live, reapply } = useEngineScenario(
     offlineScenario,
     state.ref,
@@ -304,21 +270,12 @@ export const Fig06Offline = () => {
   );
   const { step, to } = state;
 
-  const [resent, setResent] = useState<{
-    grew: boolean;
-    syncId: string;
-  } | null>(null);
-
   const handleNetwork = useCallback(() => {
     to(step < 1 ? 1 : 4);
   }, [step, to]);
 
   const handleRestart = useCallback(() => {
     to(3);
-  }, [to]);
-
-  const handleResend = useCallback(() => {
-    to(5);
   }, [to]);
 
   /*
@@ -333,7 +290,6 @@ export const Fig06Offline = () => {
     if (!live || step >= previous) {
       return;
     }
-    setResent(null);
     reapply();
     lastStep.current = 0;
     to(0);
@@ -355,31 +311,14 @@ export const Fig06Offline = () => {
     if (step === 3) {
       return "The client stopped and started. The queue was read back out of storage.";
     }
-    if (step === 4) {
-      return "Back online. The queue drained in the order it was written.";
-    }
-    if (!resent) {
-      return "Sending the first transaction a second time.";
-    }
-    return resent.grew
-      ? "The log grew. That would be the same write twice."
-      : `The server answered with syncId ${resent.syncId}, the one it already had, and the log didn’t grow.`;
+    return "Back online. The queue drained in the order it was written.";
   })();
 
   const offline = step >= 1 && step <= 3;
 
   return (
     <Figure
-      caption={
-        <>
-          Press the wifi button to go offline, then let two writes queue. Press{" "}
-          <code>Restart</code>: the client stops, starts, and reads the same
-          queue back off disk. Come back online and it drains in the order it
-          was written. Then press <code>Send it again</code> to fire the first
-          write a second time, with the id it already used. The server
-          recognises it and answers with the number it gave the first time.
-        </>
-      }
+      caption="Go offline, let two writes queue, press Restart, then come back online."
       controls={
         <>
           <Button
@@ -389,9 +328,9 @@ export const Fig06Offline = () => {
             variant="outline"
           >
             {offline ? (
-              <WifiNoSignalIcon aria-hidden="true" className="h-3.5 w-3.5" />
+              <WifiNoSignalIcon aria-hidden="true" data-icon="inline-start" />
             ) : (
-              <WifiFullIcon aria-hidden="true" className="h-3.5 w-3.5" />
+              <WifiFullIcon aria-hidden="true" data-icon="inline-start" />
             )}
             {offline ? "Go back online" : "Go offline"}
           </Button>
@@ -404,18 +343,8 @@ export const Fig06Offline = () => {
           >
             Restart
           </Button>
-
-          <Button
-            disabled={!live || step !== 4}
-            onClick={handleResend}
-            size="xs"
-            variant="outline"
-          >
-            Send it again
-          </Button>
         </>
       }
-      n={6}
       stageClassName="min-h-64"
       state={state}
       status={status}
@@ -424,7 +353,7 @@ export const Fig06Offline = () => {
       {live && engine ? (
         // Keyed: a replayed scenario is a new run, not a re-render.
         <SyncProvider autoStop={false} client={engine.clientA} key={generation}>
-          <LiveStage engine={engine} onResend={setResent} state={state} />
+          <LiveStage engine={engine} state={state} />
         </SyncProvider>
       ) : (
         <Poster />

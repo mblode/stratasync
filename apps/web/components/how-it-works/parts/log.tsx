@@ -42,7 +42,7 @@ export const Log = ({
   }
 
   return (
-    <ol className={cn("space-y-1.5", className)}>
+    <ol className={cn("flex flex-col gap-1.5", className)}>
       {rows.map((row) => {
         // Sync IDs outgrow `Number.MAX_SAFE_INTEGER`, so they are decimal
         // strings on the wire. Compare them by length first, then lexically.

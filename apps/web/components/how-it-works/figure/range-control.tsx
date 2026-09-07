@@ -1,16 +1,17 @@
 "use client";
 
-import type { ChangeEvent } from "react";
 import { useCallback, useId } from "react";
 
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
 /**
  * A continuous control.
  *
- * Native `<input type="range">` rather than either installed slider component:
- * a platform feature sits above a dependency on the ladder, and it arrives
- * with keyboard support and `aria-valuenow` already correct.
+ * The house slider rather than a native `<input type="range">`. Base UI takes
+ * and returns an array, because one track can carry several thumbs; every
+ * figure here has one value, so the array is unwrapped at this boundary and no
+ * caller has to know about it.
  */
 export const RangeControl = ({
   className,
@@ -23,7 +24,7 @@ export const RangeControl = ({
   value,
 }: {
   className?: string;
-  /** How the current value reads. Rendered in `tabular-figures`. */
+  /** How the current value reads. */
   format: (value: number) => string;
   label: string;
   max: number;
@@ -32,34 +33,32 @@ export const RangeControl = ({
   step?: number;
   value: number;
 }) => {
-  const id = useId();
-  const handleChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) =>
-      onChange(Number(event.target.value)),
-    [onChange]
+  const labelId = useId();
+  const handleValueChange = useCallback(
+    (next: number[]) => onChange(next[0] ?? min),
+    [min, onChange]
   );
 
   return (
     <span className={cn("flex items-center gap-2", className)}>
-      <label className="whitespace-nowrap font-sans text-xs" htmlFor={id}>
+      <span className="whitespace-nowrap text-xs" id={labelId}>
         {label}
-      </label>
-      <input
-        className="h-1.5 w-24 cursor-pointer accent-primary @md/figure:w-32"
-        id={id}
-        max={max}
-        min={min}
-        onChange={handleChange}
-        step={step}
-        type="range"
-        value={value}
-      />
-      <output
-        className="min-w-11 font-mono text-muted-foreground text-xs tabular-figures"
-        htmlFor={id}
-      >
+      </span>
+      {/* The house slider is `w-full`, so it needs a parent with a width to
+          fill; sized here rather than on the slider, whose own class wins. */}
+      <span className="w-24 shrink-0 @md/figure:w-32">
+        <Slider
+          aria-labelledby={labelId}
+          max={max}
+          min={min}
+          onValueChange={handleValueChange}
+          step={step}
+          value={[value]}
+        />
+      </span>
+      <span className="min-w-11 text-muted-foreground text-xs tabular-nums">
         {format(value)}
-      </output>
+      </span>
     </span>
   );
 };
