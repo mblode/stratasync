@@ -120,32 +120,25 @@ export const Fig07Rebase = () => {
     return "neutral";
   };
 
-  const verdict = (() => {
-    if (!rebased) {
-      return null;
-    }
-    if (!preview.conflictType) {
-      return "no conflict: the field sets don’t overlap";
-    }
-    return dropped
-      ? `${preview.conflictType} / ${strategy} / local write dropped`
-      : `${preview.conflictType} / ${strategy} / original rebased`;
-  })();
-
+  /*
+   * One line under the row, not three. The classification, the strategy and
+   * the outcome used to be a separate slash-separated line; a reader who has
+   * to consult two explanations of one row has been given neither.
+   */
   const status = (() => {
     if (step === 0) {
       return "The row as both sides last agreed it was.";
     }
     if (step === 1) {
-      return "Your write is applied here. It hasn’t left the device.";
+      return "Your change is applied here. It hasn’t left the device.";
     }
     if (!preview.conflictType) {
-      return "Different fields, so both changes stand.";
+      return "You changed different fields, so both changes stand.";
     }
     if (dropped) {
-      return `The local write is dropped, and ${localField} reads ${quoted(preview.after[localField])}.`;
+      return `Counted as a collision, so your change is dropped and ${localField} reads ${quoted(preview.after[localField])}.`;
     }
-    return "The local write stands, and its snapshot moves to the server’s value.";
+    return "Counted as a collision, and your change wins. Its starting point moves up to the server’s value.";
   })();
 
   return (
@@ -153,13 +146,13 @@ export const Fig07Rebase = () => {
       caption={
         <>
           The row starts as <code>{'{title: "Draft", status: "open"}'}</code>.
-          Choose which field you edit and which one the server edits, then step
-          to the rebase. With <code>fieldLevelConflicts</code> on and different
-          fields, both changes stand. Turn it off and the same pair is
-          classified <code>update-update</code>: <code>server-wins</code> drops
-          your write and the field you edited goes back to what it was, even
-          though the server never touched it. <code>client-wins</code> and{" "}
-          <code>merge</code> take the same branch, so they produce the same row.
+          Pick a field for yourself, pick one for the server, then step forward.
+          Change different fields and both changes stand. Now turn off
+          field-by-field comparison: the same two changes count as a collision,
+          yours is dropped, and the field you changed goes back to where it
+          started, even though the server never touched it. In code the two
+          switches are <code>fieldLevelConflicts</code> and{" "}
+          <code>rebaseStrategy</code>.
         </>
       }
       controls={
@@ -177,13 +170,13 @@ export const Fig07Rebase = () => {
             value={serverField}
           />
           <ToggleControl
-            label="fieldLevelConflicts"
+            label="Compare field by field"
             onChange={setFieldLevel}
             options={FIELD_LEVEL_OPTIONS}
             value={fieldLevel}
           />
           <ToggleControl
-            label="rebaseStrategy"
+            label="On a collision"
             onChange={setStrategy}
             options={STRATEGY_OPTIONS}
             value={strategy}
@@ -263,17 +256,12 @@ export const Fig07Rebase = () => {
             ))}
           </div>
 
-          {verdict ? (
-            <code className="block pt-1 font-mono text-muted-foreground text-xs">
-              {verdict}
-            </code>
-          ) : null}
-
           {rebased && preview.conflictType && strategy !== "server-wins" ? (
-            <code className="block font-mono text-[0.6875rem] text-muted-foreground">
-              client-wins and merge take the same branch in
-              resolveConflictEffect, so they are the same row today.
-            </code>
+            <p className="pt-1 font-sans text-[0.6875rem] text-muted-foreground">
+              <code className="font-mono">client-wins</code> and{" "}
+              <code className="font-mono">merge</code> run the same branch
+              today, so they give you the same row.
+            </p>
           ) : null}
         </div>
       </div>

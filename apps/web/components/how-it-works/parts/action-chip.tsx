@@ -51,12 +51,9 @@ export const ActionChip = ({
     <code className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground tabular-figures">
       {id}
     </code>
-    <code
-      className="shrink-0 font-mono text-xs font-medium"
-      title={codeName[code]}
-    >
-      {code}
-    </code>
+    {/* The word, not the protocol's letter. A reader should not have to hold
+        a five-letter legend in their head to read the log. */}
+    <span className="shrink-0 font-sans text-xs">{codeName[code]}</span>
     <code className="truncate font-mono text-xs">{summary}</code>
   </div>
 );

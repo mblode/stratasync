@@ -407,12 +407,11 @@ export const Fig04Log = () => {
       caption={
         <>
           Press <code>Insert</code>, <code>Update</code> and{" "}
-          <code>Archive</code> in any order. Each press appends one row to the
-          log and takes the next <code>syncId</code>, and the device on the
-          right is that log replayed from the top. Then turn the commit-order
-          lock off and run two writes at once: the device asks for everything
-          after the higher id, and the lower one commits a moment later, behind
-          its back.
+          <code>Archive</code> in any order. Each press adds one row to the log
+          and takes the next number, and the device on the right is that log
+          replayed from the top. Then turn the commit-order lock off and run two
+          writes at once: the device asks for everything after the higher
+          number, and the lower one lands a moment later, behind its back.
         </>
       }
       controls={

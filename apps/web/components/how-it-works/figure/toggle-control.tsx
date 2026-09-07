@@ -33,7 +33,9 @@ export const ToggleControl = <T extends string>({
   );
 
   return (
-    <span className={cn("flex items-center gap-2", className)}>
+    // Wraps, so a label that outgrows a narrow shelf drops its group to the
+    // next line instead of pushing the options off the edge.
+    <span className={cn("flex flex-wrap items-center gap-2", className)}>
       <span className="whitespace-nowrap font-sans text-xs">{label}</span>
       <ToggleGroup
         aria-label={label}

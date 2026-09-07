@@ -80,12 +80,10 @@ export const HowItWorks = () => (
       decides, and there’s only ever one of them.
     </p>
     <p>
-      A row in that log is a sync action: what happened, to which model, to
-      which row, with what data. What happened is a single letter.{" "}
-      <code>I</code> inserted a row, <code>U</code> updated one, <code>D</code>{" "}
-      deleted one, <code>A</code> archived one and <code>V</code> put an
-      archived one back. Your device doesn’t receive rows. It receives these,
-      and replays them.
+      A row in that log says what happened, to which row, with what data.
+      Inserted, updated, deleted, archived, put back. Your device never receives
+      rows. It receives these, and replays them. On the wire each one is a
+      single letter, so a day of changes is a small download.
     </p>
 
     <Fig04Log />
@@ -123,10 +121,10 @@ export const HowItWorks = () => (
 
     <p>
       The last step is the one most diagrams get wrong. An acknowledgement
-      doesn’t finish a write. The transaction moves to <code>awaitingSync</code>{" "}
-      and records the <code>syncId</code> it’s waiting for, and it retires only
-      when this device’s own cursor passes that number. That’s what makes the
-      local copy and the log agree rather than merely overlap.
+      doesn’t finish a write. The queued write records the number it’s waiting
+      for, and it retires only when this device’s own cursor passes that number.
+      That’s what makes the local copy agree with the log instead of just
+      overlapping it.
     </p>
 
     <h2>6. Going offline</h2>
@@ -141,23 +139,21 @@ export const HowItWorks = () => (
     <Fig06Offline />
 
     <p>
-      One label there is worth reading twice. Both queued entries say{" "}
-      <code>sent</code>, and both are still on the laptop. <code>sent</code>{" "}
-      means the transaction was handed to the transport, not that the server has
-      it. The client stamps it before it calls out, so a send interrupted
-      halfway is never mistaken for one that never left. The label isn’t what
-      keeps the write safe. The row underneath it is, and that stays in storage
-      until an acknowledgement retires it.
+      One label is worth reading twice. Both entries say <code>sent</code>, and
+      both are still on the laptop. <code>sent</code> means handed to the
+      network, not received. The client stamps it before it calls out, so a send
+      cut off halfway is never mistaken for one that never left. The label isn’t
+      what keeps the write safe. The row underneath it is, and that stays on
+      disk until an acknowledgement retires it.
     </p>
 
     <p>
-      The queue drains in the order it was written: <code>createdAt</code>, then{" "}
-      <code>batchIndex</code>, then <code>clientTxId</code>. Two writes queued
-      in the same millisecond still come out the way you made them. And because
-      every entry carries that <code>clientTxId</code>, a retry isn’t a second
-      write. The server keeps a unique index on the id and answers a repeat with
-      the <code>syncId</code> it gave out the first time. So a device can be
-      careless about resending. Worst case is a wasted request.
+      The queue drains in the order it was written, with a tiebreak for two
+      writes made in the same millisecond. And every entry carries an id the
+      device made up, so a retry isn’t a second write. The server keeps a unique
+      index on that id and answers a repeat with the number it gave out the
+      first time. A device can be careless about resending. Worst case is a
+      wasted request.
     </p>
 
     <p>
@@ -186,23 +182,21 @@ export const HowItWorks = () => (
     <Fig07Rebase />
 
     <p>
-      Two of those twenty-four combinations are worth sitting with. The ordinary
-      one: different fields, no conflict, both changes survive and nobody
-      chooses. That’s what <code>fieldLevelConflicts</code> buys, and it’s on by
-      default. Then turn it off. The same two writes get classified{" "}
-      <code>update-update</code>, <code>server-wins</code> discards yours, and
-      the field you edited doesn’t take the server’s value, because the server
-      never touched it. It goes back to what it was before you started. Turns
-      out switching field-level conflicts off loses your edit and gains you
-      nothing.
+      Two of those combinations are worth sitting with. The ordinary one:
+      different fields, no collision, both changes survive and nobody has to
+      choose. Comparing field by field is what buys you that, and it’s on by
+      default. Then turn it off. The same two writes now count as a collision,
+      the server’s rule discards yours, and the field you changed doesn’t take
+      the server’s value, because the server never touched it. It goes back to
+      where it started. Turns out switching field-level comparison off loses
+      your edit and gains you nothing.
     </p>
     <p>
       The default is <code>server-wins</code>, which sounds harsher than it is.
-      It only applies to a real collision on the same field, and it’s the one
-      rule that guarantees every device lands on the same row. When your write
-      survives, its <code>original</code> moves: the snapshot steps forward to
-      the server’s value, so the next comparison runs against the row that’s
-      actually there.
+      It only fires on a real collision on the same field, and it’s the one rule
+      that guarantees every device lands on the same row. When your write
+      survives, its starting point moves up to the server’s value, so the next
+      comparison runs against the row that’s actually there.
     </p>
     <p>
       All of this assumes your device had something to catch up on. A device

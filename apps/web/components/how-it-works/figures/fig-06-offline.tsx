@@ -374,12 +374,10 @@ export const Fig06Offline = () => {
         <>
           Press the wifi button to go offline, then let two writes queue. Press{" "}
           <code>Restart</code>: the client stops, starts, and reads the same
-          queue back out of storage, because the queue is data on disk rather
-          than something held in memory. Come back online and it drains in the
-          order it was written. Then press <code>Send it again</code> to fire
-          the first transaction a second time, with the <code>clientTxId</code>{" "}
-          it already used. The server recognises it and answers with the{" "}
-          <code>syncId</code> it gave the first time.
+          queue back off disk. Come back online and it drains in the order it
+          was written. Then press <code>Send it again</code> to fire the first
+          write a second time, with the id it already used. The server
+          recognises it and answers with the number it gave the first time.
         </>
       }
       controls={
