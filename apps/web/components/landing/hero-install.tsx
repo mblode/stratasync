@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Fragment } from "react";
 
 import { CopyButton } from "@/components/animate-ui/components/buttons/copy";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,18 +23,24 @@ const audiences = [
  */
 export const HeroInstall = ({ action }: { action?: ReactNode }) => (
   <Tabs className="flex flex-col gap-4" defaultValue="humans">
-    <TabsList
-      className="h-auto gap-0 p-0 [&>*+*]:ml-4 [&>*+*]:border-l [&>*+*]:border-l-white/30 [&>*+*]:pl-4"
-      variant="line"
-    >
-      {audiences.map((audience) => (
-        <TabsTrigger
-          className="px-0 text-base text-white/60 after:bg-white hover:text-white data-active:text-white"
-          key={audience.value}
-          value={audience.value}
-        >
-          {audience.label}
-        </TabsTrigger>
+    <TabsList className="h-auto gap-4 p-0" variant="line">
+      {audiences.map((audience, index) => (
+        <Fragment key={audience.value}>
+          {/*
+            A real 1px rule rather than a left border on the tab: the trigger
+            is rounded, so a border-left rendered as an arc that curled away
+            from the text at both ends.
+          */}
+          {index > 0 ? (
+            <span aria-hidden="true" className="h-4 w-px bg-white/30" />
+          ) : null}
+          <TabsTrigger
+            className="px-0 text-base text-white/60 after:bg-white hover:text-white data-active:text-white"
+            value={audience.value}
+          >
+            {audience.label}
+          </TabsTrigger>
+        </Fragment>
       ))}
     </TabsList>
     <div className="flex flex-col gap-4 md:flex-row md:items-center">

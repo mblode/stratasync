@@ -4,6 +4,17 @@ import { siteConfig } from "@/lib/config";
 import { docsGroups } from "@/lib/docs-nav";
 import avatarSm from "@/public/avatar-sm.png";
 
+/**
+ * `@stratasync/core` and friends are one group per package in `docs.json`.
+ * They are sections of the Packages section, not sections of the docs.
+ */
+const docsSections = docsGroups.flatMap((group) => {
+  const [first] = group.pages;
+  return first && !group.group.startsWith("@")
+    ? [{ label: group.group, url: first.url }]
+    : [];
+});
+
 export const SiteFooter = () => (
   <footer className="flex flex-col items-center justify-center gap-2 pt-16 pb-8 text-muted-foreground text-sm">
     <div className="flex items-center gap-1">
@@ -31,31 +42,25 @@ export const SiteFooter = () => (
         Matthew Blode
       </a>
     </div>
-    {/* One link per docs section. The sitemap carries every page; this keeps
-        a crawl path into each section off the main content. */}
+    {/*
+      One link per top-level docs section. Blode.md renders its sidebar on the
+      client, so these are the only crawl path into the sections; the sitemap
+      carries every page. The five `@stratasync/*` groups used to be listed
+      here too, which turned the footer into a package dump — `/docs/packages`
+      links to each of them, so a link to that section reaches them all.
+    */}
     <nav aria-label="Documentation">
       <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1">
-        <li>
-          <a
-            className="transition-colors hover:text-foreground"
-            href={`${siteConfig.url}/guides`}
-          >
-            Guides
-          </a>
-        </li>
-        {docsGroups.map((group) => {
-          const [first] = group.pages;
-          return first ? (
-            <li key={group.group}>
-              <a
-                className="transition-colors hover:text-foreground"
-                href={first.url}
-              >
-                {group.group}
-              </a>
-            </li>
-          ) : null;
-        })}
+        {docsSections.map((section) => (
+          <li key={section.label}>
+            <a
+              className="transition-colors hover:text-foreground"
+              href={section.url}
+            >
+              {section.label}
+            </a>
+          </li>
+        ))}
       </ul>
     </nav>
     <div className="flex flex-wrap items-center justify-center gap-2 text-muted-foreground/30">
