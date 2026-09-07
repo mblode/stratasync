@@ -90,7 +90,8 @@ export const LandingHow = () => {
             <a className="underline underline-offset-4" href={howItWorks.url}>
               See how it works
             </a>{" "}
-            — ten figures, built up one idea at a time.
+            : the mechanism built up one idea at a time, in figures you operate
+            yourself.
           </motion.p>
         </div>
       </div>
