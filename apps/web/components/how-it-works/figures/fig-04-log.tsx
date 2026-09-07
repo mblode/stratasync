@@ -318,7 +318,6 @@ export const Fig04Log = () => {
           press={press}
         />
       ))}
-      stageClassName="min-h-64"
       state={state}
       status={status}
       title="One log, and the numbers on it"
