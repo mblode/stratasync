@@ -165,7 +165,7 @@ const LiveStage = ({
   return (
     <div className="grid items-stretch gap-3 @md/figure:grid-cols-[1fr_auto_1fr]">
       <Device label="Your laptop" status={`cursor ${lastSyncId}`}>
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <TaskRow
             done={done}
             onToggle={step === 0 ? handleToggle : undefined}
@@ -219,7 +219,7 @@ const LiveStage = ({
 const Poster = () => (
   <div className="grid items-stretch gap-3 @md/figure:grid-cols-[1fr_auto_1fr]">
     <Device label="Your laptop" status="cursor 1">
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <TaskRow done={false} title={TITLE} />
         <p className="pt-1 font-sans text-[0.6875rem] text-muted-foreground">
           Outbox
@@ -280,14 +280,7 @@ export const Fig05Outbox = () => {
 
   return (
     <Figure
-      caption={
-        <>
-          Press the checkbox. The tick moves at once. The queued write takes
-          longer, and it does not finish when the server answers. It finishes
-          when this device reaches the number the server gave it back, which is
-          what Deliver delta does. Watch the cursor, not the reply.
-        </>
-      }
+      caption="Press the checkbox, then Deliver delta."
       controls={
         <Button
           disabled={!wire.some((item) => item.direction === "down")}
@@ -298,7 +291,6 @@ export const Fig05Outbox = () => {
           Deliver delta
         </Button>
       }
-      n={5}
       stageClassName="min-h-56"
       state={state}
       status={status}

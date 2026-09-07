@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 
-import type { Field, Strategy } from "../engine";
+import type { Field } from "../engine";
 import { BASE, LOCAL_VALUE, previewRebase, SERVER_VALUE } from "../engine";
 import { Figure, ToggleControl, useFigureState } from "../figure";
 import type { Tone } from "../parts";
@@ -11,9 +11,16 @@ import { FieldCell } from "../parts";
 
 const FIELDS: Field[] = ["title", "status"];
 
-const FIELD_OPTIONS: { label: string; value: Field }[] = [
-  { label: "title", value: "title" },
-  { label: "status", value: "status" },
+/*
+ * One axis, not two. The figure used to let you pick a field for each side,
+ * which is four combinations of a question that only has two answers: did the
+ * two writes touch the same field or not. You always edit the title.
+ */
+const LOCAL_FIELD: Field = "title";
+
+const OVERLAP_OPTIONS = [
+  { label: "the same field", value: "same" as const },
+  { label: "another field", value: "other" as const },
 ];
 
 const FIELD_LEVEL_OPTIONS = [
@@ -21,33 +28,17 @@ const FIELD_LEVEL_OPTIONS = [
   { label: "off", value: "off" as const },
 ];
 
-const STRATEGY_OPTIONS: { label: string; value: Strategy }[] = [
-  { label: "server-wins", value: "server-wins" },
-  { label: "client-wins", value: "client-wins" },
-  { label: "merge", value: "merge" },
-];
-
 /** Every value on this figure is a string, so every one renders with quotes. */
 const quoted = (value: unknown) => `"${String(value)}"`;
 
-const Lane = ({
-  children,
-  label,
-  note,
-}: {
-  children: ReactNode;
-  label: string;
-  note: string;
-}) => (
-  <div className="space-y-1.5">
-    <div className="flex items-baseline justify-between gap-2">
-      <p className="font-sans text-[0.6875rem] text-muted-foreground">
-        {label}
-      </p>
-      <code className="font-mono text-[0.6875rem] text-muted-foreground">
-        {note}
-      </code>
-    </div>
+/*
+ * One label per lane. Each used to carry a mono note as well — `original`,
+ * `payload`, a hardcoded `syncId` — which either restated the English label or
+ * put a number on a figure that is entirely about fields.
+ */
+const Lane = ({ children, label }: { children: ReactNode; label: string }) => (
+  <div className="flex flex-col gap-1.5">
+    <p className="font-sans text-[0.6875rem] text-muted-foreground">{label}</p>
     {children}
   </div>
 );
@@ -55,9 +46,7 @@ const Lane = ({
 /** Holds a cell's worth of space, so no lane changes height as steps land. */
 const Placeholder = () => (
   <div className="rounded-md border border-border border-dashed px-2.5 py-1.5">
-    <code className="font-mono text-[0.6875rem] text-muted-foreground">
-      nothing yet
-    </code>
+    <p className="text-[0.6875rem] text-muted-foreground">nothing yet</p>
     <code className="mt-0.5 block font-mono text-muted-foreground text-xs">
       &nbsp;
     </code>
@@ -68,16 +57,18 @@ export const Fig07Rebase = () => {
   const state = useFigureState({ stepCount: 3 });
   const { step } = state;
 
-  const [localField, setLocalField] = useState<Field>("title");
-  const [serverField, setServerField] = useState<Field>("status");
+  const [overlap, setOverlap] = useState<"other" | "same">("other");
   const [fieldLevel, setFieldLevel] = useState<"off" | "on">("on");
-  const [strategy, setStrategy] = useState<Strategy>("server-wins");
 
+  const localField = LOCAL_FIELD;
+  const serverField: Field = overlap === "same" ? "title" : "status";
+
+  /* The engine's own default, and the only one this figure teaches. */
   const preview = previewRebase({
     fieldLevel: fieldLevel === "on",
     localField,
     serverField,
-    strategy,
+    strategy: "server-wins",
   });
 
   const dropped = preview.effect === "drop-local";
@@ -91,8 +82,8 @@ export const Fig07Rebase = () => {
 
   /*
    * The three moments, all derived from the step index. Nothing here is
-   * animated, because every one of the 24 states is a pure function of the
-   * four controls — which is what makes this figure identical with motion off.
+   * animated, because every state is a pure function of the three controls,
+   * which is what makes this figure identical with motion off.
    */
   const row = (() => {
     if (step === 0) {
@@ -135,39 +126,19 @@ export const Fig07Rebase = () => {
     if (!preview.conflictType) {
       return "You changed different fields, so both changes stand.";
     }
-    if (dropped) {
-      return `Counted as a collision, so your change is dropped and ${localField} reads ${quoted(preview.after[localField])}.`;
-    }
-    return "Counted as a collision, and your change wins. Its starting point moves up to the server’s value.";
+    return `Counted as a collision, so your change is dropped and ${localField} reads ${quoted(preview.after[localField])}.`;
   })();
 
   return (
     <Figure
-      caption={
-        <>
-          The row starts as <code>{'{title: "Draft", status: "open"}'}</code>.
-          Pick a field for yourself, pick one for the server, then step forward.
-          Change different fields and both changes stand. Now turn off
-          field-by-field comparison: the same two changes count as a collision,
-          yours is dropped, and the field you changed goes back to where it
-          started, even though the server never touched it. In code the two
-          switches are <code>fieldLevelConflicts</code> and{" "}
-          <code>rebaseStrategy</code>.
-        </>
-      }
+      caption="Let the server edit the same field, then turn field-by-field comparison off."
       controls={
         <>
           <ToggleControl
-            label="You edit"
-            onChange={setLocalField}
-            options={FIELD_OPTIONS}
-            value={localField}
-          />
-          <ToggleControl
-            label="Server edits"
-            onChange={setServerField}
-            options={FIELD_OPTIONS}
-            value={serverField}
+            label="The server edits"
+            onChange={setOverlap}
+            options={OVERLAP_OPTIONS}
+            value={overlap}
           />
           <ToggleControl
             label="Compare field by field"
@@ -175,24 +146,17 @@ export const Fig07Rebase = () => {
             options={FIELD_LEVEL_OPTIONS}
             value={fieldLevel}
           />
-          <ToggleControl
-            label="On a collision"
-            onChange={setStrategy}
-            options={STRATEGY_OPTIONS}
-            value={strategy}
-          />
         </>
       }
-      n={7}
       stageClassName="min-h-64"
       state={state}
       status={status}
       title="Re-authoring your change on what you missed"
     >
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <div className="grid items-start gap-3 @md/figure:grid-cols-3">
-          <Lane label="What your write was based on" note="original">
-            <div className="space-y-1.5">
+          <Lane label="What your write was based on">
+            <div className="flex flex-col gap-1.5">
               {FIELDS.map((field) => (
                 <FieldCell
                   key={field}
@@ -213,7 +177,7 @@ export const Fig07Rebase = () => {
             </div>
           </Lane>
 
-          <Lane label="Your write" note="payload">
+          <Lane label="Your write">
             {step >= 1 ? (
               <FieldCell
                 name={localField}
@@ -226,7 +190,7 @@ export const Fig07Rebase = () => {
             )}
           </Lane>
 
-          <Lane label="The server’s change" note="syncId 2">
+          <Lane label="The server’s change">
             {rebased ? (
               <FieldCell
                 name={serverField}
@@ -240,7 +204,7 @@ export const Fig07Rebase = () => {
           </Lane>
         </div>
 
-        <div className="space-y-1.5 border-border border-t pt-4">
+        <div className="flex flex-col gap-1.5 border-border border-t pt-4">
           <p className="font-sans text-[0.6875rem] text-muted-foreground">
             The row on your screen
           </p>
@@ -255,14 +219,6 @@ export const Fig07Rebase = () => {
               />
             ))}
           </div>
-
-          {rebased && preview.conflictType && strategy !== "server-wins" ? (
-            <p className="pt-1 font-sans text-[0.6875rem] text-muted-foreground">
-              <code className="font-mono">client-wins</code> and{" "}
-              <code className="font-mono">merge</code> run the same branch
-              today, so they give you the same row.
-            </p>
-          ) : null}
         </div>
       </div>
     </Figure>

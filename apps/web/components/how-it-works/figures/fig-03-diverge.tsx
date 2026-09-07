@@ -11,7 +11,7 @@ import type { Engine, ObservableStorage, Task } from "../engine";
 import { divergeScenario, useEngineScenario, useOutbox } from "../engine";
 import type { FigureState } from "../figure";
 import { Figure, useFigureState } from "../figure";
-import { Device, FieldCell, TaskRow } from "../parts";
+import { Device, TaskRow } from "../parts";
 
 const TASK_ID = "t-1";
 const ORIGINAL = "Review pull request #42";
@@ -22,54 +22,34 @@ const ignoreWriteFailure = () => {
 };
 
 /**
- * One device's copy of the row, and the two fields the reader compares.
+ * One device's copy of the row.
  *
  * Each pane reads through its own client, so no state is lifted and no copy
  * can borrow the other's knowledge — which is the point of the section.
  */
 const Pane = ({
-  field,
   label,
   onToggle,
   storage,
 }: {
-  /** The field this device writes, so only that cell takes the tint. */
-  field: "done" | "title";
   label: string;
   onToggle?: () => void;
   storage: ObservableStorage;
 }) => {
   const { data } = useQuery<Task>("Task");
   const row = data.find((item) => item.id === TASK_ID);
-  const done = row?.done ?? false;
-  const title = row?.title ?? ORIGINAL;
 
   const pending = useOutbox(storage).length > 0;
-  const tone = pending ? "pending" : "neutral";
-  const note = pending ? "this device only" : undefined;
 
   return (
     <Device label={label}>
-      <div className="space-y-2">
-        <TaskRow
-          done={done}
-          onToggle={onToggle}
-          title={title}
-          tone={pending ? "pending" : "synced"}
-        />
-        <FieldCell
-          name="done"
-          note={field === "done" ? note : undefined}
-          tone={field === "done" ? tone : "neutral"}
-          value={String(done)}
-        />
-        <FieldCell
-          name="title"
-          note={field === "title" ? note : undefined}
-          tone={field === "title" ? tone : "neutral"}
-          value={`"${title}"`}
-        />
-      </div>
+      <TaskRow
+        done={row?.done ?? false}
+        note={pending ? "this device only" : undefined}
+        onToggle={onToggle}
+        title={row?.title ?? ORIGINAL}
+        tone={pending ? "pending" : "synced"}
+      />
     </Device>
   );
 };
@@ -131,14 +111,13 @@ const LiveStage = ({
     <Stage>
       <SyncProvider autoStop={false} client={engine.clientA}>
         <Pane
-          field="done"
           label="Your laptop"
           onToggle={step === 0 ? handleToggle : undefined}
           storage={engine.storageA}
         />
       </SyncProvider>
       <SyncProvider autoStop={false} client={engine.clientB}>
-        <Pane field="title" label="Your phone" storage={engine.storageB} />
+        <Pane label="Your phone" storage={engine.storageB} />
       </SyncProvider>
     </Stage>
   );
@@ -150,10 +129,8 @@ const Poster = () => (
   <Stage>
     {["Your laptop", "Your phone"].map((label) => (
       <Device key={label} label={label}>
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <TaskRow done={false} title={ORIGINAL} />
-          <FieldCell name="done" value="false" />
-          <FieldCell name="title" value={`"${ORIGINAL}"`} />
         </div>
       </Device>
     ))}
@@ -205,14 +182,7 @@ export const Fig03Diverge = () => {
 
   return (
     <Figure
-      caption={
-        <>
-          Tick the box on the laptop, then rename the row on the phone. Each
-          device applied its own write and neither one left home, so both copies
-          are right about themselves and wrong about each other. Nothing in this
-          figure can tell you which <code>title</code> the row actually has.
-        </>
-      }
+      caption="Tick the box on the laptop, then rename the row on the phone."
       controls={
         <Button
           disabled={step !== 1}
@@ -223,8 +193,6 @@ export const Fig03Diverge = () => {
           Rename on the phone
         </Button>
       }
-      n={3}
-      stageClassName="min-h-56"
       state={state}
       status={status}
       title="Two copies of one row"

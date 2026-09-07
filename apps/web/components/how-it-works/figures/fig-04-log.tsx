@@ -25,10 +25,8 @@ const TITLES = {
   [SEED_A]: "Review pull request #42",
   [SEED_B]: "Ship the release notes",
 };
-const RENAMED_A = "Review PR #42";
-const RENAMED_C = "Draft the changelog";
 
-/** The three presses, in the order `Next` reaches for them. */
+/** The three presses, in the order the figure reaches for them unprompted. */
 const PRESSES = ["I", "U", "A"] as const;
 type Press = (typeof PRESSES)[number];
 
@@ -45,11 +43,9 @@ interface Row {
   title: string;
 }
 
-/** What one device has actually read out of the log, and how far it has read. */
+/** What one device has read out of the log, and how far it has read. */
 interface View {
   cursor: string;
-  /** Ids this device folded in. A committed id missing from here is gone. */
-  received: ReadonlySet<string>;
   rows: Row[];
 }
 
@@ -59,17 +55,15 @@ const seedRows = (): Row[] => [
 ];
 
 /** The log, replayed from the top. This is the only way the table is built. */
-const fold = (view: View, actions: readonly SyncAction[]): View => {
-  const rows = view.rows.map((row) => ({ ...row }));
-  const received = new Set(view.received);
+const fold = (rows: Row[], actions: readonly SyncAction[]): Row[] => {
+  const next = rows.map((row) => ({ ...row }));
 
   for (const action of actions) {
-    received.add(action.id);
     const data = (action.data ?? {}) as Partial<Row>;
-    const row = rows.find((entry) => entry.id === action.modelId);
+    const row = next.find((entry) => entry.id === action.modelId);
 
     if (action.action === "I") {
-      rows.push({
+      next.push({
         archived: false,
         done: data.done ?? false,
         id: action.modelId,
@@ -79,32 +73,19 @@ const fold = (view: View, actions: readonly SyncAction[]): View => {
       Object.assign(row, data);
     } else if (action.action === "A" && row) {
       row.archived = true;
-    } else if (action.action === "D") {
-      const index = rows.findIndex((entry) => entry.id === action.modelId);
-      if (index !== -1) {
-        rows.splice(index, 1);
-      }
     }
   }
 
-  return { cursor: view.cursor, received, rows };
+  return next;
 };
 
 const CODES = new Set(["A", "C", "D", "G", "I", "U", "V"]);
 
-const toLogRows = (log: readonly SyncAction[], view: View): LogRow[] =>
+const toLogRows = (log: readonly SyncAction[]): LogRow[] =>
   log.map((action) => ({
     code: (CODES.has(action.action) ? action.action : "U") as LogRow["code"],
     id: action.id,
     summary: `${action.modelName} ${action.modelId}`,
-    /*
-     * Below the cursor and never received: the device asked for everything
-     * after a higher id before this one committed, so it never will.
-     */
-    tone:
-      !view.received.has(action.id) && Number(action.id) <= Number(view.cursor)
-        ? ("lost" as const)
-        : undefined,
   }));
 
 /** Wait for a real write to reach the server. Latency here is zero; batching is not. */
@@ -180,7 +161,7 @@ const Stage = ({
     </ServerBox>
 
     <Device label="Your laptop" status={`cursor ${cursor}`}>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {rows.map((row) => (
           <TaskRow
             done={row.done}
@@ -197,15 +178,10 @@ const Stage = ({
 
 const LiveStage = ({
   engine,
-  locked,
-  onSkip,
   presses,
   state,
 }: {
   engine: Engine;
-  locked: boolean;
-  /** Reports the two ids the race allocated, for the status line. */
-  onSkip: (ids: [string, string] | null) => void;
   /** The reader's chosen order, kept by the parent so a replay repeats it. */
   presses: RefObject<Press[]>;
   state: FigureState;
@@ -215,7 +191,6 @@ const LiveStage = ({
 
   const [view, setView] = useState<View>(() => ({
     cursor: engine.server.getLastSyncId(),
-    received: new Set<string>(),
     rows: seedRows(),
   }));
   const viewRef = useRef(view);
@@ -225,52 +200,16 @@ const LiveStage = ({
     if (packet.actions.length === 0) {
       return;
     }
-    /*
-     * `lastSyncId` is the highest id in the answer, which is the whole
-     * problem: a lower id that commits after this read is behind the cursor
-     * and no later read will ever ask for it again.
-     */
     const next = {
-      ...fold(viewRef.current, packet.actions),
       cursor: packet.lastSyncId,
+      rows: fold(viewRef.current.rows, packet.actions),
     };
     viewRef.current = next;
     setView(next);
   }, [engine]);
 
-  const race = useCallback(async () => {
-    const { clientA, server } = engine;
-
-    server.setDeferCommits(true);
-    await clientA.update("Task", SEED_A, { title: RENAMED_A });
-    await clientA.update("Task", INSERTED, { title: RENAMED_C });
-    await until(() => server.getDeferred().length === 2);
-    server.setDeferCommits(false);
-
-    const [first, second] = server.getDeferred();
-    if (!(first && second)) {
-      return;
-    }
-    onSkip([first.id, second.id]);
-
-    /*
-     * Locked, the second write cannot commit until the first one has, because
-     * `acquireInsertOrderLock` holds the gap closed from insert to commit.
-     * Unlocked, it commits the moment it is ready — and the reader is right
-     * there.
-     */
-    server.commitDeferred(locked ? 0 : 1);
-    await read();
-    server.commitDeferred(0);
-    await read();
-  }, [engine, locked, onSkip, read]);
-
   const advance = useCallback(
     async (n: number) => {
-      if (n > PRESSES.length) {
-        await race();
-        return;
-      }
       const chosen =
         presses.current[n - 1] ??
         PRESSES.find((press) => !presses.current.includes(press));
@@ -284,14 +223,13 @@ const LiveStage = ({
       await until(() => engine.server.getLog().length > before);
       await read();
     },
-    [engine, presses, race, read]
+    [engine, presses, read]
   );
 
   /*
    * The step index is the interface. A fresh mount replays every step from
-   * zero — which is what makes Reset, Back and the commit-order switch all the
-   * same operation: reseed the server, then run the reader's own sequence
-   * again.
+   * zero, which is what makes going back and starting over the same operation:
+   * reseed the server, then run the reader's own sequence again.
    */
   const target = useRef(0);
   const done = useRef(0);
@@ -303,8 +241,6 @@ const LiveStage = ({
     }
     running.current = true;
 
-    // The steps are sequential on purpose: running them at once is the bug
-    // the last half of this figure is about.
     const run = async () => {
       try {
         while (done.current < target.current) {
@@ -325,7 +261,7 @@ const LiveStage = ({
     <Stage
       cursor={view.cursor}
       head={engine.server.getLastSyncId()}
-      logRows={toLogRows(log, view)}
+      logRows={toLogRows(log)}
       rows={view.rows}
     />
   );
@@ -338,7 +274,7 @@ const Poster = () => (
 );
 
 export const Fig04Log = () => {
-  const state = useFigureState({ stepCount: PRESSES.length + 2 });
+  const state = useFigureState({ stepCount: PRESSES.length + 1 });
   const { engine, generation, live, reapply } = useEngineScenario(
     logScenario,
     state.ref,
@@ -347,8 +283,6 @@ export const Fig04Log = () => {
   const { step, to } = state;
 
   const presses = useRef<Press[]>([]);
-  const [locked, setLocked] = useState(true);
-  const [raced, setRaced] = useState<[string, string] | null>(null);
 
   const handlePress = useCallback(
     (press: Press) => {
@@ -358,16 +292,10 @@ export const Fig04Log = () => {
     [step, to]
   );
 
-  const handleLock = useCallback(() => {
-    setLocked((current) => !current);
-    setRaced(null);
-    reapply();
-  }, [reapply]);
-
   /*
-   * Back and Reset both mean "replay the scenario": a syncId that has been
-   * handed out is never handed out again, so the only honest way back is to
-   * run the reader's own sequence from the top.
+   * Looping back is a replay: a syncId that has been handed out is never
+   * handed out again, so the only honest way back is to run the reader's own
+   * sequence from the top.
    */
   const lastStep = useRef(0);
   useEffect(() => {
@@ -377,7 +305,6 @@ export const Fig04Log = () => {
       return;
     }
     presses.current = [];
-    setRaced(null);
     reapply();
     lastStep.current = 0;
     to(0);
@@ -388,59 +315,24 @@ export const Fig04Log = () => {
       return "Scroll this figure into view to run it.";
     }
     if (step === 0) {
-      return "Two rows on the device, and a log with nothing in it.";
+      return "Two tasks on the device, and a log with nothing in it.";
     }
-    if (step <= PRESSES.length) {
-      return `${step} action${step === 1 ? "" : "s"} in the log, each with the number the server gave it.`;
-    }
-    if (!raced) {
-      return "Two writes at once.";
-    }
-    const [lower, higher] = raced;
-    return locked
-      ? `${lower} committed before ${higher}, so the device read both.`
-      : `${lower} committed after ${higher}. The device had already asked for everything after ${higher}.`;
+    return `${step} change${step === 1 ? "" : "s"} in the log, each with the number the server gave it.`;
   })();
 
   return (
     <Figure
-      caption={
-        <>
-          Press <code>Insert</code>, <code>Update</code> and{" "}
-          <code>Archive</code> in any order. Each press adds one row to the log
-          and takes the next number, and the device on the right is that log
-          replayed from the top. Then turn the commit-order lock off and run two
-          writes at once: the device asks for everything after the higher
-          number, and the lower one lands a moment later, behind its back.
-        </>
-      }
-      controls={
-        <>
-          {PRESSES.map((press) => (
-            <PressButton
-              disabled={
-                !live ||
-                step >= PRESSES.length ||
-                presses.current.includes(press)
-              }
-              key={press}
-              onPress={handlePress}
-              press={press}
-            />
-          ))}
-
-          <Button
-            aria-pressed={locked}
-            disabled={!live}
-            onClick={handleLock}
-            size="xs"
-            variant="outline"
-          >
-            Commit-order lock: {locked ? "on" : "off"}
-          </Button>
-        </>
-      }
-      n={4}
+      caption="Press Insert, Update and Archive in any order."
+      controls={PRESSES.map((press) => (
+        <PressButton
+          disabled={
+            !live || step >= PRESSES.length || presses.current.includes(press)
+          }
+          key={press}
+          onPress={handlePress}
+          press={press}
+        />
+      ))}
       stageClassName="min-h-64"
       state={state}
       status={status}
@@ -451,8 +343,6 @@ export const Fig04Log = () => {
         <LiveStage
           engine={engine}
           key={generation}
-          locked={locked}
-          onSkip={setRaced}
           presses={presses}
           state={state}
         />

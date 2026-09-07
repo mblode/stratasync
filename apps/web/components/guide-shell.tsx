@@ -1,5 +1,6 @@
 import type React from "react";
 
+import { GetStarted } from "@/components/get-started";
 import {
   Accordion,
   AccordionContent,
@@ -86,7 +87,7 @@ export const GuideShell = ({ children, guide }: Props) => {
       />
       {/* oxlint-enable react/no-danger */}
 
-      <div className="container-wrapper py-8 md:py-12">
+      <div className="container-wrapper pt-4 pb-8 md:pt-6 md:pb-12">
         <ZoneBreadcrumb
           product={siteConfig.name}
           productHref={siteConfig.url}
@@ -132,6 +133,8 @@ export const GuideShell = ({ children, guide }: Props) => {
               ))}
             </Accordion>
           </section>
+
+          <GetStarted />
 
           <section className="mt-16 border-border/60 border-t pt-8">
             <h2 className="font-sans text-lg font-medium">Keep reading</h2>

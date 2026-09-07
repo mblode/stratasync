@@ -1,6 +1,5 @@
 "use client";
 
-import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Figure, RangeControl, useFigureState } from "../figure";
@@ -18,37 +17,27 @@ const formatMs = (value: number) => `${value} ms`;
  * still elapses on the wall clock, because the wait is the entire subject of
  * this figure. Suppressing it would delete the lesson.
  */
-const packetsFor = (step: number, online: boolean): WirePacket[] => {
+const packetsFor = (step: number): WirePacket[] => {
   if (step === 0) {
     return [];
   }
-
-  if (!online) {
-    return [{ id: "up", t: 0.35, tone: "pending" }];
-  }
-
   if (step === 1) {
     return [{ id: "up", t: 0.5, tone: "pending" }];
   }
-
   if (step === 2) {
     return [{ id: "up", t: 1, tone: "synced" }];
   }
-
   return [{ id: "down", t: 0, tone: "synced" }];
 };
 
 export const Fig01RoundTrip = () => {
-  const state = useFigureState({ autoplayMs: 1400, stepCount: 4 });
+  const state = useFigureState({ stepCount: 4 });
   const [latency, setLatency] = useState(200);
-  const [online, setOnline] = useState(true);
 
-  const { step: rawStep, to } = state;
-  // Offline, the request never lands, however many times you press.
-  const step = online ? rawStep : Math.min(rawStep, 1);
+  const { step, to } = state;
 
   useEffect(() => {
-    if (rawStep !== 1 || !online) {
+    if (step !== 1) {
       return;
     }
 
@@ -59,7 +48,7 @@ export const Fig01RoundTrip = () => {
       clearTimeout(half);
       clearTimeout(full);
     };
-  }, [latency, online, rawStep, to]);
+  }, [latency, step, to]);
 
   const done = step === 3;
   const inFlight = step > 0 && step < 3;
@@ -68,21 +57,9 @@ export const Fig01RoundTrip = () => {
 
   const handleToggle = useCallback(() => to(step === 0 ? 1 : 0), [step, to]);
 
-  const { reset } = state;
-  const handleNetworkChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setOnline(!event.target.checked);
-      reset();
-    },
-    [reset]
-  );
-
   const status = (() => {
     if (step === 0) {
       return "Nothing sent. The box is unticked.";
-    }
-    if (!online) {
-      return "Offline. The request never leaves the device.";
     }
     if (step === 1) {
       return `Request on the wire. ${latency} ms round trip.`;
@@ -95,38 +72,18 @@ export const Fig01RoundTrip = () => {
 
   return (
     <Figure
-      caption={
-        <>
-          Drag the slider to set the round trip, then press the checkbox.
-          Nothing about the app changes between 20&#8239;ms and 400&#8239;ms.
-          Only the distance does. Cut the network and the same interface simply
-          stops working, because the tick was never really yours to give.
-        </>
-      }
+      caption="Drag the round trip, then press the checkbox."
       controls={
-        <>
-          <RangeControl
-            format={formatMs}
-            label="Round trip"
-            max={400}
-            min={20}
-            onChange={handleLatencyChange}
-            step={20}
-            value={latency}
-          />
-          <label className="flex items-center gap-1.5 font-sans text-xs">
-            <input
-              checked={!online}
-              className="size-3.5 accent-warning"
-              onChange={handleNetworkChange}
-              type="checkbox"
-            />
-            Cut the network
-          </label>
-        </>
+        <RangeControl
+          format={formatMs}
+          label="Round trip"
+          max={400}
+          min={20}
+          onChange={handleLatencyChange}
+          step={20}
+          value={latency}
+        />
       }
-      n={1}
-      stageClassName="min-h-36"
       state={state}
       status={status}
       title="A tick that has to travel"
@@ -142,12 +99,16 @@ export const Fig01RoundTrip = () => {
           />
         </Device>
 
-        <WireLane offline={!online} packets={packetsFor(step, online)} />
+        <WireLane packets={packetsFor(step)} />
 
+        {/* The row count already says the server has nothing, so there is no
+            second line here saying it again. Mono: it is what you would type. */}
         <ServerBox status={step >= 2 ? "1 row" : "0 rows"}>
-          <p className="font-mono text-muted-foreground text-xs">
-            {step >= 2 ? `done = true` : "waiting"}
-          </p>
+          {step >= 2 ? (
+            <p className="font-mono text-muted-foreground text-xs">
+              done = true
+            </p>
+          ) : null}
         </ServerBox>
       </div>
     </Figure>

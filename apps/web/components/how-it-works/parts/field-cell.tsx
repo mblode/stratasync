@@ -27,19 +27,15 @@ export const FieldCell = ({
 }) => (
   <div
     className={cn(
-      "rounded-md border px-2.5 py-1.5",
+      "rounded-lg border px-2.5 py-1.5",
       toneSurface[tone],
       className
     )}
   >
     <div className="flex items-baseline justify-between gap-2">
-      <code className="font-mono text-[0.6875rem] text-muted-foreground">
-        {name}
-      </code>
+      <span className="text-[0.6875rem] text-muted-foreground">{name}</span>
       {note ? (
-        <code className="font-mono text-[0.6875rem] text-muted-foreground">
-          {note}
-        </code>
+        <span className="text-[0.6875rem] text-muted-foreground">{note}</span>
       ) : null}
     </div>
     <code className="mt-0.5 block truncate font-mono text-xs">{value}</code>

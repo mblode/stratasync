@@ -24,7 +24,7 @@ const packetsFor = (step: number): WirePacket[] => {
 };
 
 export const Fig02LocalReplica = () => {
-  const state = useFigureState({ autoplayMs: 1400, stepCount: 4 });
+  const state = useFigureState({ stepCount: 4 });
   const [latency, setLatency] = useState(800);
 
   const { step, to } = state;
@@ -68,14 +68,7 @@ export const Fig02LocalReplica = () => {
 
   return (
     <Figure
-      caption={
-        <>
-          Press the checkbox. The read comes from the box on the left, not the
-          one on the right. Drag the round trip as high as it goes: the tick
-          doesn’t move. All the slider changes now is how long the value stays
-          amber.
-        </>
-      }
+      caption="Press the checkbox, then drag the round trip as high as it goes."
       controls={
         <RangeControl
           format={formatMs}
@@ -87,32 +80,28 @@ export const Fig02LocalReplica = () => {
           value={latency}
         />
       }
-      n={2}
-      stageClassName="min-h-48"
       state={state}
       status={status}
       title="A copy that lives on the device"
     >
       <div className="grid items-stretch gap-3 @md/figure:grid-cols-[1fr_auto_1fr]">
         <Device label="Your phone">
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <TaskRow
               done={done}
               onToggle={handleToggle}
               title={TITLE}
               tone={confirmed ? "synced" : "pending"}
             />
-            <div className="rounded-md border border-border border-dashed p-2">
-              <p className="mb-1.5 font-sans text-[0.6875rem] text-muted-foreground">
-                Local copy: every read comes from here
-              </p>
-              <FieldCell
-                name="done"
-                note={confirmed ? "confirmed" : "local only"}
-                tone={localTone}
-                value={done ? "true" : "false"}
-              />
-            </div>
+            {/* No dashed box around this and no label above it: the cell's
+                own note says whose copy it is, and the server's cell across
+                the wire is what it is being compared against. */}
+            <FieldCell
+              name="done"
+              note={confirmed ? "confirmed" : "local only"}
+              tone={localTone}
+              value={done ? "true" : "false"}
+            />
           </div>
         </Device>
 

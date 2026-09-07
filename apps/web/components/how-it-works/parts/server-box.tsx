@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { BoxLabel } from "./box-label";
+
 /**
- * The server. The only green chrome on the page, and the 2px top edge is the
- * claim: this is the thing that decides.
+ * The server. The faint green ground is the whole claim: this is the thing
+ * that decides, and it is the only box on the page that gets a colour.
  */
 export const ServerBox = ({
   children,
@@ -17,20 +19,8 @@ export const ServerBox = ({
   label?: string;
   status?: ReactNode;
 }) => (
-  <div
-    className={cn(
-      "flex flex-col overflow-hidden rounded-lg border border-border border-t-2 border-t-primary bg-background",
-      className
-    )}
-  >
-    <div className="flex items-baseline justify-between gap-2 border-border border-b bg-surface px-3 py-1.5">
-      <span className="font-sans font-medium text-xs">{label}</span>
-      {status ? (
-        <span className="font-mono text-[0.6875rem] text-muted-foreground tabular-figures">
-          {status}
-        </span>
-      ) : null}
-    </div>
-    <div className="flex-1 p-3">{children}</div>
+  <div className={cn("flex flex-col", className)}>
+    <BoxLabel label={label} status={status} tone="synced" />
+    <div className="flex-1 rounded-xl bg-primary/[0.07] p-3">{children}</div>
   </div>
 );

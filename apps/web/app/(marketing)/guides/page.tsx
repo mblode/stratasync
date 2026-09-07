@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { GetStarted } from "@/components/get-started";
 import { ZoneBreadcrumb } from "@/components/zone-breadcrumb";
 import {
   breadcrumbSchema,
@@ -60,7 +61,7 @@ const Page = () => (
     />
     {/* oxlint-enable react/no-danger */}
 
-    <div className="container-wrapper py-8 md:py-12">
+    <div className="container-wrapper pt-4 pb-8 md:pt-6 md:pb-12">
       <ZoneBreadcrumb
         product={siteConfig.name}
         productHref={siteConfig.url}
@@ -96,6 +97,8 @@ const Page = () => (
             </li>
           ))}
         </ul>
+
+        <GetStarted />
       </div>
     </div>
   </>
