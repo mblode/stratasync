@@ -142,41 +142,39 @@ interface Crumb {
  * `/stratasync`. Anything passed here must also render in the visible trail:
  * a BreadcrumbList naming a crumb the page does not show is a structured-data
  * policy violation, and answer engines read the DOM rather than the script.
+ *
+ * The zone crumbs (Matthew Blode -> Projects) belong to the zone root, which
+ * is where a reader arriving from blode.co needs the way back. Deeper pages
+ * trade them for a site-local trail: four crumbs, two of them off-site, to say
+ * "How it works" is more chrome than orientation. `components/zone-breadcrumb.tsx`
+ * splits the same way, item for item.
  */
-export const breadcrumbSchema = (trail: Crumb[] = [], id = breadcrumbId) => ({
-  "@id": id,
-  "@type": "BreadcrumbList",
-  itemListElement: [
-    // "Matthew Blode", not "Home": the root crumb is the one piece of chrome
-    // every zone shows above the fold, and it must match the visible trail in
-    // `components/zone-breadcrumb.tsx` exactly or Google reads the mismatch as
-    // a markup error.
-    {
-      "@type": "ListItem",
-      item: `${host}/`,
-      name: "Matthew Blode",
-      position: 1,
-    },
-    {
-      "@type": "ListItem",
-      item: `${host}/projects`,
-      name: "Projects",
-      position: 2,
-    },
-    {
-      "@type": "ListItem",
-      item: siteConfig.url,
-      name: siteConfig.name,
-      position: 3,
-    },
-    ...trail.map((crumb, index) => ({
+export const breadcrumbSchema = (trail: Crumb[] = [], id = breadcrumbId) => {
+  const root: Crumb = { name: siteConfig.name, url: siteConfig.url };
+  const items =
+    trail.length > 0
+      ? [root, ...trail]
+      : [
+          // "Matthew Blode", not "Home": the root crumb is the one piece of
+          // chrome the zone root shows above the fold, and it must match the
+          // visible trail exactly or Google reads the mismatch as a markup
+          // error.
+          { name: "Matthew Blode", url: `${host}/` },
+          { name: "Projects", url: `${host}/projects` },
+          root,
+        ];
+
+  return {
+    "@id": id,
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((crumb, index) => ({
       "@type": "ListItem",
       item: crumb.url,
       name: crumb.name,
-      position: 4 + index,
+      position: index + 1,
     })),
-  ],
-});
+  };
+};
 
 export const faqSchema = () => ({
   "@id": faqId,
