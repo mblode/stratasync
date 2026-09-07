@@ -1,4 +1,3 @@
-/* oxlint-disable eslint-plugin-promise/avoid-new -- polling the server is how a figure waits for a real write to arrive */
 "use client";
 
 import type { SyncClient } from "@stratasync/client";
@@ -9,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 import type { Engine } from "../engine";
-import { logScenario, useEngineScenario, useServerLog } from "../engine";
+import { logScenario, until, useEngineScenario, useServerLog } from "../engine";
 import type { FigureState } from "../figure";
 import { Figure, useFigureState } from "../figure";
 import type { LogRow } from "../parts";
@@ -87,20 +86,6 @@ const toLogRows = (log: readonly SyncAction[]): LogRow[] =>
     id: action.id,
     summary: `${action.modelName} ${action.modelId}`,
   }));
-
-/** Wait for a real write to reach the server. Latency here is zero; batching is not. */
-const until = (test: () => boolean): Promise<void> =>
-  new Promise((resolve) => {
-    const deadline = Date.now() + 2000;
-    const tick = () => {
-      if (test() || Date.now() > deadline) {
-        resolve();
-        return;
-      }
-      setTimeout(tick, 10);
-    };
-    tick();
-  });
 
 const runPress = (client: SyncClient, press: Press): Promise<unknown> => {
   if (press === "I") {

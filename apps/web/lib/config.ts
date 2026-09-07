@@ -57,7 +57,7 @@ export const siteConfig = {
 
 /**
  * The `/how-it-works` explainer. Top-level rather than a guide: it argues one
- * mechanism across ten figures instead of answering a question, so it carries
+ * mechanism across nine figures instead of answering a question, so it carries
  * its own shell. The page, the sitemap, `llms.txt` and the nav all read this,
  * so the page reaches every surface by being described here once.
  */
