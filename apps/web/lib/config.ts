@@ -56,17 +56,17 @@ export const siteConfig = {
 } as const;
 
 /**
- * The `/how-it-works` explainer. Top-level rather than a guide: it argues one
- * mechanism across nine figures instead of answering a question, so it carries
- * its own shell. The page, the sitemap, `llms.txt` and the nav all read this,
- * so the page reaches every surface by being described here once.
+ * The `/how-it-works` explainer. Top-level rather than a guide: it follows one
+ * line of code through six figures instead of answering a question, so it
+ * carries its own shell. The page, the sitemap, `llms.txt` and the nav all
+ * read this, so the page reaches every surface by being described here once.
  */
 export const howItWorks = {
   /** The passage under the H1, quotable without the page. */
   answer:
-    "A sync engine keeps the data on the device and reconciles it with a server that numbers every change. This page builds one from a single checkbox: local reads, an ordered log, an offline write queue, and a rebase step for what you missed.",
+    "You set a field and call save(). Strata Sync writes it to a copy on the device, so the screen updates at once, then sends it to a server that numbers every change and passes it to every other device. Offline, catching up and undo all fall out of that one path.",
   description:
-    "A sync engine built up from nothing: local reads, a server-numbered log, an offline outbox, and field-level rebase. One idea per figure, each one live.",
+    "One line of code, followed all the way: a local copy for instant screens, a queue for offline, a server-numbered list every device follows, field-level catch-up and undo. Six figures, each one live.",
   /** Primary query first. Nothing in `/guides` currently targets it. */
   keywords: [
     "how does a sync engine work",
@@ -74,9 +74,9 @@ export const howItWorks = {
     "optimistic updates offline queue",
     "server sequenced sync log",
   ],
-  title: "How a sync engine works, built from one checkbox",
+  title: "How Strata Sync works, from one line of code",
   /** Content revision date. Bump when the prose changes, not on deploy. */
-  updated: "2026-09-07",
+  updated: "2026-09-08",
   url: `${siteConfig.url}/how-it-works`,
 } as const;
 
