@@ -50,7 +50,11 @@ export const TxChip = ({
    */
   <div
     className={cn(
-      "flex min-h-[3.25rem] flex-col justify-center gap-0.5 rounded-md border px-2.5 py-1.5",
+      // `leading-none`: the codes inherit the article's tall line-height
+      // otherwise, and `needs` (a smaller size on a baseline-aligned row) then
+      // grows the chip past its min height in `awaitingSync` alone, so the
+      // figure jumps 2.5px on that one state. Pinned, every state is 3.25rem.
+      "flex min-h-[3.25rem] flex-col justify-center gap-0.5 rounded-md border px-2.5 py-1.5 leading-none",
       toneSurface[stateTone[state]],
       className
     )}

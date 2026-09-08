@@ -87,6 +87,16 @@ export const Wire = ({
 );
 
 /**
+ * Where the lane turns from a stack into a row. It has to be the same width
+ * the figure's own grid turns at, so it is named rather than hardcoded: a
+ * figure whose boxes are wide needs more room before three columns fit.
+ */
+const LANE = {
+  lg: { horizontal: "hidden @lg/figure:block", vertical: "@lg/figure:hidden" },
+  md: { horizontal: "hidden @md/figure:block", vertical: "@md/figure:hidden" },
+} as const;
+
+/**
  * The wire as figures actually use it: horizontal when the figure is wide,
  * vertical when the stack has rotated 90°.
  *
@@ -95,21 +105,24 @@ export const Wire = ({
  * screen reader and no label is hidden from anyone.
  */
 export const WireLane = ({
+  at = "md",
   offline = false,
   packets,
 }: {
+  /** The figure's own column breakpoint. */
+  at?: keyof typeof LANE;
   offline?: boolean;
   packets: WirePacket[];
 }) => (
   <>
     <Wire
-      className="mx-auto self-center @md/figure:hidden"
+      className={cn("mx-auto self-center", LANE[at].vertical)}
       offline={offline}
       packets={packets}
       vertical
     />
     <Wire
-      className="hidden self-center @md/figure:block"
+      className={cn("self-center", LANE[at].horizontal)}
       offline={offline}
       packets={packets}
     />
