@@ -75,56 +75,10 @@ export class DemoServer {
   private readonly transports = new Map<string, DemoTransport>();
   private readonly rows: ModelRow[] = [];
   private readonly syncLog: SyncAction[] = [];
-  /*
-   * Additive observability for `/how-it-works`, which renders the log itself
-   * rather than only its effects. `onSyncFlow` keeps its single-callback shape
-   * because `Showcase` owns that slot.
-   */
-  private readonly logListeners = new Set<() => void>();
-  private logSnapshot: readonly SyncAction[] = [];
   onSyncFlow: SyncFlowCallback | null = null;
 
   constructor(seedRows: ModelRow[]) {
     this.rows = [...seedRows];
-  }
-
-  /**
-   * The log, as a snapshot stable between appends so `useSyncExternalStore`
-   * does not loop.
-   */
-  getLog(): readonly SyncAction[] {
-    return this.logSnapshot;
-  }
-
-  onLogAppend(listener: () => void): () => void {
-    this.logListeners.add(listener);
-    return () => {
-      this.logListeners.delete(listener);
-    };
-  }
-
-  /** Back to a known state, so a figure can be replayed from step 0. */
-  reset(seedRows: ModelRow[]): void {
-    this.nextSyncId = 1;
-    /*
-     * Copied, not aliased: `applyAction` assigns into `row.data` in place, so
-     * a figure replaying its scenario would otherwise be handed back a seed
-     * the previous run had already edited.
-     */
-    this.rows.splice(
-      0,
-      this.rows.length,
-      ...seedRows.map((row) => ({ ...row, data: { ...row.data } }))
-    );
-    this.syncLog.length = 0;
-    this.publishLog();
-  }
-
-  private publishLog(): void {
-    this.logSnapshot = [...this.syncLog];
-    for (const listener of this.logListeners) {
-      listener();
-    }
   }
 
   register(id: string, transport: DemoTransport): void {
@@ -157,22 +111,6 @@ export class DemoServer {
     batch: TransactionBatch
   ): MutateResult {
     const results = batch.transactions.map((tx) => {
-      /*
-       * Dedup on (clientId, clientTxId), as the real server does — a lookup
-       * first, a unique-constraint fallback behind it
-       * (`mutate-service.ts:498,601`). A retried transaction gets back the
-       * syncId it already has and appends nothing, which is what makes a
-       * resend safe.
-       */
-      const existing = this.findByClientTx(sourceTransportId, tx.clientTxId);
-      if (existing) {
-        return {
-          clientTxId: tx.clientTxId,
-          success: true,
-          syncId: existing.id,
-        };
-      }
-
       this.nextSyncId += 1;
       const syncId = String(this.nextSyncId);
 
@@ -186,7 +124,32 @@ export class DemoServer {
         modelName: tx.modelName,
       };
 
-      this.commit(action, sourceTransportId);
+      // Persist to sync log and update server rows
+      this.syncLog.push(action);
+      this.applyAction(action);
+
+      // Broadcast deltas to other connected transports
+      const deltaPacket: DeltaPacket = {
+        actions: [action],
+        lastSyncId: syncId,
+      };
+
+      for (const [id, transport] of this.transports) {
+        if (!transport.isOnline) {
+          continue;
+        }
+
+        if (id !== sourceTransportId) {
+          // Animate sync flow for cross-device deltas
+          const direction =
+            sourceTransportId === "A" ? "right" : ("left" as const);
+          this.onSyncFlow?.(direction);
+        }
+
+        // Deliver to ALL transports (including source). The sync engine
+        // uses the echo to confirm outbox transactions via clientTxId matching
+        transport.deliverDelta(deltaPacket);
+      }
 
       return {
         clientTxId: tx.clientTxId,
@@ -200,45 +163,6 @@ export class DemoServer {
       results,
       success: true,
     };
-  }
-
-  private findByClientTx(
-    clientId: string,
-    clientTxId: string
-  ): SyncAction | undefined {
-    return this.syncLog.find(
-      (action) =>
-        action.clientId === clientId && action.clientTxId === clientTxId
-    );
-  }
-
-  /** Persist to the log, fold it into the rows, and broadcast the delta. */
-  private commit(action: SyncAction, sourceTransportId: string): void {
-    this.syncLog.push(action);
-    this.publishLog();
-    this.applyAction(action);
-
-    const deltaPacket: DeltaPacket = {
-      actions: [action],
-      lastSyncId: action.id,
-    };
-
-    for (const [id, transport] of this.transports) {
-      if (!transport.isOnline) {
-        continue;
-      }
-
-      if (id !== sourceTransportId) {
-        // Animate sync flow for cross-device deltas
-        const direction =
-          sourceTransportId === "A" ? "right" : ("left" as const);
-        this.onSyncFlow?.(direction);
-      }
-
-      // Deliver to ALL transports (including source). The sync engine
-      // uses the echo to confirm outbox transactions via clientTxId matching
-      transport.deliverDelta(deltaPacket);
-    }
   }
 
   private applyAction(action: SyncAction): void {
@@ -269,41 +193,19 @@ export class DemoServer {
 // DemoTransport: per-client transport wired to the DemoServer
 // ---------------------------------------------------------------------------
 
-export interface WireItem {
-  /** `up` is a mutation leaving the device; `down` is a delta arriving. */
-  direction: "down" | "up";
-  id: string;
-  label: string;
-}
-
-let nextWireId = 0;
-
 export class DemoTransport implements TransportAdapter {
   private readonly server: DemoServer;
   private readonly transportId: string;
-  private deltaQueue = new AsyncQueue<DeltaPacket>();
+  private readonly deltaQueue = new AsyncQueue<DeltaPacket>();
   private readonly connectionListeners = new Set<
     (state: ConnectionState) => void
   >();
   private readonly pendingMutations: {
     batch: TransactionBatch;
-    reject: (error: Error) => void;
     resolve: (result: MutateResult) => void;
   }[] = [];
-  private latencyMs: number;
+  private readonly latencyMs: number;
   private connectionState: ConnectionState = "connected";
-
-  /*
-   * One FIFO for both wire directions, so `hold` and `step` cannot reorder
-   * packets. Off by default: unheld, `mutate` schedules on the same
-   * `latencyMs` as before and `deliverDelta` stays synchronous, which is what
-   * `Showcase`'s cross-device timing depends on.
-   */
-  private readonly wire: WireItem[] = [];
-  private readonly heldQueue: { item: WireItem; run: () => void }[] = [];
-  private readonly wireListeners = new Set<() => void>();
-  private wireSnapshot: readonly WireItem[] = [];
-  private held: "both" | "down" | "up" | null = null;
 
   isOnline = true;
 
@@ -315,160 +217,6 @@ export class DemoTransport implements TransportAdapter {
   }
 
   // --- Public control methods ---
-
-  /** What is in flight right now, oldest first. */
-  getWire(): readonly WireItem[] {
-    return this.wireSnapshot;
-  }
-
-  onWireChange(listener: () => void): () => void {
-    this.wireListeners.add(listener);
-    return () => {
-      this.wireListeners.delete(listener);
-    };
-  }
-
-  /**
-   * Freeze the wire. Everything queues; nothing is dropped.
-   *
-   * The direction matters. Holding only `down` lets a mutation reach the server
-   * and its ack come back — so a transaction really does reach `awaitingSync`
-   * with a real `syncIdNeededForCompletion` — while the delta that would
-   * advance this device's cursor sits visibly in flight. That frame is the
-   * whole read-your-writes story, and it is not reachable with a single flag.
-   */
-  hold(direction: "both" | "down" | "up" = "both"): void {
-    this.held = direction;
-  }
-
-  private isHeld(direction: "down" | "up"): boolean {
-    return this.held === "both" || this.held === direction;
-  }
-
-  /** What is frozen right now, if anything. */
-  getHold(): "both" | "down" | "up" | null {
-    return this.held;
-  }
-
-  /** Let everything through, in the order it was queued. */
-  release(direction?: "down" | "up"): void {
-    if (direction === undefined) {
-      this.held = null;
-      for (const entry of this.heldQueue.splice(0)) {
-        entry.run();
-      }
-      return;
-    }
-
-    if (this.held === "both") {
-      this.held = direction === "down" ? "up" : "down";
-    } else if (this.held === direction) {
-      this.held = null;
-    }
-
-    const kept = this.heldQueue.filter(
-      (entry) => entry.item.direction !== direction
-    );
-    const freed = this.heldQueue.filter(
-      (entry) => entry.item.direction === direction
-    );
-    this.heldQueue.length = 0;
-    this.heldQueue.push(...kept);
-    for (const entry of freed) {
-      entry.run();
-    }
-  }
-
-  /** Let exactly one packet through, oldest first. */
-  step(direction?: "down" | "up"): void {
-    const index =
-      direction === undefined
-        ? 0
-        : this.heldQueue.findIndex(
-            (entry) => entry.item.direction === direction
-          );
-    if (index === -1) {
-      return;
-    }
-    const [entry] = this.heldQueue.splice(index, 1);
-    entry?.run();
-  }
-
-  /**
-   * Undo `close()`.
-   *
-   * `client.clearAll()` resets its orchestrator, which calls
-   * `transport.close()` — and close unregisters from the server and closes the
-   * delta queue for good. The how-it-works page restarts the same client
-   * against the same transport when a figure checks the engine out, so close
-   * has to be reversible here. `Showcase` tears its transports down and never
-   * reuses them, so nothing else observes this.
-   */
-  reopen(): void {
-    /*
-     * A reopened transport is a new connection, so nothing survives the gap.
-     * Without this the held delta from the previous scenario is replayed into
-     * the fresh queue the moment the hold lifts, and the reseeded client
-     * applies a change to a row that no longer has the edit.
-     */
-    this.heldQueue.length = 0;
-    this.pendingMutations.length = 0;
-    this.wire.length = 0;
-    this.publishWire();
-    this.deltaQueue = new AsyncQueue<DeltaPacket>();
-    this.server.register(this.transportId, this);
-  }
-
-  /**
-   * Fail every buffered mutation, which is what killing the app does to a send
-   * that never left. The client puts those transactions back to `queued` with
-   * a `retryCount` (`outbox-manager.ts:372-395`) and replays them on restart —
-   * so this is the only honest way to show a durable queue outliving its
-   * client. `Showcase` never calls it.
-   */
-  abortPending(): void {
-    for (const { reject } of this.pendingMutations.splice(0)) {
-      reject(new Error("Transport closed"));
-    }
-  }
-
-  setLatency(latencyMs: number): void {
-    this.latencyMs = latencyMs;
-  }
-
-  private publishWire(): void {
-    this.wireSnapshot = [...this.wire];
-    for (const listener of this.wireListeners) {
-      listener();
-    }
-  }
-
-  private removeFromWire(id: string): void {
-    const index = this.wire.findIndex((item) => item.id === id);
-    if (index !== -1) {
-      this.wire.splice(index, 1);
-      this.publishWire();
-    }
-  }
-
-  private enqueue(direction: "down" | "up", label: string, run: () => void) {
-    nextWireId += 1;
-    const item: WireItem = { direction, id: `w${nextWireId}`, label };
-    this.wire.push(item);
-    this.publishWire();
-
-    const finish = () => {
-      this.removeFromWire(item.id);
-      run();
-    };
-
-    if (this.isHeld(direction)) {
-      this.heldQueue.push({ item, run: finish });
-      return;
-    }
-
-    this.scheduleResolve(finish);
-  }
 
   setOnline(online: boolean): void {
     this.isOnline = online;
@@ -484,14 +232,8 @@ export class DemoTransport implements TransportAdapter {
   private flushPendingMutations(): void {
     const queued = this.pendingMutations.splice(0);
     for (const { batch, resolve } of queued) {
-      // Through the wire, so a figure can watch the offline queue drain in
-      // order. Unheld this schedules on the same `latencyMs` as before.
-      this.enqueue(
-        "up",
-        `${batch.transactions.length} transaction${
-          batch.transactions.length === 1 ? "" : "s"
-        }`,
-        () => resolve(this.server.processMutation(this.transportId, batch))
+      this.scheduleResolve(() =>
+        resolve(this.server.processMutation(this.transportId, batch))
       );
     }
   }
@@ -505,29 +247,7 @@ export class DemoTransport implements TransportAdapter {
   }
 
   deliverDelta(packet: DeltaPacket): void {
-    if (!this.isHeld("down")) {
-      // Synchronous, exactly as before. Only a held wire intercepts a delta.
-      this.deltaQueue.push(packet);
-      return;
-    }
-
-    nextWireId += 1;
-    const item: WireItem = {
-      direction: "down",
-      id: `w${nextWireId}`,
-      label: `${packet.actions.length} action${
-        packet.actions.length === 1 ? "" : "s"
-      } · syncId ${packet.lastSyncId}`,
-    };
-    this.wire.push(item);
-    this.publishWire();
-    this.heldQueue.push({
-      item,
-      run: () => {
-        this.removeFromWire(item.id);
-        this.deltaQueue.push(packet);
-      },
-    });
+    this.deltaQueue.push(packet);
   }
 
   // --- TransportAdapter implementation ---
@@ -559,18 +279,14 @@ export class DemoTransport implements TransportAdapter {
   mutate(batch: TransactionBatch): Promise<MutateResult> {
     if (!this.isOnline) {
       // Buffer while offline. Resolves when we come back online.
-      return new Promise((resolve, reject) => {
-        this.pendingMutations.push({ batch, reject, resolve });
+      return new Promise((resolve) => {
+        this.pendingMutations.push({ batch, resolve });
       });
     }
 
     return new Promise((resolve) => {
-      this.enqueue(
-        "up",
-        `${batch.transactions.length} transaction${
-          batch.transactions.length === 1 ? "" : "s"
-        }`,
-        () => resolve(this.server.processMutation(this.transportId, batch))
+      this.scheduleResolve(() =>
+        resolve(this.server.processMutation(this.transportId, batch))
       );
     });
   }
