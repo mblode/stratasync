@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { Figure, RangeControl, useFigureState } from "../figure";
 import { Device, ServerBox, TaskRow, WireLane } from "../parts";
 import type { WirePacket } from "../parts";
@@ -88,7 +90,10 @@ export const Fig01RoundTrip = () => {
       status={status}
       title="A tick that has to travel"
     >
-      <div className="grid items-stretch gap-3 @md/figure:grid-cols-[1fr_auto_1fr]">
+      {/* Columns later than the other figures: `Saving…` widens the task row,
+          and at 28rem the three columns it leaves behind are too narrow for
+          the server's own label to stay on one line. */}
+      <div className="grid items-stretch gap-3 @lg/figure:grid-cols-[1fr_auto_1fr]">
         <Device label="Your phone">
           <TaskRow
             done={done}
@@ -99,16 +104,22 @@ export const Fig01RoundTrip = () => {
           />
         </Device>
 
-        <WireLane packets={packetsFor(step)} />
+        <WireLane at="lg" packets={packetsFor(step)} />
 
         {/* The row count already says the server has nothing, so there is no
-            second line here saying it again. Mono: it is what you would type. */}
+            second line here saying it again. Mono: it is what you would type.
+
+            Always in the DOM, so the row the line needs is already there when
+            it arrives and the figure does not grow mid-round-trip. */}
         <ServerBox status={step >= 2 ? "1 row" : "0 rows"}>
-          {step >= 2 ? (
-            <p className="font-mono text-muted-foreground text-xs">
-              done = true
-            </p>
-          ) : null}
+          <p
+            className={cn(
+              "font-mono text-muted-foreground text-xs",
+              step < 2 && "invisible"
+            )}
+          >
+            done = true
+          </p>
         </ServerBox>
       </div>
     </Figure>
