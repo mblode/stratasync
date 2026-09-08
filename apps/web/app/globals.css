@@ -347,3 +347,26 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * A packet crossing a wire on /how-it-works. Reversed for the way back, and
+ * zeroed with every other animation under prefers-reduced-motion above, so the
+ * packet is then simply at its destination.
+ */
+@keyframes wire-x {
+  from {
+    left: 0%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@keyframes wire-y {
+  from {
+    top: 0%;
+  }
+  to {
+    top: 100%;
+  }
+}

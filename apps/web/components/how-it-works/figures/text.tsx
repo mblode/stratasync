@@ -10,9 +10,9 @@ import { Device } from "../parts";
 const BASE = "Ship the notes";
 
 /**
- * The whole point of the figure is that the merged sentence is *computed*, so
- * it is computed: two real `Y.Doc`s, edited concurrently, then exchanged. If
- * Yjs ever merged this differently, the figure would say so.
+ * The merged sentence is computed, not typed in: two real `Y.Doc`s, edited
+ * without seeing each other, then exchanged. If Yjs ever merged this
+ * differently, the figure would say so.
  */
 const merge = () => {
   const base = new Y.Doc();
@@ -24,7 +24,6 @@ const merge = () => {
   Y.applyUpdate(a, seed);
   Y.applyUpdate(b, seed);
 
-  // Neither device has seen the other when it types.
   a.getText("t").insert(9, "release ");
   b.getText("t").insert(BASE.length, " today");
 
@@ -65,8 +64,6 @@ interface Span {
 const build = (): { localA: string; localB: string; spans: Span[] } => {
   const { localA, localB, merged } = merge();
 
-  // Each device's insert, located in the merged sentence by what the *other*
-  // device's copy turned out to be missing.
   const marks = [
     { by: "a" as const, ...gap(localB, merged) },
     { by: "b" as const, ...gap(localA, merged) },
@@ -90,26 +87,23 @@ const build = (): { localA: string; localB: string; spans: Span[] } => {
 
 const { localA, localB, spans } = build();
 
-/*
- * Authorship is an underline, never a colour, so the only colour on the figure
- * is the red on the characters last-write-wins destroyed.
- */
+/** Whose words these are: a solid underline for you, a dotted one for them. */
 const pen = (by: By) => {
   if (by === "a") {
-    return "underline decoration-border underline-offset-4";
+    return "underline decoration-foreground/40 underline-offset-4";
   }
   if (by === "b") {
-    return "underline decoration-border decoration-dotted underline-offset-4";
+    return "underline decoration-dotted decoration-foreground/40 underline-offset-4";
   }
   return "";
 };
 
-/** One device's own copy: the base, plus the words that device just typed. */
+/** One phone's own copy: the sentence, plus the words that phone typed. */
 const Local = ({ by, text }: { by: By; text: string }) => {
   const { length, start } = gap(BASE, text);
 
   return (
-    <p className="text-sm">
+    <p className="min-h-9 text-sm leading-9">
       {text.slice(0, start)}
       <span className={pen(by)}>{text.slice(start, start + length)}</span>
       {text.slice(start + length)}
@@ -119,7 +113,7 @@ const Local = ({ by, text }: { by: By; text: string }) => {
 
 const Merged = ({ label, lost }: { label: string; lost?: boolean }) => (
   <div className="flex flex-col gap-1">
-    <p className="text-muted-foreground text-xs">{label}</p>
+    <p className="font-sans text-[0.6875rem] text-muted-foreground">{label}</p>
     <p className="text-sm">
       {spans.map((span) => (
         <span
@@ -137,47 +131,46 @@ const Merged = ({ label, lost }: { label: string; lost?: boolean }) => (
   </div>
 );
 
-export const Fig09Text = () => {
+export const TextFigure = () => {
   const state = useFigureState({ stepCount: 3 });
   const { step } = state;
 
   const status = (() => {
     if (step === 0) {
-      return "One sentence, on two devices.";
+      return "One sentence, on two phones.";
     }
     if (step === 1) {
-      return "Both edits happen at once. Neither device has seen the other.";
+      return "Both people type at once. Neither phone has seen the other.";
     }
-    return "Last write wins keeps one sentence. Yjs keeps both edits.";
+    return "Picking one change loses the other person’s words. Merging keeps both.";
   })();
 
   return (
     <Figure
-      caption="Watch two people type into the same sentence at once."
+      caption="Two people type into the same sentence at the same time."
       state={state}
       status={status}
       title="Two edits inside one sentence"
     >
       <div className="flex flex-col gap-6">
         <div className="grid gap-3 @md/figure:grid-cols-2">
-          <Device label="Laptop">
+          <Device label="Your phone">
             <Local by="a" text={step === 0 ? BASE : localA} />
           </Device>
-          <Device label="Phone">
+          <Device label="Another phone">
             <Local by="b" text={step === 0 ? BASE : localB} />
           </Device>
         </div>
 
-        {/* Always in the DOM, so the reveal costs no reflow and the space it
-            needs is the space it already occupies, at any width. */}
+        {/* Always in the DOM, so the reveal costs no reflow. */}
         <div
           className={cn(
-            "grid gap-4 @md/figure:grid-cols-2",
-            step < 2 && "invisible"
+            "grid gap-4 transition-opacity duration-300 @md/figure:grid-cols-2",
+            step < 2 && "opacity-0"
           )}
         >
-          <Merged label="Last write wins" lost />
-          <Merged label="Yjs" />
+          <Merged label="If the list picked one" lost />
+          <Merged label="Merged with Yjs" />
         </div>
       </div>
     </Figure>
