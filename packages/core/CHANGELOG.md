@@ -1,5 +1,26 @@
 # @stratasync/core
 
+## 2.5.0
+
+### Minor Changes
+
+- ff1c7b6: Make a sync run reproducible. `SyncRuntime` collects the three ambient sources the engine used to read directly — `Date.now()`, `setTimeout`, and `crypto.randomUUID` — behind one injectable interface, defaulting to `systemRuntime`. Pass `runtime` (and optionally `clientId`) to `createSyncClient` and every clock read, timer, and generated id in the orchestrator, outbox, cursor, bootstrap runner and delta pipeline comes from it.
+  
+  This is what a conformance driver needs: with a fake runtime, only the scenario's `advanceClock` moves time and ids come from a seeded sequence, so a run is byte-identical each time. `packages/client/src/conformance/` ships that driver, speaking the stdin/stdout protocol in the corpus README, and eleven scenarios now run through it.
+  
+  Skipping the catch-up delta fetch straight after a full bootstrap is the one behaviour change: the snapshot leaves the cursor at the server's `lastSyncId` and the subscription opens from that same id, and `TransportAdapter.subscribe` is contractually required to replay everything after it, so that fetch was a guaranteed-empty round trip on the coldest start path.
+- e173dc3: Make the model schema a readable artifact. `serializeModelSnapshot` turns a `ModelRegistrySnapshot` into a canonical JSON document — sorted keys, no undefined, no functions — carrying a `snapshotVersion` envelope, so a non-TypeScript port can read, diff and pin the schema instead of inferring it from hashing code.
+  
+  Canonicalization moved out of `hash.ts` into `schema/snapshot.ts` and is now shared, so the document and the hash cannot drift. `computeSchemaHash` is unchanged byte-for-byte: it hashes only the document's `models` projection, and `snapshotVersion` is deliberately outside that projection so versioning the document does not re-bootstrap every client. The projection is pinned by a new `compute-schema-hash` conformance vector.
+
+### Patch Changes
+
+- 96295f4: Reject an unrepresentable epoch at the mutation boundary, and write down the two decoder asymmetries the conformance vectors uncovered.
+  
+  `parseTemporalInput` accepted any finite epoch, so a value past ±8.64e15 ms produced a JavaScript Invalid Date — no throw, no null — that flowed straight into an insert payload. The bound now sits on `toInstantDateOrNull` / `toDateOnlyDateOrNull`, which only the ingress path uses; egress still passes a stored epoch through unchanged, because nulling one there would clear the field on every client instead of rejecting one write.
+  
+  No behaviour change beyond that. `SyncActionType` and the protocol docs now state that `"C"`, `"G"` and `"S"` are part of the accepted set, and `parseSyncAction` and `parseSyncActionOutput` each name the other and say why one is lenient and one is strict.
+
 ## 2.4.1
 
 ## 2.4.0
