@@ -1,9 +1,5 @@
-import { isRegistrySnapshot, schemaToSnapshot } from "./normalize.js";
-import type {
-  ModelRegistrySnapshot,
-  PropertyMetadata,
-  SchemaDefinition,
-} from "./types.js";
+import { canonicalSchemaJson } from "./snapshot.js";
+import type { ModelRegistrySnapshot, SchemaDefinition } from "./types.js";
 
 // oxlint-disable-next-line number-literal-case
 const FNV_OFFSET_BASIS_64 = 0xcb_f2_9c_e4_84_22_23_25n;
@@ -26,96 +22,12 @@ const stableHash64 = (str: string): bigint => {
 const toHex = (num: bigint): string => num.toString(16).padStart(16, "0");
 
 /**
- * Sorts object keys alphabetically and removes undefined values
- */
-const sortObject = (obj: Record<string, unknown>): Record<string, unknown> => {
-  const sorted: Record<string, unknown> = {};
-  const keys = Object.keys(obj).toSorted();
-
-  for (const key of keys) {
-    const value = obj[key];
-    if (value !== undefined) {
-      sorted[key] = value;
-    }
-  }
-
-  return sorted;
-};
-
-const canonicalizeProperty = (
-  prop: PropertyMetadata
-): Record<string, unknown> =>
-  sortObject({
-    foreignKey: prop.foreignKey,
-    indexed: prop.indexed,
-    inverseProperty: prop.inverseProperty,
-    lazy: prop.lazy,
-    nullable: prop.nullable,
-    referenceModel: prop.referenceModel,
-    through: prop.through,
-    type: prop.type,
-  });
-
-const canonicalizeIndexes = (
-  indexes: ModelRegistrySnapshot["models"][string]["meta"]["indexes"]
-): { fields: string[]; unique?: boolean }[] | undefined => {
-  if (!(indexes && indexes.length > 0)) {
-    return undefined;
-  }
-
-  return indexes
-    .map(
-      (index) =>
-        sortObject({
-          fields: [...index.fields],
-          unique: index.unique,
-        }) as { fields: string[]; unique?: boolean }
-    )
-    .toSorted((left, right) =>
-      JSON.stringify(left).localeCompare(JSON.stringify(right))
-    );
-};
-
-const canonicalizeModelEntry = (
-  entry: ModelRegistrySnapshot["models"][string]
-): Record<string, unknown> => {
-  const properties = Object.entries(entry.properties)
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([propName, prop]) => [propName, canonicalizeProperty(prop)]);
-
-  return {
-    meta: sortObject({
-      groupKey: entry.meta.groupKey,
-      indexes: canonicalizeIndexes(entry.meta.indexes),
-      loadStrategy: entry.meta.loadStrategy,
-      name: entry.meta.name,
-      partialLoadMode: entry.meta.partialLoadMode,
-      primaryKey: entry.meta.primaryKey,
-      schemaVersion: entry.meta.schemaVersion,
-      tableName: entry.meta.tableName,
-      usedForPartialIndexes: entry.meta.usedForPartialIndexes,
-    }),
-    properties: sortObject(Object.fromEntries(properties)),
-  };
-};
-
-const canonicalizeSnapshot = (snapshot: ModelRegistrySnapshot): unknown => {
-  const models = Object.entries(snapshot.models)
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([name, entry]) => [name, canonicalizeModelEntry(entry)]);
-
-  return { models: sortObject(Object.fromEntries(models)) };
-};
-
-/**
- * Computes a deterministic hash of the model registry snapshot
+ * Computes a deterministic hash of the model registry snapshot.
+ *
+ * Canonicalization lives in `snapshot.ts` so the serialized document and the
+ * hash cannot drift apart. `canonicalSchemaJson` defines which part of that
+ * document is hashed; changing it re-bootstraps every client.
  */
 export const computeSchemaHash = (
   input: ModelRegistrySnapshot | SchemaDefinition
-): string => {
-  const snapshot = isRegistrySnapshot(input) ? input : schemaToSnapshot(input);
-  const canonical = canonicalizeSnapshot(snapshot);
-  const jsonStr = JSON.stringify(canonical);
-  const hash = stableHash64(jsonStr);
-  return toHex(hash);
-};
+): string => toHex(stableHash64(canonicalSchemaJson(input)));
