@@ -3,9 +3,14 @@ import type {
   DeltaPacket,
   SyncClientState,
   SyncId,
+  SyncRuntime,
   Transaction,
 } from "@stratasync/core";
-import { getOrCreateClientId, ModelRegistry } from "@stratasync/core";
+import {
+  getOrCreateClientId,
+  ModelRegistry,
+  systemRuntime,
+} from "@stratasync/core";
 
 import type { IdentityMapRegistry } from "./identity-map.js";
 import { AsyncQueue } from "./internal/async-queue.js";
@@ -46,6 +51,7 @@ export class SyncOrchestrator {
       ) => Promise<void>)
     | null = null;
   private readonly options: SyncClientOptions;
+  private readonly runtime: SyncRuntime;
   private readonly registry: ModelRegistry;
 
   private readonly stateMachine: SyncStateMachine;
@@ -96,6 +102,7 @@ export class SyncOrchestrator {
     emitEvent?: (event: SyncClientEvent) => void
   ) {
     this.options = options;
+    this.runtime = options.runtime ?? systemRuntime;
     this.storage = options.storage;
     this.transport = options.transport;
     this.identityMaps = identityMaps;
@@ -106,7 +113,7 @@ export class SyncOrchestrator {
     this.groups = options.groups ?? [];
     this.emitEvent = emitEvent;
     this.stateMachine = new SyncStateMachine(emitEvent);
-    this.cursor = new SyncCursor(this.storage);
+    this.cursor = new SyncCursor(this.storage, this.runtime);
 
     this.context = this.buildContext();
     this.bootstrapRunner = new BootstrapRunner(this.context);
@@ -120,7 +127,9 @@ export class SyncOrchestrator {
           ? this.coverageLoader(modelName, indexedKey, keyValue)
           : this.storage.setPartialIndex(modelName, indexedKey, keyValue),
       processOutboxTransactions: () => this.processOutboxTransactions(),
-      runBootstrap: (runToken) => this.bootstrapRunner.bootstrap(runToken),
+      runBootstrap: async (runToken) => {
+        await this.bootstrapRunner.bootstrap(runToken);
+      },
     });
 
     this.attachTransportConnectionListener();
@@ -148,6 +157,7 @@ export class SyncOrchestrator {
       recordError: (error) => this.handleSyncError(error),
       registry: this.registry,
       runWithStateLock: (operation) => this.runWithStateLock(operation),
+      runtime: this.runtime,
       schemaHash: this.schemaHash,
       setCatchingUp: (catchingUp) =>
         this.stateMachine.setCatchingUp(catchingUp),
@@ -299,7 +309,7 @@ export class SyncOrchestrator {
       if (!this.isRunActive(activeRunToken)) {
         return;
       }
-      await this.bootstrapIfNeeded(meta, activeRunToken);
+      const didBootstrap = await this.bootstrapIfNeeded(meta, activeRunToken);
       if (!this.isRunActive(activeRunToken)) {
         return;
       }
@@ -307,7 +317,7 @@ export class SyncOrchestrator {
         await this.applyPendingOutboxTransactions(true);
         await this.storage.setMeta({
           groupChangePending: false,
-          updatedAt: Date.now(),
+          updatedAt: this.runtime.now(),
         });
         this.groupChangePending = false;
       }
@@ -319,16 +329,24 @@ export class SyncOrchestrator {
       // Network operations run in background, don't block start()
       const subscribeAfterSyncId = this.cursor.lastSyncId;
       this.deltaPipeline.startDeltaSubscription(subscribeAfterSyncId);
-      const catchUp = this.deltaPipeline.catchUpMissedDeltas(
-        subscribeAfterSyncId,
-        activeRunToken
-      );
-      // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
-      catchUp.catch((error) => {
-        if (this.isRunActive(activeRunToken)) {
-          this.handleSyncError(error);
-        }
-      });
+      // A full bootstrap leaves the cursor at the server's `lastSyncId` and
+      // the subscription was opened from exactly there. TransportAdapter
+      // requires `subscribe` to replay everything after that cursor, so the
+      // catch-up fetch — a "best-effort accelerator" by that same contract —
+      // can only come back empty here. Skipping it saves a guaranteed-wasted
+      // round trip on the most expensive start path there is.
+      if (!didBootstrap) {
+        const catchUp = this.deltaPipeline.catchUpMissedDeltas(
+          subscribeAfterSyncId,
+          activeRunToken
+        );
+        // oxlint-disable-next-line prefer-await-to-then, prefer-await-to-callbacks -- fire-and-forget error handler
+        catchUp.catch((error) => {
+          if (this.isRunActive(activeRunToken)) {
+            this.handleSyncError(error);
+          }
+        });
+      }
       // No outbox drain here: outboxManager is attached only after start()
       // resolves (see client.ts createOutboxManager), so this call would be a
       // no-op at startup. The client owns the post-start drain via
@@ -360,6 +378,7 @@ export class SyncOrchestrator {
     this.groupChangePending = meta.groupChangePending === true;
     this.privacyWithheldClientTxIds = new Set(meta.privacyWithheldClientTxIds);
     this.clientId =
+      this.options.clientId ??
       meta.clientId ??
       getOrCreateClientId(`${this.options.dbName ?? "sync-db"}_client_id`);
     this.cursor.hydrate(meta);
@@ -379,14 +398,14 @@ export class SyncOrchestrator {
     await this.storage.setMeta({
       firstSyncId: this.cursor.firstSyncId,
       subscribedSyncGroups: this.groups,
-      updatedAt: Date.now(),
+      updatedAt: this.runtime.now(),
     });
   }
 
   private bootstrapIfNeeded(
     meta: StorageMeta,
     runToken: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     return this.bootstrapRunner.bootstrapIfNeeded(meta, runToken);
   }
 
@@ -425,7 +444,7 @@ export class SyncOrchestrator {
       );
       await this.storage.setMeta({
         privacyWithheldClientTxIds: withheldIds,
-        updatedAt: Date.now(),
+        updatedAt: this.runtime.now(),
       });
       ({ replayable } = prepared);
     }

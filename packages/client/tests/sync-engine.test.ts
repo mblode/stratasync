@@ -1151,6 +1151,36 @@ const waitUntil = async (
   throw new Error(errorMessage);
 };
 
+/**
+ * Seeds storage so `start()` hydrates locally instead of bootstrapping.
+ *
+ * The catch-up delta fetch lives on this warm path: it covers the gap between
+ * a stored cursor and the present. A cold start has no such gap — the snapshot
+ * and the subscription meet at the same sync id — so tests that exercise
+ * catch-up start warm.
+ */
+const hydrateWarmStart = async (
+  storage: InMemoryStorage,
+  rows: ModelRow[],
+  lastSyncId: string,
+  subscribedSyncGroups: string[] = [],
+  options: { schema?: typeof schema; persistModels?: string[] } = {}
+): Promise<void> => {
+  for (const row of rows) {
+    await storage.put(row.modelName, row.data as Record<string, unknown>);
+  }
+  await storage.setMeta({
+    bootstrapComplete: true,
+    firstSyncId: lastSyncId,
+    lastSyncId,
+    schemaHash: new ModelRegistry(options.schema ?? schema).getSchemaHash(),
+    subscribedSyncGroups,
+  });
+  for (const modelName of options.persistModels ?? ["Task", "Team"]) {
+    await storage.setModelPersistence(modelName, true);
+  }
+};
+
 const waitForSync = async (
   client: ReturnType<typeof createSyncClient>,
   expectedSyncId: string
@@ -1734,7 +1764,10 @@ describe("reverse-done alignment", () => {
       expect(persistence.persisted).toBeTruthy();
 
       expect(transport.bootstrapCalls[0]?.onlyModels).toEqual(["Task", "Team"]);
-      expect(transport.fetchDeltaCalls[0]?.after).toBe("42");
+      // The snapshot already sits at "42" and the stream replays from there,
+      // so the gap is closed by the subscription, not by a catch-up fetch.
+      expect(transport.subscribeCalls[0]?.afterSyncId).toBe("42");
+      expect(transport.fetchDeltaCalls).toHaveLength(0);
     } finally {
       await client.stop();
     }
@@ -2130,31 +2163,17 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    // Warm start: the catch-up fetch runs, and it is the call the server
+    // answers with BOOTSTRAP_REQUIRED, so the snapshot below is the recovery
+    // bootstrap it forces.
+    await hydrateWarmStart(storage, initialRows, "10", ["team-1"]);
     const transport = new TestTransport({
       fullMetadata: {
-        lastSyncId: "10",
+        lastSyncId: "25",
         subscribedSyncGroups: ["team-1"],
       },
-      fullRows: initialRows,
+      fullRows: recoveredRows,
     });
-    const originalBootstrap = transport.bootstrap.bind(transport);
-    transport.bootstrap = ((options: BootstrapOptions) => {
-      if (transport.bootstrapCalls.length >= 1 && options.type === "full") {
-        transport.bootstrapCalls.push(options);
-        return (async function* generate() {
-          await Promise.resolve();
-          for (const row of recoveredRows) {
-            yield row;
-          }
-          return {
-            lastSyncId: "25",
-            subscribedSyncGroups: ["team-1"],
-          };
-        })();
-      }
-
-      return originalBootstrap(options);
-    }) as TestTransport["bootstrap"];
     let fetchCalls = 0;
     transport.fetchDeltas = ((after: string) => {
       fetchCalls += 1;
@@ -2181,7 +2200,9 @@ describe("reverse-done alignment", () => {
       await client.start();
       await waitForSync(client, "25");
 
-      expect(transport.bootstrapCalls).toHaveLength(2);
+      // The recovery bootstrap is the only one: the warm start hydrated from
+      // storage, so BOOTSTRAP_REQUIRED is what put us on the snapshot path.
+      expect(transport.bootstrapCalls).toHaveLength(1);
       expect(
         client.getIdentityMap<Record<string, unknown>>("Task").get("task-1")
       ).toMatchObject({
@@ -2415,6 +2436,10 @@ describe("reverse-done alignment", () => {
 
   it("fetches the rows behind a coverage action instead of claiming empty coverage", async () => {
     const storage = new InMemoryStorage();
+    await hydrateWarmStart(storage, [], "42", [], {
+      persistModels: ["Task", "Comment"],
+      schema: regularPartialSchema,
+    });
     const transport = new TestTransport({
       batchRows: [
         {
@@ -2549,6 +2574,9 @@ describe("reverse-done alignment", () => {
   });
 
   it("applies post-subscribe catch-up deltas during startup", async () => {
+    // A warm start: the catch-up fetch covers the gap between the stored
+    // cursor and the present. (A cold start has no gap to cover — the
+    // snapshot and the subscription meet at the same sync id.)
     const storage = new InMemoryStorage();
     const rows: ModelRow[] = [
       {
@@ -2560,6 +2588,7 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    await hydrateWarmStart(storage, rows, "10", ["team-1"]);
     const transport = new TestTransport({
       fetchDeltaPacket: {
         actions: [
@@ -2620,6 +2649,7 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    await hydrateWarmStart(storage, rows, "10", ["team-1"]);
     const transport = new TestTransport({
       fetchDeltaPackets: [
         {
@@ -2854,6 +2884,7 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    await hydrateWarmStart(storage, rows, "10", ["team-1"]);
     const transport = new TestTransport({
       fullMetadata: {
         lastSyncId: "10",
@@ -2943,6 +2974,7 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    await hydrateWarmStart(storage, rows, "10", ["team-1"]);
     const transport = new TestTransport({
       fetchDeltaPacket: {
         actions: [
@@ -3100,6 +3132,7 @@ describe("reverse-done alignment", () => {
         modelName: "Team",
       },
     ];
+    await hydrateWarmStart(storage, rows, "10", ["team-1"]);
     const transport = new TestTransport({
       fullMetadata: {
         lastSyncId: "10",
