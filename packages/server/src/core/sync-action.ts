@@ -54,6 +54,24 @@ export const serializeSyncActionOutput = (
   syncId: action.syncId,
 });
 
+/**
+ * Reads a `SerializedSyncActionOutput` back into a `SyncActionOutput`.
+ *
+ * This is **not** the wire decoder. Its only caller is `parseDeltaMessage` in
+ * `delta/delta-publisher.ts`, which reads what `serializeSyncActionOutput`
+ * wrote onto the Redis `sync:deltas` channel — an internal round-trip between
+ * two server processes. A malformed message there is a bug in this package, not
+ * a peer being generous, so every field is rejected rather than defaulted: a
+ * non-object `data`, an absent `createdAt` and an unparseable `createdAt` all
+ * throw.
+ *
+ * `parseSyncAction` in `@stratasync/core` decodes the same-named fields for a
+ * client and tolerates all three, because there a single odd action must not
+ * tear down a live sync session. That asymmetry is intentional; its full
+ * reasoning is on `parseSyncAction`. Note the mirror-image gap: this function
+ * does not validate the action letter, because the server writes it, whereas
+ * the client validates it and does not validate much else.
+ */
 export const parseSyncActionOutput = (raw: unknown): SyncActionOutput => {
   if (!isRecord(raw)) {
     throw new Error("Sync action must be an object");

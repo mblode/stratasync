@@ -5,6 +5,25 @@ import type { SyncId } from "./sync-id.js";
  * Sync action types emitted by the server.
  * Includes mutation actions plus sync-group / coverage signals.
  */
+/**
+ * Every action letter a client may receive.
+ *
+ * `TransactionAction` covers the five that carry a row: `"I"` insert, `"U"`
+ * update, `"D"` delete, `"A"` archive, `"V"` unarchive. The three beyond it
+ * carry no row and are routed instead of applied:
+ *
+ * - `"C"` — covering. Grants coverage of a partial-index key without carrying
+ *   the rows behind it; the client fetches them. See `delta-pipeline.ts`.
+ * - `"G"` — sync-group membership change, emitted by `@stratasync/server`
+ *   (`SYNC_GROUPS_ACTION`). Forces a full re-bootstrap.
+ * - `"S"` — the same membership change under its older letter. Accepted so a
+ *   client can read a log written by a server that predates `"G"`; nothing in
+ *   this repo emits it.
+ *
+ * A port that rejects `"C"`, `"G"` or `"S"` fails the delta stream on the first
+ * one it meets, so the set is pinned by `corpus/vectors/parse-sync-action.json`
+ * and documented in `apps/docs/architecture/sync-protocol.mdx`.
+ */
 export type SyncActionType = TransactionAction | "C" | "G" | "S";
 
 /**

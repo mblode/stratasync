@@ -3,6 +3,26 @@ const INSTANT_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const DATE_ONLY_DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * The widest instant a `Date` can hold: ±8.64e15 ms (ECMA-262 time-clip).
+ *
+ * A finite epoch outside that range neither throws nor returns null —
+ * `new Date(8.64e15 + 1)` is an Invalid Date, whose `getTime()` is NaN. So the
+ * `…OrNull` conversions below, which promise a usable `Date`, bound their input
+ * rather than trusting `Number.isFinite`.
+ *
+ * The `…Epoch` functions deliberately do not: those run on egress, encoding a
+ * value already stored into a sync action, and a stored number the client is
+ * owed must reach it unchanged. Nulling it there would clear a field on every
+ * client instead of rejecting one write. The bound belongs on ingress, where
+ * `parseTemporalInput` turns a null into a thrown error and nothing is
+ * persisted.
+ */
+const MAX_EPOCH_MS = 8_640_000_000_000_000;
+
+const isRepresentableEpoch = (value: unknown): boolean =>
+  typeof value === "number" && Math.abs(value) <= MAX_EPOCH_MS;
+
 const pad = (value: number): string => String(value).padStart(2, "0");
 
 const parseDateOnlyParts = (
@@ -123,7 +143,9 @@ export const toDateOnlyStringOrNull = (value: unknown): string | null =>
 
 export const toDateOnlyDateOrNull = (value: unknown): Date | null => {
   const epoch = toDateOnlyEpoch(value);
-  return epoch === null ? null : new Date(epoch);
+  return epoch === null || !isRepresentableEpoch(epoch)
+    ? null
+    : new Date(epoch);
 };
 
 export const toInstantEpoch = (value: unknown): number | null => {
@@ -149,5 +171,7 @@ export const toInstantEpoch = (value: unknown): number | null => {
 
 export const toInstantDateOrNull = (value: unknown): Date | null => {
   const epoch = toInstantEpoch(value);
-  return epoch === null ? null : new Date(epoch);
+  return epoch === null || !isRepresentableEpoch(epoch)
+    ? null
+    : new Date(epoch);
 };

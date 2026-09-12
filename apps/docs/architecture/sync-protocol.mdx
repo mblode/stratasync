@@ -15,14 +15,36 @@ Strata Sync is an open-source implementation of the sync engine Linear described
 
 A monotonic append-only log of **sync actions**. Each action represents a single change to a single model row.
 
-| Field       | Description                                                                                          |
-| ----------- | ---------------------------------------------------------------------------------------------------- |
-| `syncId`    | A monotonically increasing integer assigned by the server, encoded as a **string** on the wire.      |
-| `modelName` | Which model changed (for example, `"Task"` or `"User"`).                                             |
-| `modelId`   | The primary key of the affected row.                                                                 |
-| `action`    | The change type: `"I"` (insert), `"U"` (update), `"D"` (delete), `"A"` (archive), `"V"` (unarchive). |
-| `data`      | The changed fields (for inserts and updates) or `null` (for deletes).                                |
-| `groupId`   | The sync group the row belongs to, when the model is group-scoped. Used for access control.          |
+| Field       | Description                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| `syncId`    | A monotonically increasing integer assigned by the server, encoded as a **string** on the wire. |
+| `modelName` | Which model changed (for example, `"Task"` or `"User"`).                                        |
+| `modelId`   | The primary key of the affected row.                                                            |
+| `action`    | The change type. See the action letters below.                                                  |
+| `data`      | The changed fields (for inserts and updates) or `null` (for deletes).                           |
+| `groupId`   | The sync group the row belongs to, when the model is group-scoped. Used for access control.     |
+
+### Action letters
+
+Five letters carry a row and are applied to it:
+
+| Letter | Meaning   |
+| ------ | --------- |
+| `"I"`  | Insert    |
+| `"U"`  | Update    |
+| `"D"`  | Delete    |
+| `"A"`  | Archive   |
+| `"V"`  | Unarchive |
+
+Three more carry no row. A client routes them rather than applying them, and a
+client that rejects an unknown letter will fail the whole delta packet the first
+time one arrives — so an implementation must accept all eight:
+
+| Letter | Meaning                                                                                                                                          |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `"C"`  | Covering. Grants the client coverage of a partial-index key without carrying the rows behind it; the client fetches them.                        |
+| `"G"`  | Sync-group membership change. Addressed to the changed user's own group and carrying `{ subscribedSyncGroups }`; forces a full re-bootstrap.     |
+| `"S"`  | The same membership change under its older letter. Accepted for logs written by a server that predates `"G"`; the current server never emits it. |
 
 A **delta packet** bundles sync actions with a `lastSyncId` watermark:
 
