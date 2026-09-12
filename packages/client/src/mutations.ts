@@ -1,6 +1,7 @@
 import type {
   ArchiveTransactionOptions,
   ModelRegistry,
+  SyncRuntime,
   Transaction,
   UnarchiveTransactionOptions,
 } from "@stratasync/core";
@@ -9,7 +10,7 @@ import {
   createArchivePayload,
   createUnarchivePatch,
   createUnarchivePayload,
-  generateUUID,
+  systemRuntime,
 } from "@stratasync/core";
 
 import type { HistoryEntry } from "./history-manager.js";
@@ -75,6 +76,8 @@ const buildEffectiveUpdate = <T extends Record<string, unknown>>(
  */
 export interface MutationCoordinatorDeps {
   identityMaps: IdentityMapRegistry;
+  /** Clock and id source for generated model ids. Defaults to `systemRuntime`. */
+  runtime?: SyncRuntime;
   getRegistry(): ModelRegistry;
   isOptimistic(): boolean;
   runWithMutationOutbox<T>(
@@ -116,9 +119,11 @@ export interface MutationCoordinatorDeps {
 
 export class MutationCoordinator {
   private readonly deps: MutationCoordinatorDeps;
+  private readonly runtime: SyncRuntime;
 
   constructor(deps: MutationCoordinatorDeps) {
     this.deps = deps;
+    this.runtime = deps.runtime ?? systemRuntime;
   }
 
   private requireExisting(
@@ -202,7 +207,7 @@ export class MutationCoordinator {
       mutationOptions?.onTransactionCreated,
       () => {
         const primaryKey = this.deps.getRegistry().getPrimaryKey(modelName);
-        const id = (data[primaryKey] as string) || generateUUID();
+        const id = (data[primaryKey] as string) || this.runtime.newId();
         const fullData = { ...data, [primaryKey]: id };
         const serializedFullData = this.deps.serializeMutationRecord(
           modelName,
@@ -361,7 +366,10 @@ export class MutationCoordinator {
       () => {
         const existing = this.requireExisting(modelName, id);
         const existingData = getModelData(existing);
-        const archived = createArchivePayload(mutationOptions?.archivedAt);
+        const archived = createArchivePayload(
+          mutationOptions?.archivedAt,
+          this.runtime
+        );
         const original =
           mutationOptions?.original ?? captureArchiveState(existingData);
 

@@ -11,11 +11,11 @@ import type {
 import {
   captureArchiveState,
   deserializeModelRecord,
-  generateUUID,
   getOrCreateClientId,
   noopReactivityAdapter,
   readArchivedAt,
   serializeModelRecord,
+  systemRuntime,
 } from "@stratasync/core";
 
 import type { HistoryEntry, HistoryOperation } from "./history-manager.js";
@@ -80,6 +80,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
   // `ReactivityAdapter | undefined` again, since the option is optional.
   const reactivity = options.reactivity ?? noopReactivityAdapter;
   const resolvedOptions: SyncClientOptions = { ...options, reactivity };
+  const runtime = resolvedOptions.runtime ?? systemRuntime;
 
   const identityMaps = new IdentityMapRegistry(
     reactivity,
@@ -222,8 +223,8 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     rollbackTransaction({
       action,
       clientId: orchestrator.getClientId() || "rollback",
-      clientTxId: `rollback:${generateUUID()}`,
-      createdAt: Date.now(),
+      clientTxId: `rollback:${runtime.newId()}`,
+      createdAt: runtime.now(),
       modelId,
       modelName,
       original,
@@ -320,10 +321,12 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     yjsManagers =
       typeof resolvedOptions.yjs === "function"
         ? resolvedOptions.yjs({
-            clientId: getOrCreateClientId(
-              `${resolvedOptions.dbName ?? "sync-db"}_client_id`
-            ),
-            connId: generateUUID(),
+            clientId:
+              resolvedOptions.clientId ??
+              getOrCreateClientId(
+                `${resolvedOptions.dbName ?? "sync-db"}_client_id`
+              ),
+            connId: runtime.newId(),
           })
         : resolvedOptions.yjs;
   }
@@ -358,6 +361,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
           });
         }
       },
+      runtime,
       storage: options.storage,
       transport: options.transport,
     };
@@ -646,6 +650,7 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
     recordHistoryEntry,
     rollbackOptimisticMutation,
     runWithMutationOutbox,
+    runtime,
     serializeMutationRecord,
   });
 
