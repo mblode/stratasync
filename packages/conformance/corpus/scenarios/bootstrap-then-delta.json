@@ -60,7 +60,7 @@
         { "model": "Task", "id": "t1", "fields": { "title": "first" } },
         { "model": "Task", "id": "t2", "fields": { "title": "second" } }
       ],
-      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "transport": { "bootstrapCount": 1 },
       "storage": { "lastSyncId": "100", "bootstrapComplete": true }
     },
     {
@@ -144,7 +144,7 @@
       "store": [
         { "model": "Task", "id": "t1", "fields": { "title": "first renamed" } }
       ],
-      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "transport": { "bootstrapCount": 1 },
       "storage": { "lastSyncId": "103" }
     }
   ]

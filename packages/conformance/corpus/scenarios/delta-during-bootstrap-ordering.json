@@ -80,7 +80,7 @@
           "fields": { "title": "Renamed after the snapshot", "sortOrder": 10 }
         }
       ],
-      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "transport": { "bootstrapCount": 1 },
       "storage": { "lastSyncId": "101", "bootstrapComplete": true }
     }
   ]

@@ -1,11 +1,11 @@
 {
   "files": {
-    "README.md": "5cc2659edb0bba02368dff4da73cc1112b9fc70975bdd9aaa1e0c362df67b8c1",
+    "README.md": "eaf5f7c65004f15beb6b8b76fc92826a4966fac788ebd7fad50844dfd73ac27a",
     "capabilities/stratasync-ts.json": "c8a38dae29bda24657305a2a6f48e5d83027bbab63a0764df21fdcff859e2be2",
     "scenarios/archive-then-unarchive-round-trip.json": "f3fe18ad1cd33fa7fc527675d1d186fcb22eff86bc651a7dd07463ba72d895e1",
-    "scenarios/bootstrap-then-delta.json": "faca89d170d2c53c77994dd7ad7d316aa473f35b74b404177d17feb24d845502",
+    "scenarios/bootstrap-then-delta.json": "0c5066519b032ff8a52a290ade98c32e4a4348d1685dd3791356cdf1c4fc338d",
     "scenarios/cursor-too-old-forces-rebootstrap.json": "17dd310a09d16b82fffb001da2f1136e5db289c11652ef62bf7a217dd0d4b38e",
-    "scenarios/delta-during-bootstrap-ordering.json": "c03e074040cfeba6b615d2e8ffa93d941174237a251559d6eff9773a9c6b4cb3",
+    "scenarios/delta-during-bootstrap-ordering.json": "50f7d97d5232cab179b17389a51b9607a4d9013afcb08742a0f17e99df2bded4",
     "scenarios/outbox-delta-echo-is-idempotent.json": "91c33ceacdbd99e7f3307b0c5325b0d0513f4728aaff8e27e125fd95fd108747",
     "scenarios/outbox-offline-replay-acked-once.json": "f2c81b9996689de0f4a7052deebe055620b1910ee055b534263408f0c73d9b90",
     "scenarios/rebase-disjoint-fields-both-survive.json": "164337fff8833dbcebbf7a12b689861b362b9eb4236dff6809aa4c7ffde32924",

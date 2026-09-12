@@ -20,6 +20,33 @@
   ],
   "overrides": [
     {
+      "files": ["packages/client/src/**/*.ts"],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "setTimeout",
+            "message": "Use runtime.schedule(): a hard-coded timer cannot be driven by the conformance driver's fake clock. See SyncRuntime in @stratasync/core."
+          },
+          {
+            "name": "setInterval",
+            "message": "Use runtime.schedule(): a hard-coded timer cannot be driven by the conformance driver's fake clock. See SyncRuntime in @stratasync/core."
+          }
+        ],
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+            "message": "Use runtime.now(): a wall-clock read cannot be driven by the conformance driver's fake clock. See SyncRuntime in @stratasync/core."
+          },
+          {
+            "selector": "CallExpression[callee.object.name='Math'][callee.property.name='random']",
+            "message": "Use runtime.newId(): a random id makes a conformance run non-reproducible. See SyncRuntime in @stratasync/core."
+          }
+        ]
+      }
+    },
+    {
       "files": [
         "**/*.test.{ts,tsx,js,jsx}",
         "**/__tests__/**/*.{ts,tsx,js,jsx}"
