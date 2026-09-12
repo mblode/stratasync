@@ -72,6 +72,13 @@ $ echo '<scenario json>' | ./driver
 {"scenarioId":"...","ok":true,"steps":[...]}
 ```
 
+**Exit status reports the driver, not the verdict.** A driver that spoke the
+protocol exits `0` even when the scenario failed — the `ok` field carries the
+verdict, and the runner is what fails the build. Reserve a non-zero exit for a
+driver that could not run at all: bad arguments, unparseable stdin, a crash. A
+harness that reads the exit code instead of `ok` will call every failing
+scenario a pass.
+
 Three commands, selected by `argv[1]`:
 
 | Command        | stdin    | stdout                                   |
@@ -117,6 +124,18 @@ authority, this table is orientation.
 | `ackMutation`      | Server accepts the identified transaction             |
 | `rejectMutation`   | Server rejects it, with a message                     |
 | `expect`           | Assert engine state (see below)                       |
+
+### What not to assert
+
+`transport.deltaFetchCount` counts a **best-effort accelerator**, not a
+guarantee. `TransportAdapter.subscribe` is what closes the gap between a
+cursor and the present; the delta fetch only closes it sooner, and an
+implementation is free to skip one the subscription already covers. Assert the
+count where it distinguishes two paths — a reconnect fetch from a startup one,
+say, which needs a `0` before the `1` to mean anything — and leave it out where
+it would just pin one implementation's choice about when to accelerate. The
+TypeScript engine skips the fetch straight after a full bootstrap; a port that
+issues one there is not less conformant.
 
 ### `expect`
 

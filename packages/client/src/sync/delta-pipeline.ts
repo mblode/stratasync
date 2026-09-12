@@ -431,8 +431,13 @@ export class DeltaPipeline {
   }
 
   /**
-   * Best-effort catch-up for deltas created between bootstrap completion and
-   * subscription readiness.
+   * Best-effort catch-up for the gap between a stored cursor and the present.
+   *
+   * Only the warm start calls this: a run that took a full snapshot already
+   * has its cursor at the server's `lastSyncId`, and the subscription opened
+   * from that same id replays anything after it (see the comment at the call
+   * site in `sync-orchestrator.ts`). Failing here loses nothing — the stream
+   * is what closes the gap; this only closes it sooner.
    */
   async catchUpMissedDeltas(
     afterSyncId: SyncId,

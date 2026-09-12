@@ -331,10 +331,18 @@ export class SyncOrchestrator {
       this.deltaPipeline.startDeltaSubscription(subscribeAfterSyncId);
       // A full bootstrap leaves the cursor at the server's `lastSyncId` and
       // the subscription was opened from exactly there. TransportAdapter
-      // requires `subscribe` to replay everything after that cursor, so the
-      // catch-up fetch — a "best-effort accelerator" by that same contract —
-      // can only come back empty here. Skipping it saves a guaranteed-wasted
-      // round trip on the most expensive start path there is.
+      // requires `subscribe` to replay everything after that cursor, so
+      // anything this fetch could return is already on its way down the
+      // stream — and the same contract calls the fetch a "best-effort
+      // accelerator", not the thing that closes the gap. Skipping it trades a
+      // redundant round trip on the most expensive start path for deltas
+      // written in the moments after the snapshot arriving over the socket
+      // rather than over HTTP.
+      //
+      // Every partial path still fetches: `bootstrapIfNeeded` returns false
+      // for a local bootstrap, for the offline fallback, and for a remote
+      // bootstrap that aborted before persisting, and in each of those the
+      // cursor really is behind the present.
       if (!didBootstrap) {
         const catchUp = this.deltaPipeline.catchUpMissedDeltas(
           subscribeAfterSyncId,
