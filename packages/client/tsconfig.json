@@ -5,6 +5,7 @@
     "rootDir": "..",
     "baseUrl": ".",
     "paths": {
+      "@stratasync/conformance": ["../conformance/src/index.ts"],
       "@stratasync/core": ["../core/src/index.ts"],
       "@stratasync/y-doc": ["../y-doc/src/index.ts"]
     }
