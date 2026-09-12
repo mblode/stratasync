@@ -121,7 +121,11 @@ authority, this table is orientation.
 ### `expect`
 
 An `expect` step carries any subset of these keys; only the keys present are
-asserted, so a scenario stays readable and does not over-specify.
+asserted, so a scenario stays readable and does not over-specify. The one
+exception is an `outbox` entry: `clientTxId`, `action`, `model`, and `modelId`
+are all required on each one (`schemas/scenario.schema.json` rejects a partial
+entry), because a half-identified transaction is ambiguous about which
+transaction it means.
 
 ```json
 {
@@ -130,7 +134,15 @@ asserted, so a scenario stays readable and does not over-specify.
   "cursor": "42",
   "store": [{ "model": "Task", "id": "t1", "fields": { "title": "a" } }],
   "storeAbsent": [{ "model": "Task", "id": "t2" }],
-  "outbox": [{ "clientTxId": "tx1", "status": "pending" }],
+  "outbox": [
+    {
+      "clientTxId": "tx1",
+      "action": "UPDATE",
+      "model": "Task",
+      "modelId": "t1",
+      "status": "pending"
+    }
+  ],
   "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
   "storage": { "schemaHash": "v1", "bootstrapComplete": true }
 }

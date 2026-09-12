@@ -1,6 +1,6 @@
 {
   "files": {
-    "README.md": "b29c5fbc3ef49624ba9fdae5233cfec0d78abdfe31ae4f8af255efaf3b71ddf6",
+    "README.md": "c5705f8c4c808cae6f208b05fb8a95d3658a5dd3a7631fb679f695e081798728",
     "capabilities/stratasync-ts.json": "c8a38dae29bda24657305a2a6f48e5d83027bbab63a0764df21fdcff859e2be2",
     "scenarios/archive-then-unarchive-round-trip.json": "f3fe18ad1cd33fa7fc527675d1d186fcb22eff86bc651a7dd07463ba72d895e1",
     "scenarios/bootstrap-then-delta.json": "faca89d170d2c53c77994dd7ad7d316aa473f35b74b404177d17feb24d845502",
