@@ -1,0 +1,87 @@
+{
+  "id": "delta-during-bootstrap-ordering",
+  "description": "Packets queued on the socket while the snapshot is still downloading are handed to the engine the instant it subscribes. Actions at or below the snapshot's sync id are already in the snapshot and must be dropped; actions above it must be applied on top of it, whatever order they were queued in.",
+  "requires": ["bootstrap", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    { "op": "socketOpen" },
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "In the snapshot",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "99",
+        "actions": [
+          {
+            "syncId": "99",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "D",
+            "clientId": "c_other"
+          }
+        ]
+      }
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "U",
+            "clientId": "c_other",
+            "data": { "title": "Renamed after the snapshot" }
+          }
+        ]
+      }
+    },
+    { "op": "start", "groups": ["w1"] },
+    {
+      "op": "expect",
+      "label": "the pre-snapshot delete is dropped, the post-snapshot rename lands, and no catch-up fetch was needed",
+      "state": "syncing",
+      "cursor": "101",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "Renamed after the snapshot", "sortOrder": 10 }
+        }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "storage": { "lastSyncId": "101", "bootstrapComplete": true }
+    }
+  ]
+}
