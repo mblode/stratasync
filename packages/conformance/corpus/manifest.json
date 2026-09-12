@@ -20,7 +20,7 @@
     "vectors/parse-sync-id.json": "3ba179104bf1c36ff106d7d5b21c373168c498a5d83da63faa34d6d42a4ad2da",
     "vectors/parse-temporal-input.json": "f419c0015ad9c1b07a38dba8a7fcb56c8fd1f4df0c242405b2d687e824ade518",
     "vectors/read-ndjson-lines.json": "e936fce1d47a4727ea37e397ba0e62824885fe27ffb5409f130d18c3cee67319",
-    "vectors/serialize-sync-data.json": "710b04d593facb15e787b82afbd5e45eadb6a0e8143afdd0c386ed401d013657"
+    "vectors/serialize-sync-data.json": "95f29a028b34cc03aecbe75a6021f25b33f9f40d0813b82af5a8680258b098a2"
   },
   "protocolVersion": 1,
   "version": "2.4.1"

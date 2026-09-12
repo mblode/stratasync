@@ -16,9 +16,9 @@ import type { SyncId } from "./sync-id.js";
  *   the rows behind it; the client fetches them. See `delta-pipeline.ts`.
  * - `"G"` — sync-group membership change, emitted by `@stratasync/server`
  *   (`SYNC_GROUPS_ACTION`). Forces a full re-bootstrap.
- * - `"S"` — the same membership change under its older letter. Accepted so a
- *   client can read a log written by a server that predates `"G"`; nothing in
- *   this repo emits it.
+ * - `"S"` — routed identically to `"G"` by the delta pipeline. No server in this
+ *   repo emits it, and no history here records what wrote it, so it is accepted
+ *   rather than explained: dropping it would reject a log some server produced.
  *
  * A port that rejects `"C"`, `"G"` or `"S"` fails the delta stream on the first
  * one it meets, so the set is pinned by `corpus/vectors/parse-sync-action.json`

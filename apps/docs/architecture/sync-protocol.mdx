@@ -40,11 +40,11 @@ Three more carry no row. A client routes them rather than applying them, and a
 client that rejects an unknown letter will fail the whole delta packet the first
 time one arrives — so an implementation must accept all eight:
 
-| Letter | Meaning                                                                                                                                          |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `"C"`  | Covering. Grants the client coverage of a partial-index key without carrying the rows behind it; the client fetches them.                        |
-| `"G"`  | Sync-group membership change. Addressed to the changed user's own group and carrying `{ subscribedSyncGroups }`; forces a full re-bootstrap.     |
-| `"S"`  | The same membership change under its older letter. Accepted for logs written by a server that predates `"G"`; the current server never emits it. |
+| Letter | Meaning                                                                                                                                      |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"C"`  | Covering. Grants the client coverage of a partial-index key without carrying the rows behind it; the client fetches them.                    |
+| `"G"`  | Sync-group membership change. Addressed to the changed user's own group and carrying `{ subscribedSyncGroups }`; forces a full re-bootstrap. |
+| `"S"`  | Handled exactly as `"G"` is. No server in this package emits it; it is accepted so a log that does carry it still applies.                   |
 
 A **delta packet** bundles sync actions with a `lastSyncId` watermark:
 

@@ -8,8 +8,8 @@ const DATE_ONLY_DAY_MS = 24 * 60 * 60 * 1000;
  *
  * A finite epoch outside that range neither throws nor returns null —
  * `new Date(8.64e15 + 1)` is an Invalid Date, whose `getTime()` is NaN. So the
- * `…OrNull` conversions below, which promise a usable `Date`, bound their input
- * rather than trusting `Number.isFinite`.
+ * conversions below that promise a usable `Date` — or a string derived from one
+ * — bound their input rather than trusting `Number.isFinite`.
  *
  * The `…Epoch` functions deliberately do not: those run on egress, encoding a
  * value already stored into a sync action, and a stored number the client is
@@ -20,8 +20,8 @@ const DATE_ONLY_DAY_MS = 24 * 60 * 60 * 1000;
  */
 const MAX_EPOCH_MS = 8_640_000_000_000_000;
 
-const isRepresentableEpoch = (value: unknown): boolean =>
-  typeof value === "number" && Math.abs(value) <= MAX_EPOCH_MS;
+const isRepresentableEpoch = (value: number): boolean =>
+  Math.abs(value) <= MAX_EPOCH_MS;
 
 const pad = (value: number): string => String(value).padStart(2, "0");
 
@@ -128,7 +128,7 @@ export const toDateOnlyEpoch = (value: unknown): number | null => {
 export const epochToDateOnlyString = (value: number | null): string | null => {
   const epoch = toDateOnlyEpoch(value);
 
-  if (epoch === null) {
+  if (epoch === null || !isRepresentableEpoch(epoch)) {
     return null;
   }
 
