@@ -1,0 +1,154 @@
+{
+  "fn": "serializeSyncData",
+  "description": "Encoding a stored row into the `data` object of a sync action. Positional arguments: the row, the field specs by column, and options carrying an optional model id and an optional explicit key list. Temporal columns leave as EPOCH MILLISECONDS, not ISO-8601 strings — this is the opposite encoding to the one the same value has in a sync action's `createdAt`, and getting it backwards is silent data corruption rather than a parse error. Every other column is copied verbatim. A value the instant codec cannot read becomes null rather than failing the packet. When `keys` is given it, not the row, decides the shape, so a key the row lacks is emitted as null for a temporal column and left unset otherwise; an unset key is written here as an ABSENT key.",
+  "cases": [
+    {
+      "name": "a column with no field spec is copied verbatim",
+      "input": [{ "title": "Bug fix" }, {}],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "an empty row is an empty data object",
+      "input": [{}, { "dueAt": { "type": "date" } }],
+      "expected": {}
+    },
+    {
+      "name": "the model id is prepended when supplied",
+      "input": [{ "title": "Bug fix" }, {}, { "modelId": "t1" }],
+      "expected": { "id": "t1", "title": "Bug fix" }
+    },
+    {
+      "name": "a null model id is not emitted",
+      "input": [{ "title": "Bug fix" }, {}, { "modelId": null }],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "date: a stored instant leaves as epoch milliseconds",
+      "input": [
+        { "dueAt": "2026-01-01T00:00:00.000Z" },
+        { "dueAt": { "type": "date" } }
+      ],
+      "expected": { "dueAt": 1767225600000 }
+    },
+    {
+      "name": "date: an epoch stays an epoch",
+      "input": [{ "dueAt": 1736899200000 }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": 1736899200000 }
+    },
+    {
+      "name": "date: null stays null",
+      "input": [{ "dueAt": null }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null }
+    },
+    {
+      "name": "date: the epoch itself is a value, not a null",
+      "input": [{ "dueAt": 0 }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": 0 }
+    },
+    {
+      "name": "date: a date-only string is not an instant and becomes null",
+      "input": [{ "dueAt": "2026-01-01" }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null }
+    },
+    {
+      "name": "date: an unreadable value becomes null rather than failing the packet",
+      "input": [{ "dueAt": "whenever" }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null }
+    },
+    {
+      "name": "date: an offset instant is normalized to UTC epoch",
+      "input": [
+        { "dueAt": "2026-01-01T11:00:00.000+11:00" },
+        { "dueAt": { "type": "date" } }
+      ],
+      "expected": { "dueAt": 1767225600000 }
+    },
+    {
+      "name": "date: an epoch beyond 2^53 is not narrowed",
+      "input": [{ "dueAt": 9007199254740994 }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": 9007199254740994 }
+    },
+    {
+      "name": "dateNow serializes the same as date",
+      "input": [
+        { "createdAt": "2026-01-01T00:00:00.000Z" },
+        { "createdAt": { "type": "dateNow" } }
+      ],
+      "expected": { "createdAt": 1767225600000 }
+    },
+    {
+      "name": "dateOnly: a YYYY-MM-DD string leaves as epoch milliseconds",
+      "input": [{ "dueOn": "2026-01-01" }, { "dueOn": { "type": "dateOnly" } }],
+      "expected": { "dueOn": 1767225600000 }
+    },
+    {
+      "name": "dateOnly: a UTC-midnight epoch stays an epoch",
+      "input": [
+        { "dueOn": 1736899200000 },
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "expected": { "dueOn": 1736899200000 }
+    },
+    {
+      "name": "dateOnly: an epoch that is not UTC midnight becomes null",
+      "input": [
+        { "dueOn": 1736942400000 },
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "expected": { "dueOn": null }
+    },
+    {
+      "name": "dateOnly: an instant string is not a date-only and becomes null",
+      "input": [
+        { "dueOn": "2026-01-01T00:00:00.000Z" },
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "expected": { "dueOn": null }
+    },
+    {
+      "name": "dateOnly: null stays null",
+      "input": [{ "dueOn": null }, { "dueOn": { "type": "dateOnly" } }],
+      "expected": { "dueOn": null }
+    },
+    {
+      "name": "string and number columns are copied verbatim",
+      "input": [
+        { "rank": 0, "title": "" },
+        { "rank": { "type": "number" }, "title": { "type": "string" } }
+      ],
+      "expected": { "rank": 0, "title": "" }
+    },
+    {
+      "name": "keys decides the shape when it is given",
+      "input": [
+        { "note": "hi", "title": "Bug fix" },
+        {},
+        { "keys": ["title"] }
+      ],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "a key in keys that the row lacks is unset when it has no temporal spec",
+      "input": [{ "title": "Bug fix" }, {}, { "keys": ["note", "title"] }],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "a key in keys that the row lacks is null when it is temporal",
+      "input": [
+        { "title": "Bug fix" },
+        { "dueAt": { "type": "date" } },
+        { "keys": ["dueAt", "title"] }
+      ],
+      "expected": { "dueAt": null, "title": "Bug fix" }
+    },
+    {
+      "name": "keys and a model id together",
+      "input": [
+        { "note": "hi", "title": "Bug fix" },
+        {},
+        { "keys": ["title"], "modelId": "t1" }
+      ],
+      "expected": { "id": "t1", "title": "Bug fix" }
+    }
+  ]
+}

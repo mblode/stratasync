@@ -6,13 +6,100 @@
  */
 import { loadVectorFile } from "@stratasync/conformance";
 
+import {
+  parseBootstrapLine,
+  parseDeltaPacket,
+  parseSyncAction,
+} from "../src/protocol/index.js";
+import { readNdjsonLines } from "../src/protocol/ndjson.js";
 import { computeSchemaHash } from "../src/schema/hash.js";
 import {
   MODEL_SNAPSHOT_VERSION,
   serializeModelSnapshot,
 } from "../src/schema/snapshot.js";
 import type { ModelRegistrySnapshot } from "../src/schema/types.js";
-import { compareSyncId } from "../src/sync/sync-id.js";
+import { compareSyncId, parseSyncId } from "../src/sync/sync-id.js";
+
+/**
+ * Corpus values are JSON, so a returned date is compared as its ISO-8601 UTC
+ * string and a key the implementation left `undefined` is compared as an
+ * absent key — a port has no second empty value to distinguish it from one.
+ */
+const toCorpusValue = (value: unknown): unknown => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(toCorpusValue);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, member]) => member !== undefined)
+        .map(([key, member]) => [key, toCorpusValue(member)])
+    );
+  }
+  return value;
+};
+
+/**
+ * Runs one vector file against a synchronous function. `input` is always an
+ * array of positional arguments in these files.
+ */
+const describeVectors = (
+  stem: string,
+  call: (args: unknown[]) => unknown
+): void => {
+  const file = loadVectorFile(stem);
+
+  describe(`${file.fn} vectors`, () => {
+    for (const testCase of file.cases) {
+      const args = testCase.input as unknown[];
+
+      it(testCase.name, () => {
+        if (testCase.throws === true) {
+          expect(() => call(args)).toThrow();
+          return;
+        }
+        expect(toCorpusValue(call(args))).toStrictEqual(testCase.expected);
+      });
+    }
+  });
+};
+
+describeVectors("compare-sync-id", (args) =>
+  // The vector pins the sign; the magnitude is an implementation detail.
+  Math.sign(compareSyncId(args[0] as string, args[1] as string))
+);
+
+describeVectors("parse-sync-id", (args) =>
+  parseSyncId(args[0], args[1] as string | undefined)
+);
+
+describeVectors("parse-sync-action", (args) =>
+  parseSyncAction(args[0] as Record<string, unknown>)
+);
+
+describeVectors("parse-delta-packet", (args) => parseDeltaPacket(args[0]));
+
+describeVectors("parse-bootstrap-line", (args) =>
+  parseBootstrapLine(args[0] as string)
+);
+
+const streamFromChunks = (chunks: string[]): ReadableStream<Uint8Array> => {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(encoder.encode(chunks[index] as string));
+        index += 1;
+      } else {
+        controller.close();
+      }
+    },
+  });
+};
 
 /**
  * Rebuilds an object with its keys in `order`. Insertion order has to come
@@ -25,14 +112,18 @@ const declare = <T>(
   of: Record<string, T>
 ): Record<string, T> => Object.fromEntries(order.map((key) => [key, of[key]]));
 
-describe("compareSyncId vectors", () => {
-  const file = loadVectorFile("compare-sync-id");
+describe("readNdjsonLines vectors", () => {
+  const file = loadVectorFile("read-ndjson-lines");
 
   for (const testCase of file.cases) {
-    it(testCase.name, () => {
-      const [a, b] = testCase.input as [string, string];
-      // The vector pins the sign; the magnitude is an implementation detail.
-      expect(Math.sign(compareSyncId(a, b))).toBe(testCase.expected);
+    const [chunks] = testCase.input as [string[]];
+
+    it(testCase.name, async () => {
+      const lines: string[] = [];
+      for await (const line of readNdjsonLines(streamFromChunks(chunks))) {
+        lines.push(line);
+      }
+      expect(lines).toStrictEqual(testCase.expected);
     });
   }
 });

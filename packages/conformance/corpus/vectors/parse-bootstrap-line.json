@@ -1,0 +1,214 @@
+{
+  "fn": "parseBootstrapLine",
+  "description": "Decoding one NDJSON line of a bootstrap or batch-load stream. One positional argument: the raw line, leading and trailing whitespace included. A blank or whitespace-only line decodes to null, so a trailing newline in the body is not an error. A model row is tagged with `__class`; metadata arrives either behind the `_metadata_=` prefix, nested under a `_metadata_` key, or inferred from `lastSyncId`/`subscribedSyncGroups`/`returnedModelsCount`. The `end` marker is checked before that inference, because an `end` line may legitimately carry a `lastSyncId`. The whole metadata record is preserved on `raw` so a server can ship extras. A line that is not a JSON object, or an object that is none of the above, fails the stream.",
+  "cases": [
+    {
+      "name": "a blank line is not an error",
+      "input": [""],
+      "expected": null
+    },
+    {
+      "name": "a whitespace-only line is not an error",
+      "input": ["   "],
+      "expected": null
+    },
+    {
+      "name": "a bare newline is not an error",
+      "input": ["\n"],
+      "expected": null
+    },
+    {
+      "name": "a model row",
+      "input": ["{\"__class\":\"Task\",\"id\":\"t1\",\"title\":\"Bug fix\"}"],
+      "expected": {
+        "row": {
+          "data": { "id": "t1", "title": "Bug fix" },
+          "modelName": "Task"
+        },
+        "type": "row"
+      }
+    },
+    {
+      "name": "a model row surrounded by whitespace and a trailing newline",
+      "input": ["  {\"__class\":\"Task\",\"id\":\"t1\"}  \n"],
+      "expected": {
+        "row": { "data": { "id": "t1" }, "modelName": "Task" },
+        "type": "row"
+      }
+    },
+    {
+      "name": "metadata behind the _metadata_= prefix",
+      "input": [
+        "_metadata_={\"lastSyncId\":\"42\",\"subscribedSyncGroups\":[\"g1\",\"g2\"]}"
+      ],
+      "expected": {
+        "metadata": {
+          "lastSyncId": "42",
+          "raw": {
+            "lastSyncId": "42",
+            "subscribedSyncGroups": ["g1", "g2"]
+          },
+          "subscribedSyncGroups": ["g1", "g2"]
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "metadata nested under a _metadata_ key",
+      "input": ["{\"_metadata_\":{\"lastSyncId\":\"42\"}}"],
+      "expected": {
+        "metadata": {
+          "lastSyncId": "42",
+          "raw": { "lastSyncId": "42" },
+          "subscribedSyncGroups": []
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "metadata inferred from lastSyncId alone",
+      "input": ["{\"lastSyncId\":\"7\"}"],
+      "expected": {
+        "metadata": {
+          "lastSyncId": "7",
+          "raw": { "lastSyncId": "7" },
+          "subscribedSyncGroups": []
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "metadata inferred from returnedModelsCount alone",
+      "input": ["{\"returnedModelsCount\":{\"Task\":2}}"],
+      "expected": {
+        "metadata": {
+          "raw": { "returnedModelsCount": { "Task": 2 } },
+          "returnedModelsCount": { "Task": 2 },
+          "subscribedSyncGroups": []
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "metadata carries schemaHash, databaseVersion and unknown extras",
+      "input": [
+        "_metadata_={\"databaseVersion\":3,\"firstSyncId\":\"1\",\"lastSyncId\":\"42\",\"schemaHash\":\"0123456789abcdef\",\"subscribedSyncGroups\":[\"g1\"]}"
+      ],
+      "expected": {
+        "metadata": {
+          "databaseVersion": 3,
+          "lastSyncId": "42",
+          "raw": {
+            "databaseVersion": 3,
+            "firstSyncId": "1",
+            "lastSyncId": "42",
+            "schemaHash": "0123456789abcdef",
+            "subscribedSyncGroups": ["g1"]
+          },
+          "schemaHash": "0123456789abcdef",
+          "subscribedSyncGroups": ["g1"]
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "non-string members of subscribedSyncGroups are dropped",
+      "input": ["_metadata_={\"subscribedSyncGroups\":[\"g1\",5,null,\"g2\"]}"],
+      "expected": {
+        "metadata": {
+          "raw": { "subscribedSyncGroups": ["g1", 5, null, "g2"] },
+          "subscribedSyncGroups": ["g1", "g2"]
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "a non-array subscribedSyncGroups becomes empty, not absent",
+      "input": ["_metadata_={\"subscribedSyncGroups\":\"g1\"}"],
+      "expected": {
+        "metadata": {
+          "raw": { "subscribedSyncGroups": "g1" },
+          "subscribedSyncGroups": []
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "a numeric lastSyncId in metadata is rejected, not coerced",
+      "input": ["_metadata_={\"lastSyncId\":42}"],
+      "throws": true
+    },
+    {
+      "name": "a lastSyncId beyond 2^53 survives metadata decoding",
+      "input": ["_metadata_={\"lastSyncId\":\"9007199254740993\"}"],
+      "expected": {
+        "metadata": {
+          "lastSyncId": "9007199254740993",
+          "raw": { "lastSyncId": "9007199254740993" },
+          "subscribedSyncGroups": []
+        },
+        "type": "meta"
+      }
+    },
+    {
+      "name": "the end marker",
+      "input": ["{\"type\":\"end\"}"],
+      "expected": { "type": "end" }
+    },
+    {
+      "name": "the end marker with a row count",
+      "input": ["{\"rowCount\":3,\"type\":\"end\"}"],
+      "expected": { "rowCount": 3, "type": "end" }
+    },
+    {
+      "name": "an end marker carrying lastSyncId is still an end, not metadata",
+      "input": ["{\"lastSyncId\":\"9\",\"type\":\"end\"}"],
+      "expected": { "type": "end" }
+    },
+    {
+      "name": "a server error line fails the stream",
+      "input": ["{\"message\":\"boom\",\"type\":\"error\"}"],
+      "throws": true
+    },
+    {
+      "name": "a server error line with no message still fails the stream",
+      "input": ["{\"type\":\"error\"}"],
+      "throws": true
+    },
+    {
+      "name": "an object that is neither a row nor metadata",
+      "input": ["{\"foo\":\"bar\"}"],
+      "throws": true
+    },
+    {
+      "name": "a __class that is not a string is not a row",
+      "input": ["{\"__class\":7,\"id\":\"t1\"}"],
+      "throws": true
+    },
+    {
+      "name": "a line that is a JSON number, not an object",
+      "input": ["42"],
+      "throws": true
+    },
+    {
+      "name": "a line that is a JSON string, not an object",
+      "input": ["\"Task\""],
+      "throws": true
+    },
+    {
+      "name": "a line that is a JSON array, not an object",
+      "input": ["[1,2]"],
+      "throws": true
+    },
+    {
+      "name": "a line that is JSON null",
+      "input": ["null"],
+      "throws": true
+    },
+    {
+      "name": "a line that is not JSON at all",
+      "input": ["not json"],
+      "throws": true
+    }
+  ]
+}

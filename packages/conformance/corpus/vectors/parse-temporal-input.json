@@ -1,0 +1,101 @@
+{
+  "fn": "parseTemporalInput",
+  "description": "Decoding one temporal field of a mutation payload. Positional arguments: the kind (\"instant\" or \"dateOnly\"), the raw value, and the field name. Epoch milliseconds is the ONLY accepted encoding — an ISO-8601 string is rejected even though it is what the same value looks like elsewhere on the wire, and a port that accepts both is wrong. Null and absent both decode to null, so a field cleared by the client and a field the client never sent are indistinguishable at this layer. A \"dateOnly\" value must land exactly on UTC midnight. Results are written here as ISO-8601 strings; an implementation converts its date type to ISO-8601 UTC before comparing.",
+  "cases": [
+    {
+      "name": "instant: null is null",
+      "input": ["instant", null, "dueAt"],
+      "expected": null
+    },
+    {
+      "name": "instant: an absent value is null",
+      "input": ["instant"],
+      "expected": null
+    },
+    {
+      "name": "instant: epoch milliseconds",
+      "input": ["instant", 1736899200000, "dueAt"],
+      "expected": "2025-01-15T00:00:00.000Z"
+    },
+    {
+      "name": "instant: the epoch itself is a value, not an absent field",
+      "input": ["instant", 0, "dueAt"],
+      "expected": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "instant: a negative epoch predates 1970",
+      "input": ["instant", -86400000, "dueAt"],
+      "expected": "1969-12-31T00:00:00.000Z"
+    },
+    {
+      "name": "instant: a sub-second epoch keeps its milliseconds",
+      "input": ["instant", 1736899200123, "dueAt"],
+      "expected": "2025-01-15T00:00:00.123Z"
+    },
+    {
+      "name": "instant: an ISO-8601 string is rejected, not parsed",
+      "input": ["instant", "2026-01-01T00:00:00.000Z", "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: a stringified epoch is rejected, not coerced",
+      "input": ["instant", "1736899200000", "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: a boolean is rejected",
+      "input": ["instant", true, "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: an object is rejected",
+      "input": ["instant", {}, "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: an array is rejected",
+      "input": ["instant", [], "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "dateOnly: null is null",
+      "input": ["dateOnly", null, "dueOn"],
+      "expected": null
+    },
+    {
+      "name": "dateOnly: an absent value is null",
+      "input": ["dateOnly"],
+      "expected": null
+    },
+    {
+      "name": "dateOnly: UTC midnight",
+      "input": ["dateOnly", 1736899200000, "dueOn"],
+      "expected": "2025-01-15T00:00:00.000Z"
+    },
+    {
+      "name": "dateOnly: the epoch itself is UTC midnight",
+      "input": ["dateOnly", 0, "dueOn"],
+      "expected": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "dateOnly: a negative whole day",
+      "input": ["dateOnly", -86400000, "dueOn"],
+      "expected": "1969-12-31T00:00:00.000Z"
+    },
+    {
+      "name": "dateOnly: one millisecond past midnight is rejected",
+      "input": ["dateOnly", 1736899200001, "dueOn"],
+      "throws": true
+    },
+    {
+      "name": "dateOnly: a mid-day epoch is rejected",
+      "input": ["dateOnly", 1736942400000, "dueOn"],
+      "throws": true
+    },
+    {
+      "name": "dateOnly: a YYYY-MM-DD string is rejected, not parsed",
+      "input": ["dateOnly", "2026-01-01", "dueOn"],
+      "throws": true
+    }
+  ]
+}
