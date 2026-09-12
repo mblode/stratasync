@@ -38,6 +38,8 @@ export {
   isAlreadySerializedValue,
   serializeModelRecord,
 } from "./schema/codec.js";
+export type { CancelScheduled, SyncRuntime } from "./runtime/index.js";
+export { delay, systemRuntime } from "./runtime/index.js";
 export { computeSchemaHash } from "./schema/hash.js";
 export { ModelRegistry } from "./schema/registry.js";
 export {
@@ -51,6 +53,8 @@ export type {
 } from "./schema/snapshot.js";
 export type { PropertySerializer } from "./schema/types.js";
 export type {
+  FieldDefinition,
+  ModelDefinition,
   ModelMetadata,
   ModelRegistrySnapshot,
   SchemaDefinition,

@@ -1,3 +1,6 @@
+import type { SyncRuntime } from "../runtime/index.js";
+import { systemRuntime } from "../runtime/index.js";
+
 export interface ArchiveState extends Record<string, unknown> {
   archivedAt?: number | null;
 }
@@ -37,8 +40,11 @@ export const captureArchiveState = (
   record: Record<string, unknown> | ArchiveState | undefined
 ): ArchiveState => ({ archivedAt: readArchivedAt(record) ?? null });
 
-export const createArchivePayload = (archivedAt?: number): ArchiveState => ({
-  archivedAt: archivedAt ?? Date.now(),
+export const createArchivePayload = (
+  archivedAt?: number,
+  runtime: SyncRuntime = systemRuntime
+): ArchiveState => ({
+  archivedAt: archivedAt ?? runtime.now(),
 });
 
 export const createUnarchivePatch = (): ArchiveState => ({ archivedAt: null });
