@@ -1,6 +1,6 @@
 {
   "name": "stratasync",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "stratasync: the CLI for Strata Sync, an open-source implementation of Linear's sync engine. `npx stratasync init my-app` scaffolds a runnable local-first app with a Fastify + Postgres sync server and a React client.",
   "keywords": [
     "cli",
