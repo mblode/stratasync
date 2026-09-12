@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/transport-graphql",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "@stratasync/transport-graphql: GraphQL + WebSocket transport adapter for Strata Sync, an open-source implementation of Linear's sync engine.",
   "keywords": [
     "fetch",
@@ -60,7 +60,7 @@
   "dependencies": {
     "@stratasync/client": "*",
     "@stratasync/core": "*",
-    "@stratasync/y-doc": "^2.5.0"
+    "@stratasync/y-doc": "^2.5.1"
   },
   "engines": {
     "node": ">=22"

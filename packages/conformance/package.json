@@ -1,6 +1,6 @@
 {
   "name": "@stratasync/conformance",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "@stratasync/conformance: the language-agnostic conformance corpus for Strata Sync, an open-source implementation of Linear's sync engine. Golden vectors, engine scenarios and a driver protocol every implementation must pass.",
   "keywords": [
     "conformance",

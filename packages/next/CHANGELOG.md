@@ -1,5 +1,13 @@
 # @stratasync/next
 
+## 2.5.1
+
+### Patch Changes
+
+- @stratasync/client@2.5.1
+  - @stratasync/core@2.5.1
+  - @stratasync/react@2.5.1
+
 ## 2.5.0
 
 ### Patch Changes

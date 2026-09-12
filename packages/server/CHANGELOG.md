@@ -1,5 +1,11 @@
 # @stratasync/server
 
+## 2.5.1
+
+### Patch Changes
+
+- a65002a: Emit a terminal bootstrap end marker with the actual streamed row count after all models finish successfully. This lets clients detect truncated snapshots before replacing local data or advancing their cursor. Deploy the server before enabling client enforcement.
+
 ## 2.5.0
 
 ### Patch Changes
