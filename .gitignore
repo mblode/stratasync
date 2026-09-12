@@ -11,3 +11,6 @@ dist/
 .vercel
 .env*.local
 /docs
+
+# Agent worktrees (git scaffolding, never committed)
+.claude/worktrees/
