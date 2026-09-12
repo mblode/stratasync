@@ -1,8 +1,10 @@
 import type {
   ArchiveTransactionOptions,
+  CancelScheduled,
   MutateResult,
   SyncAction,
   SyncId,
+  SyncRuntime,
   Transaction,
   UnarchiveTransactionOptions,
 } from "@stratasync/core";
@@ -15,6 +17,7 @@ import {
   createUpdateTransaction,
   isSyncIdGreaterThan,
   maxSyncId,
+  systemRuntime,
   ZERO_SYNC_ID,
 } from "@stratasync/core";
 
@@ -55,6 +58,8 @@ export interface OutboxManagerOptions {
   onTransactionStateChange?: (tx: Transaction) => void;
   /** Callback when transaction is rejected by server */
   onTransactionRejected?: (tx: Transaction) => void;
+  /** Clock, batch timer and transaction id source. Defaults to `systemRuntime`. */
+  runtime?: SyncRuntime;
 }
 
 /**
@@ -77,9 +82,10 @@ export class OutboxManager {
   private readonly maxBatchSize: number;
   private readonly onTransactionStateChange?: (tx: Transaction) => void;
   private readonly onTransactionRejected?: (tx: Transaction) => void;
+  private readonly runtime: SyncRuntime;
 
   private pendingBatch: Transaction[] = [];
-  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private cancelBatchTimer: CancelScheduled | null = null;
   private processing = false;
   private processingPromise: Promise<void> | null = null;
   // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
@@ -119,6 +125,7 @@ export class OutboxManager {
     this.maxBatchSize = options.maxBatchSize ?? 100;
     this.onTransactionStateChange = options.onTransactionStateChange;
     this.onTransactionRejected = options.onTransactionRejected;
+    this.runtime = options.runtime ?? systemRuntime;
   }
 
   /**
@@ -129,7 +136,13 @@ export class OutboxManager {
     modelId: string,
     data: Record<string, unknown>
   ): Promise<Transaction> {
-    const tx = createInsertTransaction(this.clientId, modelName, modelId, data);
+    const tx = createInsertTransaction(
+      this.clientId,
+      modelName,
+      modelId,
+      data,
+      this.runtime
+    );
     await this.queueTransaction(tx);
     return tx;
   }
@@ -148,7 +161,8 @@ export class OutboxManager {
       modelName,
       modelId,
       changes,
-      original
+      original,
+      this.runtime
     );
     await this.queueTransaction(tx);
     return tx;
@@ -166,7 +180,8 @@ export class OutboxManager {
       this.clientId,
       modelName,
       modelId,
-      original
+      original,
+      this.runtime
     );
     await this.queueTransaction(tx);
     return tx;
@@ -184,7 +199,8 @@ export class OutboxManager {
       this.clientId,
       modelName,
       modelId,
-      options
+      options,
+      this.runtime
     );
     await this.queueTransaction(tx);
     return tx;
@@ -202,7 +218,8 @@ export class OutboxManager {
       this.clientId,
       modelName,
       modelId,
-      options
+      options,
+      this.runtime
     );
     await this.queueTransaction(tx);
     return tx;
@@ -253,9 +270,7 @@ export class OutboxManager {
    * Schedules sending the pending batch
    */
   private scheduleBatchSend(): void {
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-    }
+    this.clearBatchTimer();
 
     // Send immediately if batch is full
     if (this.pendingBatch.length >= this.maxBatchSize) {
@@ -263,19 +278,22 @@ export class OutboxManager {
       return;
     }
 
-    this.batchTimer = setTimeout(() => {
+    this.cancelBatchTimer = this.runtime.schedule(() => {
+      this.cancelBatchTimer = null;
       this.flushBatch();
     }, this.batchDelay);
+  }
+
+  private clearBatchTimer(): void {
+    this.cancelBatchTimer?.();
+    this.cancelBatchTimer = null;
   }
 
   /**
    * Flushes the pending batch
    */
   private flushBatch(): void {
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
+    this.clearBatchTimer();
 
     if (this.pendingBatch.length === 0) {
       return;
@@ -328,7 +346,7 @@ export class OutboxManager {
       return;
     }
 
-    const batch = createTransactionBatch(transactions);
+    const batch = createTransactionBatch(transactions, this.runtime);
 
     try {
       const result = await this.transport.mutate(batch);
@@ -590,10 +608,7 @@ export class OutboxManager {
   }
 
   private async flushPendingBatchNow(): Promise<void> {
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
+    this.clearBatchTimer();
 
     if (this.pendingBatch.length === 0) {
       return;
@@ -759,10 +774,7 @@ export class OutboxManager {
 
   dispose(): void {
     this.lifecycleVersion += 1;
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
+    this.clearBatchTimer();
     this.pendingBatch = [];
     this.localClientTxIds.clear();
     // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern

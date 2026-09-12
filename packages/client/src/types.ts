@@ -15,6 +15,7 @@ import type {
   SyncAction,
   SyncClientState,
   SyncId,
+  SyncRuntime,
   Transaction,
   TransactionBatch,
   UnarchiveTransactionOptions,
@@ -328,6 +329,19 @@ export interface SyncClientOptions {
   rebaseStrategy?: "server-wins" | "client-wins" | "merge";
   /** Enable field-level conflict detection for rebasing (default: true) */
   fieldLevelConflicts?: boolean;
+  /**
+   * Clock, timer queue and id source. Defaults to `systemRuntime` (wall clock,
+   * host timers, random UUIDs). Supply one to make a run reproducible — the
+   * conformance driver injects a fake clock so only its `advanceClock`
+   * operation moves time.
+   */
+  runtime?: SyncRuntime;
+  /**
+   * Stable identifier for this client installation. Defaults to the value
+   * persisted in storage metadata, then to a generated one. Injecting it keeps
+   * `clientId` out of ambient browser storage, which conformance runs require.
+   */
+  clientId?: string;
 }
 
 /**

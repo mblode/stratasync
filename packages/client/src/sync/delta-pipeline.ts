@@ -1,6 +1,7 @@
 // oxlint-disable prefer-await-to-then, prefer-await-to-callbacks -- this module
 // drives fire-and-forget background loops and registers iterator callbacks.
 import type {
+  CancelScheduled,
   DeltaPacket,
   RebaseConflict,
   RebaseOptions,
@@ -10,6 +11,7 @@ import type {
 } from "@stratasync/core";
 import {
   applyDeltas,
+  delay,
   isSyncIdGreaterThan,
   rebaseOriginals,
   rebaseTransactions,
@@ -101,12 +103,6 @@ const getAuthoritativeGroups = (
   return undefined;
 };
 
-const wait = (ms: number): Promise<void> =>
-  // oxlint-disable-next-line avoid-new -- wrapping callback API in promise
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-
 /**
  * Collaborators the pipeline calls back into for cross-cutting work the
  * orchestrator still coordinates (bootstrap recovery, sync-group handling,
@@ -152,11 +148,11 @@ export class DeltaPipeline {
   /** Coverage keys awaiting a fetch once the state lock is released. */
   private pendingCoverageLoads: CoverageKey[] = [];
   /** Pending resubscribe after a stream failure; cleared on reset. */
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private cancelReconnect: CancelScheduled | null = null;
   /** Guards against stacking group-change re-bootstraps. */
   private groupChangeBootstrapInFlight = false;
   /** Retry of a failed group-change re-bootstrap; cleared on reset. */
-  private groupChangeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private cancelGroupChangeRetry: CancelScheduled | null = null;
 
   constructor(ctx: SyncContext, deps: DeltaPipelineDeps) {
     this.ctx = ctx;
@@ -176,23 +172,19 @@ export class DeltaPipeline {
   }
 
   private clearGroupChangeRetryTimer(): void {
-    if (this.groupChangeRetryTimer) {
-      clearTimeout(this.groupChangeRetryTimer);
-      this.groupChangeRetryTimer = null;
-    }
+    this.cancelGroupChangeRetry?.();
+    this.cancelGroupChangeRetry = null;
   }
 
   private clearReconnectTimer(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnect?.();
+    this.cancelReconnect = null;
   }
 
   private scheduleResubscribe(runToken: number): void {
     this.clearReconnectTimer();
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
+    this.cancelReconnect = this.ctx.runtime.schedule(() => {
+      this.cancelReconnect = null;
       if (this.ctx.isRunActive(runToken) && !this.ctx.getDeltaSubscription()) {
         this.startDeltaSubscription();
       }
@@ -336,7 +328,7 @@ export class DeltaPipeline {
         // latch in storage before opening ordinary packet application again.
         await this.ctx.storage.setMeta({
           groupChangePending: false,
-          updatedAt: Date.now(),
+          updatedAt: this.ctx.runtime.now(),
         });
         this.ctx.setGroupChangePending(false);
       }
@@ -378,7 +370,7 @@ export class DeltaPipeline {
         ? { subscribedSyncGroups: authoritativeGroups }
         : {}),
       ...pendingMeta,
-      updatedAt: Date.now(),
+      updatedAt: this.ctx.runtime.now(),
     });
     if (!wasPending) {
       this.ctx.setGroupChangePending(true);
@@ -411,8 +403,8 @@ export class DeltaPipeline {
         // is alive, because every packet is being held until it lands.
         if (this.ctx.isRunActive(runToken) && this.ctx.isGroupChangePending()) {
           this.clearGroupChangeRetryTimer();
-          this.groupChangeRetryTimer = setTimeout(() => {
-            this.groupChangeRetryTimer = null;
+          this.cancelGroupChangeRetry = this.ctx.runtime.schedule(() => {
+            this.cancelGroupChangeRetry = null;
             this.scheduleGroupChangeBootstrap(runToken);
           }, GROUP_CHANGE_RETRY_DELAY_MS);
         }
@@ -588,7 +580,7 @@ export class DeltaPipeline {
           }
           throw error;
         }
-        await wait(300 * (attempt + 1));
+        await delay(this.ctx.runtime, 300 * (attempt + 1));
       }
     }
 

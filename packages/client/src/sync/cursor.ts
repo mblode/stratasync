@@ -1,5 +1,9 @@
-import type { SyncId } from "@stratasync/core";
-import { isSyncIdGreaterThan, ZERO_SYNC_ID } from "@stratasync/core";
+import type { SyncId, SyncRuntime } from "@stratasync/core";
+import {
+  isSyncIdGreaterThan,
+  systemRuntime,
+  ZERO_SYNC_ID,
+} from "@stratasync/core";
 
 import type { StorageAdapter } from "../types.js";
 
@@ -15,9 +19,11 @@ export class SyncCursor {
   private _lastSyncId: SyncId = ZERO_SYNC_ID;
   private _firstSyncId: SyncId = ZERO_SYNC_ID;
   private readonly storage: StorageAdapter;
+  private readonly runtime: SyncRuntime;
 
-  constructor(storage: StorageAdapter) {
+  constructor(storage: StorageAdapter, runtime: SyncRuntime = systemRuntime) {
     this.storage = storage;
+    this.runtime = runtime;
   }
 
   get lastSyncId(): SyncId {
@@ -73,9 +79,9 @@ export class SyncCursor {
     }
     this._lastSyncId = syncId;
     await this.storage.setMeta({
-      lastSyncAt: Date.now(),
+      lastSyncAt: this.runtime.now(),
       lastSyncId: this._lastSyncId,
-      updatedAt: Date.now(),
+      updatedAt: this.runtime.now(),
     });
     return true;
   }

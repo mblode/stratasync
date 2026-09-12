@@ -3,6 +3,7 @@ import type {
   DeltaPacket,
   ModelRegistry,
   SyncClientState,
+  SyncRuntime,
   Transaction,
 } from "@stratasync/core";
 
@@ -33,6 +34,8 @@ export interface SyncContext {
   readonly identityMaps: IdentityMapRegistry;
   readonly registry: ModelRegistry;
   readonly options: SyncClientOptions;
+  /** Clock, timers and id source. Never read `Date.now()` or `setTimeout` directly. */
+  readonly runtime: SyncRuntime;
   readonly cursor: SyncCursor;
   readonly schemaHash: string;
   readonly emitEvent?: (event: SyncClientEvent) => void;

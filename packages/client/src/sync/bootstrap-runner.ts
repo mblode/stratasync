@@ -21,10 +21,16 @@ export class BootstrapRunner {
     return !this.ctx.isRunActive(runToken);
   }
 
-  async bootstrapIfNeeded(meta: StorageMeta, runToken: number): Promise<void> {
+  /**
+   * Returns whether a full remote bootstrap actually landed, so the caller can
+   * skip the delta catch-up fetch that a fresh snapshot makes redundant.
+   */
+  async bootstrapIfNeeded(
+    meta: StorageMeta,
+    runToken: number
+  ): Promise<boolean> {
     if ((this.ctx.options.bootstrapMode ?? "auto") === "full") {
-      await this.bootstrap(runToken);
-      return;
+      return await this.bootstrap(runToken);
     }
 
     // A group-change re-bootstrap still owed from a previous run (the client
@@ -36,10 +42,10 @@ export class BootstrapRunner {
       meta.groupChangePending === true || (await this.shouldBootstrap(meta));
     if (!needsBootstrap) {
       await this.hydrateIdentityMaps(runToken);
-      return;
+      return false;
     }
 
-    await this.runBootstrapStrategy(runToken);
+    return await this.runBootstrapStrategy(runToken);
   }
 
   async shouldBootstrap(meta: StorageMeta): Promise<boolean> {
@@ -59,15 +65,15 @@ export class BootstrapRunner {
     );
   }
 
-  private async runBootstrapStrategy(runToken: number): Promise<void> {
+  private async runBootstrapStrategy(runToken: number): Promise<boolean> {
     const bootstrapMode = this.ctx.options.bootstrapMode ?? "auto";
     if (bootstrapMode === "local") {
       await this.localBootstrap(runToken);
-      return;
+      return false;
     }
 
     try {
-      await this.bootstrap(runToken);
+      return await this.bootstrap(runToken);
     } catch (error) {
       const canFallback =
         bootstrapMode === "auto" &&
@@ -75,7 +81,7 @@ export class BootstrapRunner {
         (await this.hasLocalData());
       if (canFallback) {
         await this.localBootstrap(runToken);
-        return;
+        return false;
       }
       throw error;
     }
@@ -84,7 +90,7 @@ export class BootstrapRunner {
   /**
    * Performs initial bootstrap.
    */
-  async bootstrap(runToken: number): Promise<void> {
+  async bootstrap(runToken: number): Promise<boolean> {
     this.ctx.setState("bootstrapping");
     const previousMeta = await this.ctx.storage.getMeta();
 
@@ -98,10 +104,10 @@ export class BootstrapRunner {
 
     const snapshot = await this.readBootstrapStream(iterator, runToken);
     if (!snapshot) {
-      return;
+      return false;
     }
     if (this.shouldAbort(runToken)) {
-      return;
+      return false;
     }
 
     const replacesExistingSnapshot =
@@ -114,7 +120,7 @@ export class BootstrapRunner {
     if (replacesExistingSnapshot && !this.ctx.isGroupChangePending()) {
       await this.ctx.storage.setMeta({
         groupChangePending: true,
-        updatedAt: Date.now(),
+        updatedAt: this.ctx.runtime.now(),
       });
       this.ctx.setGroupChangePending(true);
       this.ctx.identityMaps.batch(() => {
@@ -129,7 +135,7 @@ export class BootstrapRunner {
 
     const persisted = await this.markBootstrapModelsPersisted(runToken);
     if (!persisted) {
-      return;
+      return false;
     }
 
     // Keep the durable privacy latch set until the caller has sanitized and
@@ -143,17 +149,18 @@ export class BootstrapRunner {
       databaseVersion,
       firstSyncId: this.ctx.cursor.firstSyncId,
       groupChangePending: privacyReconcile,
-      lastSyncAt: Date.now(),
+      lastSyncAt: this.ctx.runtime.now(),
       lastSyncId: this.ctx.cursor.lastSyncId,
       privacyWithheldClientTxIds: previousMeta.privacyWithheldClientTxIds,
       schemaHash: this.ctx.schemaHash,
       subscribedSyncGroups: this.ctx.getGroups(),
-      updatedAt: Date.now(),
+      updatedAt: this.ctx.runtime.now(),
     });
     this.ctx.emitEvent?.({
       lastSyncId: this.ctx.cursor.lastSyncId,
       type: "syncComplete",
     });
+    return true;
   }
 
   private async readBootstrapStream(
