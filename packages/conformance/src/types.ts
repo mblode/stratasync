@@ -177,7 +177,7 @@ export interface Expectation {
   cursor?: SyncId;
   store?: Row[];
   storeAbsent?: { model: string; id: string }[];
-  outbox?: Partial<OutboxEntry>[];
+  outbox?: OutboxEntry[];
   transport?: {
     bootstrapCount?: number;
     deltaFetchCount?: number;
