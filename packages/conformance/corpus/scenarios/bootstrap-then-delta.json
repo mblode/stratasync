@@ -1,0 +1,151 @@
+{
+  "id": "bootstrap-then-delta",
+  "description": "A cold client bootstraps, then applies an insert, an update and a delete delivered over the socket, advancing its cursor once per packet.",
+  "requires": ["bootstrap", "websocket"],
+  "seed": { "clientId": "c_test", "clock": 1700000000000 },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "description": "optionalString",
+        "sortOrder": "number",
+        "completedAt": "optionalDate"
+      }
+    }
+  ],
+  "steps": [
+    { "op": "expect", "label": "cold start", "state": "disconnected" },
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "first",
+            "description": null,
+            "sortOrder": 1000,
+            "completedAt": null
+          }
+        },
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": {
+            "id": "t2",
+            "workspaceId": "w1",
+            "title": "second",
+            "description": "notes",
+            "sortOrder": 2000,
+            "completedAt": null
+          }
+        }
+      ]
+    },
+    { "op": "start", "groups": ["w1"] },
+    { "op": "socketOpen" },
+    {
+      "op": "expect",
+      "label": "bootstrap applied",
+      "state": "syncing",
+      "cursor": "100",
+      "store": [
+        { "model": "Task", "id": "t1", "fields": { "title": "first" } },
+        { "model": "Task", "id": "t2", "fields": { "title": "second" } }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "storage": { "lastSyncId": "100", "bootstrapComplete": true }
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t3",
+            "action": "I",
+            "groupId": "w1",
+            "data": {
+              "id": "t3",
+              "workspaceId": "w1",
+              "title": "third",
+              "description": null,
+              "sortOrder": 3000,
+              "completedAt": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "insert applied",
+      "cursor": "101",
+      "store": [{ "model": "Task", "id": "t3", "fields": { "title": "third" } }]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "102",
+        "actions": [
+          {
+            "syncId": "102",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "U",
+            "groupId": "w1",
+            "data": { "title": "first renamed" }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "update is a partial patch, not a replace",
+      "cursor": "102",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "first renamed", "sortOrder": 1000 }
+        }
+      ]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "103",
+        "actions": [
+          {
+            "syncId": "103",
+            "modelName": "Task",
+            "modelId": "t2",
+            "action": "D",
+            "groupId": "w1",
+            "data": null
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "delete removes the row and still advances the cursor",
+      "cursor": "103",
+      "storeAbsent": [{ "model": "Task", "id": "t2" }],
+      "store": [
+        { "model": "Task", "id": "t1", "fields": { "title": "first renamed" } }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "storage": { "lastSyncId": "103" }
+    }
+  ]
+}

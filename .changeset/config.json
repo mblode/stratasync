@@ -14,6 +14,7 @@
       "@stratasync/storage-idb",
       "@stratasync/storage-local",
       "@stratasync/transport-graphql",
+      "@stratasync/conformance",
       "stratasync"
     ]
   ],

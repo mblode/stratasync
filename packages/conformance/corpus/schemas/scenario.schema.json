@@ -1,0 +1,359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stratasync.dev/conformance/scenario.schema.json",
+  "title": "Strata Sync conformance scenario",
+  "description": "An ordered script of operations against a Strata Sync engine backed by a fake transport, fake storage and fake clock, interleaved with assertions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "description", "models", "steps"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Kebab-case unique id; also the filename stem."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What behaviour this pins, in one sentence."
+    },
+    "requires": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" },
+      "default": [],
+      "description": "Capabilities an implementation must declare to run this scenario. Unlisted means every implementation must pass it."
+    },
+    "seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Deterministic sources. A driver must use these instead of ambient randomness or the wall clock.",
+      "properties": {
+        "clientId": { "type": "string", "default": "c_test" },
+        "clock": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Fake clock start, epoch milliseconds."
+        },
+        "txIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Sequence handed out for clientTxId, in order."
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Minimal model registry for this scenario.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "fields"],
+        "properties": {
+          "name": { "type": "string" },
+          "groupKey": { "type": "string" },
+          "loadStrategy": {
+            "enum": [
+              "instant",
+              "lazy",
+              "partial",
+              "explicitlyRequested",
+              "local"
+            ],
+            "default": "instant"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Field name to codec kind. The codec kind is what decoding-relevant schema means.",
+            "additionalProperties": {
+              "enum": [
+                "id",
+                "string",
+                "optionalString",
+                "number",
+                "optionalNumber",
+                "boolean",
+                "date",
+                "optionalDate",
+                "json"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "given": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pre-existing local state before the engine starts.",
+      "properties": {
+        "meta": { "$ref": "#/$defs/storageMeta" },
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/row" }
+        },
+        "outbox": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/outboxEntry" }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "capability": {
+      "enum": [
+        "bootstrap",
+        "deltaFetch",
+        "websocket",
+        "outbox",
+        "rebase",
+        "archive",
+        "syncGroups",
+        "schemaHashGating",
+        "loadStrategies",
+        "partialLoad",
+        "undoRedo",
+        "crdt"
+      ]
+    },
+    "syncId": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Sync IDs are strings end to end; they outgrow 2^53 and a JSON number would lose precision."
+    },
+    "storageMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lastSyncId": { "$ref": "#/$defs/syncId" },
+        "firstSyncId": { "$ref": "#/$defs/syncId" },
+        "schemaHash": { "type": ["string", "null"] },
+        "bootstrapComplete": { "type": "boolean" },
+        "subscribedGroups": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "id", "fields"],
+      "properties": {
+        "model": { "type": "string" },
+        "id": { "type": "string" },
+        "fields": { "type": "object" }
+      }
+    },
+    "outboxEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientTxId", "action", "model", "modelId"],
+      "properties": {
+        "clientTxId": { "type": "string" },
+        "action": {
+          "enum": ["INSERT", "UPDATE", "DELETE", "ARCHIVE", "UNARCHIVE"]
+        },
+        "model": { "type": "string" },
+        "modelId": { "type": "string" },
+        "payload": { "type": "object" },
+        "status": {
+          "enum": ["pending", "inflight", "failed"],
+          "default": "pending"
+        }
+      }
+    },
+    "syncAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["syncId", "modelName", "modelId", "action"],
+      "properties": {
+        "syncId": { "$ref": "#/$defs/syncId" },
+        "modelName": { "type": "string" },
+        "modelId": { "type": "string" },
+        "action": {
+          "enum": ["I", "U", "D", "A", "V"],
+          "description": "Insert, Update, Delete, Archive, unarchiVe."
+        },
+        "data": { "type": ["object", "null"] },
+        "groupId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientTxId": { "type": "string" }
+      }
+    },
+    "deltaPacket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastSyncId", "actions"],
+      "properties": {
+        "lastSyncId": { "$ref": "#/$defs/syncId" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/syncAction" }
+        },
+        "hasMore": { "type": "boolean", "default": false }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["op"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "start" },
+            "groups": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": { "op": { "const": "stop" } }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["rows"],
+          "properties": {
+            "op": { "const": "respondBootstrap" },
+            "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+            "lastSyncId": { "$ref": "#/$defs/syncId" },
+            "schemaHash": { "type": "string" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["packet"],
+          "properties": {
+            "op": { "const": "respondDeltas" },
+            "packet": { "$ref": "#/$defs/deltaPacket" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["packet"],
+          "properties": {
+            "op": { "const": "deliverDelta" },
+            "packet": { "$ref": "#/$defs/deltaPacket" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": { "op": { "const": "socketOpen" } }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "socketClose" },
+            "code": { "type": "integer", "default": 1006 }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "op": { "const": "transportError" },
+            "kind": {
+              "enum": [
+                "network",
+                "unauthorized",
+                "bootstrapRequired",
+                "serverError"
+              ],
+              "description": "bootstrapRequired is the 409 cursor-too-old case; only a full re-bootstrap recovers."
+            },
+            "on": {
+              "enum": ["bootstrap", "deltas", "mutate"],
+              "default": "deltas"
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["ms"],
+          "properties": {
+            "op": { "const": "advanceClock" },
+            "ms": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["action", "model", "modelId"],
+          "properties": {
+            "op": { "const": "mutate" },
+            "action": {
+              "enum": ["INSERT", "UPDATE", "DELETE", "ARCHIVE", "UNARCHIVE"]
+            },
+            "model": { "type": "string" },
+            "modelId": { "type": "string" },
+            "payload": { "type": "object" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["clientTxId"],
+          "properties": {
+            "op": { "const": "ackMutation" },
+            "clientTxId": { "type": "string" },
+            "syncId": { "$ref": "#/$defs/syncId" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["clientTxId"],
+          "properties": {
+            "op": { "const": "rejectMutation" },
+            "clientTxId": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "expect" },
+            "label": { "type": "string" },
+            "state": {
+              "enum": [
+                "disconnected",
+                "connecting",
+                "bootstrapping",
+                "syncing",
+                "error"
+              ]
+            },
+            "cursor": { "$ref": "#/$defs/syncId" },
+            "store": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+            "storeAbsent": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["model", "id"],
+                "properties": {
+                  "model": { "type": "string" },
+                  "id": { "type": "string" }
+                }
+              }
+            },
+            "outbox": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/outboxEntry" }
+            },
+            "transport": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bootstrapCount": { "type": "integer", "minimum": 0 },
+                "deltaFetchCount": { "type": "integer", "minimum": 0 },
+                "mutateCount": { "type": "integer", "minimum": 0 },
+                "socketConnectCount": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "storage": { "$ref": "#/$defs/storageMeta" }
+          }
+        }
+      ]
+    }
+  }
+}

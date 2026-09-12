@@ -30,6 +30,7 @@ packages/
   storage-local/      # localStorage storage adapter (demos / lightweight apps)
   transport-graphql/  # GraphQL + WebSocket transport
   server/             # Server-side sync with Fastify + Drizzle
+  conformance/        # Language-agnostic conformance corpus every implementation must pass
 apps/
   docs/               # MDX docs content (docs.json); deployed via Blode.md — no package.json
   docs-worker/        # Cloudflare Worker routing stratasync.dev → docs + landing
@@ -51,7 +52,7 @@ spec, and trigger phrases belong inside the description.
 ## Build Order
 
 ```
-Layer 0: core, server (no internal deps)
+Layer 0: core, server, conformance (no internal deps)
 Layer 1: y-doc, mobx (depend on core)
 Layer 2: client (depends on core, y-doc)
 Layer 3: react, storage-idb, storage-local, transport-graphql (depend on client + core)
@@ -64,4 +65,5 @@ Layer 4: next (depends on client, core, react)
 - **Linting via oxlint/oxfmt**: Run `npm run lint:fix` to format and fix. Config presets come from `ultracite` (in `.oxlintrc.json` extends).
 - **Git hooks via lefthook**: Pre-commit runs oxfmt + oxlint on staged files. Hooks install automatically via `npm install`.
 - **Internal deps use `"*"`**: All `@stratasync/*` inter-package dependencies are pinned as `"*"` (npm workspaces resolves them locally). Don't switch to `workspace:*` — `changeset publish` shells out to `npm publish`, which does not rewrite the `workspace:` protocol, so it would publish broken manifests.
-- **Coordinated versions**: All 10 published packages are a changesets `fixed` group — they always release together at the same version.
+- **Coordinated versions**: All published packages are a changesets `fixed` group — they always release together at the same version.
+- **Conformance corpus**: `packages/conformance/corpus/` is the cross-language contract (vectors, scenarios, capability manifests). It is data, not code, and the Swift port in `donebear/packages/stratasync-swift` reads the same files. Editing a vector or scenario to make one language pass silently breaks the others — **fix the implementation, not the corpus**. After any corpus edit run `npm run lint:fix` **first** and `npm run corpus:manifest --workspace=packages/conformance` second — oxfmt formats the corpus JSON too, so regenerating before formatting leaves a stale manifest and a red suite. Read `packages/conformance/corpus/README.md` before adding to it.
