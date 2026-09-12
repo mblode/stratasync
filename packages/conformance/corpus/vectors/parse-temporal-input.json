@@ -1,6 +1,6 @@
 {
   "fn": "parseTemporalInput",
-  "description": "Decoding one temporal field of a mutation payload. Positional arguments: the kind (\"instant\" or \"dateOnly\"), the raw value, and the field name. Epoch milliseconds is the ONLY accepted encoding — an ISO-8601 string is rejected even though it is what the same value looks like elsewhere on the wire, and a port that accepts both is wrong. Null and absent both decode to null, so a field cleared by the client and a field the client never sent are indistinguishable at this layer. A \"dateOnly\" value must land exactly on UTC midnight. Results are written here as ISO-8601 strings; an implementation converts its date type to ISO-8601 UTC before comparing.",
+  "description": "Decoding one temporal field of a mutation payload. Positional arguments: the kind (\"instant\" or \"dateOnly\"), the raw value, and the field name. Epoch milliseconds is the ONLY accepted encoding — an ISO-8601 string is rejected even though it is what the same value looks like elsewhere on the wire, and a port that accepts both is wrong. Null and absent both decode to null, so a field cleared by the client and a field the client never sent are indistinguishable at this layer. A \"dateOnly\" value must land exactly on UTC midnight. Results are written here as ISO-8601 strings; an implementation converts its date type to ISO-8601 UTC before comparing. An epoch outside ±8.64e15 ms is rejected: it is finite, so a naive finiteness check lets it through, but the resulting date is unrepresentable.",
   "cases": [
     {
       "name": "instant: null is null",
@@ -95,6 +95,31 @@
     {
       "name": "dateOnly: a YYYY-MM-DD string is rejected, not parsed",
       "input": ["dateOnly", "2026-01-01", "dueOn"],
+      "throws": true
+    },
+    {
+      "name": "instant: the maximum representable epoch is accepted",
+      "input": ["instant", 8640000000000000, "dueAt"],
+      "expected": "+275760-09-13T00:00:00.000Z"
+    },
+    {
+      "name": "instant: one millisecond past the maximum epoch is rejected",
+      "input": ["instant", 8640000000000001, "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: one millisecond past the minimum epoch is rejected",
+      "input": ["instant", -8640000000000001, "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "instant: an epoch at Number.MAX_SAFE_INTEGER is rejected",
+      "input": ["instant", 9007199254740992, "dueAt"],
+      "throws": true
+    },
+    {
+      "name": "dateOnly: a whole day past the maximum epoch is rejected",
+      "input": ["dateOnly", 8640086400000000, "dueOn"],
       "throws": true
     }
   ]

@@ -2,7 +2,9 @@ import { maxSyncId, parseSyncId, ZERO_SYNC_ID } from "../sync/sync-id.js";
 import type { DeltaPacket, SyncAction, SyncActionType } from "../sync/types.js";
 
 /**
- * Maps action strings to internal action codes.
+ * Narrows a wire action letter to `SyncActionType`. The accepted set is the
+ * eight documented on that type, not the five row-carrying ones — see its doc
+ * comment for why `"C"`, `"G"` and `"S"` belong here.
  */
 const normalizeAction = (action: string): SyncActionType => {
   if (
@@ -22,6 +24,26 @@ const normalizeAction = (action: string): SyncActionType => {
 
 /**
  * Parses a raw sync action payload into a SyncAction.
+ *
+ * This is the **client-side** decoder: it reads server-authored bytes off the
+ * wire, and its leniency is deliberate. A missing or null `data` becomes `{}`
+ * and an unparseable `createdAt` is dropped rather than thrown on, because a
+ * single odd field on one action must not tear down a sync session the user is
+ * mid-edit in; the fields it does throw on (`syncId`, `modelName`, `modelId`,
+ * `action`) are the ones without which the action cannot be routed at all.
+ *
+ * `parseSyncActionOutput` in `@stratasync/server` looks like a duplicate of
+ * this and is not. It parses the server's *own* `serializeSyncActionOutput`
+ * output back off the Redis delta channel, where a malformed message is a bug
+ * in this codebase rather than a peer being generous — so it rejects all three
+ * of the cases above. Conversely it does not validate the action letter, since
+ * the server writes that letter itself.
+ *
+ * Keep the two asymmetric. Making this one strict turns a tolerable server
+ * quirk into a broken client; making that one lenient lets a corrupt internal
+ * message through silently. Both are pinned by
+ * `corpus/vectors/parse-sync-action.json` and
+ * `corpus/vectors/parse-sync-action-output.json`.
  */
 export const parseSyncAction = (raw: Record<string, unknown>): SyncAction => {
   const syncIdRaw = raw.syncId ?? raw.id;
