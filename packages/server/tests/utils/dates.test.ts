@@ -279,4 +279,12 @@ describe(epochToDateOnlyString, () => {
   it("pads single-digit month and day", () => {
     expect(epochToDateOnlyString(Date.UTC(2024, 0, 5))).toBe("2024-01-05");
   });
+
+  it("returns null for a day-aligned epoch past the representable range", () => {
+    // Finite and an exact multiple of a day, so it clears the alignment check
+    // above; `new Date` still can't hold it. Without the range check the
+    // template literal interpolated three NaNs and returned "NaN-NaN-NaN",
+    // which a caller cannot tell from a real date string.
+    expect(epochToDateOnlyString(8_640_086_400_000_000)).toBeNull();
+  });
 });
