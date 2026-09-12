@@ -1,24 +1,21 @@
 {
-  "name": "@stratasync/core",
+  "name": "@stratasync/conformance",
   "version": "2.4.1",
-  "description": "@stratasync/core: model runtime, schema decorators, transactions and the sync protocol of Strata Sync, an open-source implementation of Linear's sync engine.",
+  "description": "@stratasync/conformance: the language-agnostic conformance corpus for Strata Sync, an open-source implementation of Linear's sync engine. Golden vectors, engine scenarios and a driver protocol every implementation must pass.",
   "keywords": [
-    "decorators",
-    "delta-sync",
+    "conformance",
+    "cross-platform",
+    "golden-vectors",
     "linear",
-    "linear sync engine",
     "linear-sync-engine",
     "local-first",
-    "model-registry",
-    "offline-first",
-    "optimistic-updates",
-    "realtime",
+    "parity",
     "sync",
     "sync-engine",
-    "transactions",
+    "test-vectors",
     "typescript"
   ],
-  "homepage": "https://blode.co/stratasync/docs/packages/core",
+  "homepage": "https://blode.co/stratasync/docs/packages/conformance",
   "bugs": {
     "url": "https://github.com/mblode/stratasync/issues"
   },
@@ -30,12 +27,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mblode/stratasync.git",
-    "directory": "packages/core"
+    "directory": "packages/conformance"
   },
   "files": [
+    "corpus",
     "dist",
-    "src",
-    "!src/**/*.test.*"
+    "src"
   ],
   "type": "module",
   "sideEffects": false,
@@ -46,7 +43,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./corpus/*": "./corpus/*"
   },
   "publishConfig": {
     "access": "public",
@@ -56,10 +54,11 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "dev": "tsc --watch -p tsconfig.build.json",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "corpus:manifest": "node --experimental-strip-types scripts/build-manifest.ts"
   },
   "devDependencies": {
-    "@stratasync/conformance": "*"
+    "ajv": "^8.17.1"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,22 @@
+{
+  "implementation": "stratasync-ts",
+  "language": "typescript",
+  "protocolVersion": 1,
+  "corpusVersion": "2.4.1",
+  "capabilities": [
+    "bootstrap",
+    "deltaFetch",
+    "websocket",
+    "outbox",
+    "archive",
+    "syncGroups",
+    "schemaHashGating"
+  ],
+  "notes": {
+    "rebase": "Implemented in packages/client, but not yet declared: a capability is claimed once a scenario exercises it through the driver, not because the source contains it.",
+    "loadStrategies": "Same. packages/core carries loadStrategy, no scenario covers it yet.",
+    "partialLoad": "Same. packages/core carries partialLoadMode, no scenario covers it yet.",
+    "undoRedo": "Same.",
+    "crdt": "Provided by @stratasync/y-doc; no scenario covers it yet."
+  }
+}

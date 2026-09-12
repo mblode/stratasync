@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stratasync.dev/conformance/capabilities.schema.json",
+  "title": "Strata Sync implementation capability manifest",
+  "description": "What one implementation claims to support. The runner skips corpus artifacts whose `requires` are not declared here, and fails if an artifact exercises a capability that is not declared.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["implementation", "language", "protocolVersion", "capabilities"],
+  "properties": {
+    "implementation": {
+      "type": "string",
+      "description": "Stable id, e.g. \"stratasync-ts\", \"stratasync-swift\", \"stratasync-kotlin\"."
+    },
+    "language": { "enum": ["typescript", "swift", "kotlin"] },
+    "protocolVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Driver protocol version this implementation speaks."
+    },
+    "corpusVersion": {
+      "type": "string",
+      "description": "Corpus version the implementation was last verified against."
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "bootstrap",
+          "deltaFetch",
+          "websocket",
+          "outbox",
+          "rebase",
+          "archive",
+          "syncGroups",
+          "schemaHashGating",
+          "loadStrategies",
+          "partialLoad",
+          "undoRedo",
+          "crdt"
+        ]
+      }
+    },
+    "notes": {
+      "type": "object",
+      "description": "Optional per-capability prose for anything deliberately unsupported. Keys are capability names.",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}
