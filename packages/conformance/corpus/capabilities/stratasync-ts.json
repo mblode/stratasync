@@ -8,13 +8,13 @@
     "deltaFetch",
     "websocket",
     "outbox",
+    "rebase",
     "archive",
     "syncGroups",
     "schemaHashGating"
   ],
   "notes": {
-    "rebase": "Implemented in packages/client, but not yet declared: a capability is claimed once a scenario exercises it through the driver, not because the source contains it.",
-    "loadStrategies": "Same. packages/core carries loadStrategy, no scenario covers it yet.",
+    "loadStrategies": "Implemented in packages/core (loadStrategy), but not yet declared: a capability is claimed once a scenario exercises it through the driver, not because the source contains it.",
     "partialLoad": "Same. packages/core carries partialLoadMode, no scenario covers it yet.",
     "undoRedo": "Same.",
     "crdt": "Provided by @stratasync/y-doc; no scenario covers it yet."

@@ -1,0 +1,117 @@
+{
+  "id": "rebase-same-field-server-wins",
+  "description": "A local optimistic update and a server delta touch the same field of the same row. Under the default server-wins strategy the server write is the last write: the optimistic value is rolled back and the pending mutation is dropped rather than replayed over the server's.",
+  "requires": ["bootstrap", "outbox", "rebase", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_rebase_same_field"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "Bootstrapped title",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "mutate",
+      "action": "UPDATE",
+      "model": "Task",
+      "modelId": "t1",
+      "payload": {
+        "title": "Renamed locally"
+      }
+    },
+    {
+      "op": "expect",
+      "label": "the local title is optimistic and pending",
+      "cursor": "100",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Renamed locally",
+            "sortOrder": 10
+          }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_rebase_same_field",
+          "action": "UPDATE",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "U",
+            "clientId": "c_other",
+            "data": {
+              "title": "Renamed on the server"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "same field conflicts: the server value stands and the local mutation is discarded",
+      "cursor": "101",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Renamed on the server",
+            "sortOrder": 10
+          }
+        }
+      ],
+      "outbox": [],
+      "transport": {
+        "mutateCount": 0
+      }
+    }
+  ]
+}

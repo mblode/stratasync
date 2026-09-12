@@ -1,0 +1,152 @@
+{
+  "id": "outbox-delta-echo-is-idempotent",
+  "description": "The server echoes an accepted mutation back as a delta. The echo clears the outbox entry by clientId + clientTxId, and a redelivery of the same action (which a resubscribe replay will produce) changes nothing.",
+  "requires": ["bootstrap", "outbox", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_echo_1"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": []
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "mutate",
+      "action": "INSERT",
+      "model": "Task",
+      "modelId": "t1",
+      "payload": {
+        "workspaceId": "w1",
+        "title": "written locally",
+        "sortOrder": 10
+      }
+    },
+    {
+      "op": "advanceClock",
+      "ms": 50
+    },
+    {
+      "op": "ackMutation",
+      "clientTxId": "tx_echo_1",
+      "syncId": "101"
+    },
+    {
+      "op": "expect",
+      "label": "accepted but not yet durable: the cursor has not reached the mutation",
+      "cursor": "100",
+      "outbox": [
+        {
+          "clientTxId": "tx_echo_1",
+          "action": "INSERT",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "inflight"
+        }
+      ],
+      "transport": {
+        "mutateCount": 1
+      }
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "I",
+            "clientId": "c_test",
+            "clientTxId": "tx_echo_1",
+            "data": {
+              "id": "t1",
+              "workspaceId": "w1",
+              "title": "written locally",
+              "sortOrder": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "the echo confirms the mutation and drains the outbox exactly once",
+      "cursor": "101",
+      "outbox": [],
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "written locally",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "I",
+            "clientId": "c_test",
+            "clientTxId": "tx_echo_1",
+            "data": {
+              "id": "t1",
+              "workspaceId": "w1",
+              "title": "written locally",
+              "sortOrder": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "a replayed action at or below the cursor is a no-op, not a second apply",
+      "cursor": "101",
+      "outbox": [],
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "written locally",
+            "sortOrder": 10
+          }
+        }
+      ],
+      "transport": {
+        "mutateCount": 1
+      }
+    }
+  ]
+}

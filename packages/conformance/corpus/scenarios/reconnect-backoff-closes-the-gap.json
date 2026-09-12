@@ -1,0 +1,153 @@
+{
+  "id": "reconnect-backoff-closes-the-gap",
+  "description": "A dropped socket leaves a gap in the sync log. Nothing self-heals while the transport is down; reconnecting fetches the gap, and when that fetch fails the retry is parked on the clock — only advanceClock moves it, and the retry is what closes the gap.",
+  "requires": ["bootstrap", "deltaFetch", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "As bootstrapped",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    { "op": "start", "groups": ["w1"] },
+    { "op": "socketOpen" },
+    {
+      "op": "expect",
+      "label": "connected and caught up",
+      "state": "syncing",
+      "cursor": "100",
+      "transport": {
+        "bootstrapCount": 1,
+        "deltaFetchCount": 0,
+        "socketConnectCount": 1
+      }
+    },
+    { "op": "socketClose", "code": 1006 },
+    {
+      "op": "respondDeltas",
+      "packet": {
+        "lastSyncId": "102",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "U",
+            "clientId": "c_other",
+            "data": { "title": "Renamed while we were away" }
+          },
+          {
+            "syncId": "102",
+            "modelName": "Task",
+            "modelId": "t2",
+            "action": "I",
+            "clientId": "c_other",
+            "data": {
+              "id": "t2",
+              "workspaceId": "w1",
+              "title": "Created while we were away",
+              "sortOrder": 20
+            }
+          }
+        ]
+      }
+    },
+    { "op": "advanceClock", "ms": 30000 },
+    {
+      "op": "expect",
+      "label": "a down transport does not heal itself: no fetch, no reconnect churn",
+      "cursor": "100",
+      "storeAbsent": [{ "model": "Task", "id": "t2" }],
+      "transport": { "deltaFetchCount": 0, "socketConnectCount": 1 }
+    },
+    { "op": "socketOpen" },
+    {
+      "op": "expect",
+      "label": "reconnect fetches the gap once and resubscribes from the new cursor",
+      "state": "syncing",
+      "cursor": "102",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "Renamed while we were away" }
+        },
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": { "title": "Created while we were away", "sortOrder": 20 }
+        }
+      ],
+      "transport": { "deltaFetchCount": 1, "socketConnectCount": 2 }
+    },
+    { "op": "stop" },
+    { "op": "transportError", "kind": "network", "on": "deltas" },
+    {
+      "op": "respondDeltas",
+      "packet": {
+        "lastSyncId": "103",
+        "actions": [
+          {
+            "syncId": "103",
+            "modelName": "Task",
+            "modelId": "t2",
+            "action": "U",
+            "clientId": "c_other",
+            "data": { "title": "Renamed again" }
+          }
+        ]
+      }
+    },
+    { "op": "start", "groups": ["w1"] },
+    {
+      "op": "expect",
+      "label": "the catch-up fetch failed; the retry is parked on the clock, not spinning",
+      "cursor": "102",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": { "title": "Created while we were away" }
+        }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 2 }
+    },
+    { "op": "advanceClock", "ms": 300 },
+    {
+      "op": "expect",
+      "label": "the backoff retry fires on the fake clock and closes the gap",
+      "state": "syncing",
+      "cursor": "103",
+      "store": [
+        { "model": "Task", "id": "t2", "fields": { "title": "Renamed again" } }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 3 }
+    }
+  ]
+}
