@@ -115,6 +115,70 @@ const collectLines = async (
 };
 
 describe(BootstrapService, () => {
+  it.each(["full", "partial"] as const)(
+    "terminates an empty %s bootstrap",
+    async (type) => {
+      const dao = { getLastSyncIdForGroups: vi.fn().mockResolvedValue(7n) };
+      const service = new BootstrapService(
+        createBootstrapDb({}, {}),
+        dao as never,
+        {}
+      );
+      const lines = await collectLines(
+        service.generateBootstrapNdjson(
+          { groups: [], userId: "user-1" },
+          { schemaHash: "schema-1", type }
+        )
+      );
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0] ?? "")).toMatchObject({ lastSyncId: "7" });
+      expect(JSON.parse(lines[1] ?? "")).toEqual({ rowCount: 0, type: "end" });
+    }
+  );
+
+  it("does not emit a completion marker when a later model fails", async () => {
+    const dao = {
+      getLastSyncIdForGroups: vi.fn().mockResolvedValue(7n),
+      getTouchedModelIdsAfter: vi
+        .fn()
+        .mockResolvedValueOnce(new Set())
+        .mockRejectedValueOnce(new Error("database disconnected")),
+    };
+    const model: SyncModelConfig = {
+      bootstrap: {
+        buildScopeWhere: () => sql`true`,
+        cursor: { idField: "taskId", type: "simple" },
+        fields: ["title"],
+      },
+      groupKey: null,
+      mutate: {
+        actions: new Set(["I"]),
+        idField: "taskId",
+        insertFields: { title: { type: "string" } },
+        kind: "standard",
+      },
+      table: namedTasks,
+    };
+    const service = new BootstrapService(
+      createBootstrapDb(
+        { named_tasks: [[{ taskId: "task-1", title: "Task" }]] },
+        { named_tasks: 1 }
+      ),
+      dao as never,
+      { First: model, Second: model }
+    );
+    const stream = service.generateBootstrapNdjson(
+      { groups: [], userId: "user-1" },
+      { schemaHash: "schema-1" }
+    );
+    const metadata = await stream.next();
+    expect(metadata.value).toContain('"lastSyncId":"7"');
+    const firstRow = await stream.next();
+    expect(firstRow.value).toContain('"__class":"First"');
+    await expect(stream.next()).rejects.toThrow("database disconnected");
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+  });
+
   it("continues simple-cursor pagination when the cursor field is numeric", async () => {
     const page1 = Array.from({ length: 1000 }, (_, index) => ({
       sequence: index + 1,
@@ -159,9 +223,13 @@ describe(BootstrapService, () => {
       )
     );
 
-    expect(lines).toHaveLength(1002);
+    expect(lines).toHaveLength(1003);
+    expect(JSON.parse(lines.at(-1) ?? "")).toEqual({
+      rowCount: 1001,
+      type: "end",
+    });
     expect(lines[0]).toContain('"returnedModelsCount":{"NumericTask":1001}');
-    expect(lines.at(-1)).toContain('"sequence":1001');
+    expect(lines.at(-2)).toContain('"sequence":1001');
   });
 
   it("filters touched rows during bootstrap even when the primary key is not named id", async () => {
@@ -233,7 +301,11 @@ describe(BootstrapService, () => {
         modelName: "NamedTask",
       },
     ]);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines.at(-1) ?? "")).toEqual({
+      rowCount: 1,
+      type: "end",
+    });
     expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":2}');
     expect(lines[1]).toContain('"id":"task-1"');
     expect(lines[1]).toContain('"title":"Keep me"');
@@ -308,7 +380,11 @@ describe(BootstrapService, () => {
         modelName: "NumericTask",
       },
     ]);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines.at(-1) ?? "")).toEqual({
+      rowCount: 1,
+      type: "end",
+    });
     expect(lines[0]).toContain('"returnedModelsCount":{"NumericTask":2}');
     expect(lines[1]).toContain('"id":1');
     expect(lines[1]).toContain('"sequence":1');
@@ -384,7 +460,11 @@ describe(BootstrapService, () => {
         modelName: "NamedTask",
       },
     ]);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines.at(-1) ?? "")).toEqual({
+      rowCount: 1,
+      type: "end",
+    });
     expect(lines[0]).toContain('"lastSyncId":"100"');
     expect(lines[0]).toContain('"returnedModelsCount":{"NamedTask":2}');
     expect(lines[1]).toContain('"id":"task-1"');

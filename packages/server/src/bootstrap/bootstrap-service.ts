@@ -175,7 +175,7 @@ export class BootstrapService {
     const returnedModelsCount: Record<string, number> = {};
 
     // Rows in scope at the snapshot (pre touched-filter). Informational metadata
-    // only — no first-party consumer relies on it matching the streamed count.
+    // only — the terminal marker counts the rows actually streamed.
     for (const modelName of modelsToBootstrap) {
       const modelCount = await this.countModelRows(modelName, filter);
       returnedModelsCount[modelName] = modelCount;
@@ -191,6 +191,7 @@ export class BootstrapService {
     this.logger.debug({ metadata }, "Bootstrap metadata");
     yield JSON.stringify(metadata);
 
+    let streamedRowCount = 0;
     for (const modelName of modelsToBootstrap) {
       let rowCount = 0;
       for await (const line of this.streamFilteredModelRows(
@@ -200,10 +201,15 @@ export class BootstrapService {
         filterAfterSyncId
       )) {
         rowCount += 1;
+        streamedRowCount += 1;
         yield line;
       }
       this.logger.debug({ modelName, rowCount }, "Bootstrap model streamed");
     }
+
+    // Emit only after every model finishes successfully. EOF alone cannot
+    // distinguish a complete snapshot from a truncated response.
+    yield JSON.stringify({ rowCount: streamedRowCount, type: "end" });
 
     this.logger.info(
       { groups, returnedModelsCount, userId: context.userId },

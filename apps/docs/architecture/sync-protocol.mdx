@@ -112,6 +112,27 @@ Each model declares a load strategy that controls when it syncs.
 | `"explicitlyRequested"` | Never loaded automatically. Fetched only when you explicitly request it.                                                               |
 | `"local"`               | Client-only data that never syncs to the server. Useful for UI state or drafts.                                                        |
 
+### Bootstrap completion
+
+Successful full and partial bootstrap responses end with a terminal NDJSON record:
+
+```json
+{ "type": "end", "rowCount": 42 }
+```
+
+The server emits this record only after all requested models finish streaming,
+including an empty snapshot (`rowCount: 0`). `rowCount` is the total number of
+model rows actually emitted after touched-row filtering; it excludes metadata
+and the terminal record. Metadata's `returnedModelsCount` contains pre-filter
+counts and must not be used for exact completeness validation.
+
+Deploy the server update before requiring this marker in clients. A client that
+enforces completeness should require the terminal record and verify its count
+before replacing its stored snapshot or advancing its cursor. EOF without the
+marker is an incomplete bootstrap. Existing clients that ignore `end` records
+remain compatible, but do not gain truncation protection until they enforce it.
+Batch-load responses do not use this completion marker.
+
 ## Idempotency
 
 Every mutation carries an idempotency key (`clientId + clientTxId`). The server deduplicates, so resending after a crash or network drop is safe.
