@@ -79,6 +79,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@stratasync/conformance": "*",
     "@types/node": "^25.5.0",
     "fastify": "^5.12.1",
     "redis": "^5.11.0",

@@ -1,0 +1,66 @@
+{
+  "fn": "mapGraphQLAction",
+  "description": "Decoding the action name of one transaction in a mutation request into the letter the sync log writes it back as. The asymmetry is deliberate and is the contract: a mutation request spells the action out (INSERT, UPDATE, DELETE, ARCHIVE, UNARCHIVE) while the sync log uses a single letter (I, U, D, A, V). Neither spelling is accepted where the other belongs, so a port that reuses one enum for both wire formats is wrong. Matching is exact and case-sensitive.",
+  "cases": [
+    { "name": "INSERT", "input": ["INSERT"], "expected": "I" },
+    { "name": "UPDATE", "input": ["UPDATE"], "expected": "U" },
+    { "name": "DELETE", "input": ["DELETE"], "expected": "D" },
+    { "name": "ARCHIVE", "input": ["ARCHIVE"], "expected": "A" },
+    { "name": "UNARCHIVE", "input": ["UNARCHIVE"], "expected": "V" },
+    {
+      "name": "the log letter for insert is not a mutation action name",
+      "input": ["I"],
+      "throws": true
+    },
+    {
+      "name": "the log letter for update is not a mutation action name",
+      "input": ["U"],
+      "throws": true
+    },
+    {
+      "name": "the log letter for delete is not a mutation action name",
+      "input": ["D"],
+      "throws": true
+    },
+    {
+      "name": "the log letter for archive is not a mutation action name",
+      "input": ["A"],
+      "throws": true
+    },
+    {
+      "name": "the log letter for unarchive is not a mutation action name",
+      "input": ["V"],
+      "throws": true
+    },
+    {
+      "name": "lowercase is not accepted",
+      "input": ["insert"],
+      "throws": true
+    },
+    {
+      "name": "mixed case is not accepted",
+      "input": ["Insert"],
+      "throws": true
+    },
+    {
+      "name": "surrounding whitespace is not trimmed",
+      "input": [" INSERT"],
+      "throws": true
+    },
+    {
+      "name": "an empty action name",
+      "input": [""],
+      "throws": true
+    },
+    {
+      "name": "a plausible but unsupported action name",
+      "input": ["CREATE"],
+      "throws": true
+    },
+    {
+      "name": "an extension log letter is not a mutation action name",
+      "input": ["G"],
+      "throws": true
+    }
+  ]
+}

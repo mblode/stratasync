@@ -1,0 +1,153 @@
+{
+  "fn": "buildUpdateData",
+  "description": "Building the patch an UPDATE mutation writes. Positional arguments: the payload, the list of columns the model allows a client to write, and the field specs by column. The SHAPE IS DRIVEN BY THE PAYLOAD here, the mirror of buildInsertData: only keys the payload carries are emitted, so absent means \"leave it alone\" and an explicit null means \"clear it\". A key outside the allowed list is dropped silently rather than rejected. Only the temporal kinds coerce; every other kind passes its value through verbatim, including a column with no field spec at all. Dates are written as ISO-8601 strings.",
+  "cases": [
+    {
+      "name": "an allowed key is written",
+      "input": [
+        { "title": "Bug fix" },
+        ["title"],
+        { "title": { "type": "string" } }
+      ],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "an absent key is left alone, not defaulted",
+      "input": [
+        { "title": "Bug fix" },
+        ["note", "title"],
+        { "note": { "type": "stringNull" }, "title": { "type": "string" } }
+      ],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "an explicit null clears the field",
+      "input": [
+        { "note": null },
+        ["note"],
+        { "note": { "type": "stringNull" } }
+      ],
+      "expected": { "note": null }
+    },
+    {
+      "name": "a key outside the allowed list is dropped, not rejected",
+      "input": [
+        { "ownerId": "u9", "title": "Bug fix" },
+        ["title"],
+        { "title": { "type": "string" } }
+      ],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "an empty allowed list drops everything",
+      "input": [{ "title": "Bug fix" }, [], { "title": { "type": "string" } }],
+      "expected": {}
+    },
+    {
+      "name": "an empty payload is an empty patch",
+      "input": [{}, ["title"], { "title": { "type": "string" } }],
+      "expected": {}
+    },
+    {
+      "name": "an allowed column with no field spec passes through verbatim",
+      "input": [{ "title": "Bug fix" }, ["title"], {}],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "string: an empty string is written, not treated as absent",
+      "input": [{ "title": "" }, ["title"], { "title": { "type": "string" } }],
+      "expected": { "title": "" }
+    },
+    {
+      "name": "string: a default does not apply on update",
+      "input": [
+        { "title": null },
+        ["title"],
+        { "title": { "defaultValue": "Untitled", "type": "string" } }
+      ],
+      "expected": { "title": null }
+    },
+    {
+      "name": "number: zero is written",
+      "input": [{ "rank": 0 }, ["rank"], { "rank": { "type": "number" } }],
+      "expected": { "rank": 0 }
+    },
+    {
+      "name": "number: a default does not apply on update",
+      "input": [
+        { "rank": null },
+        ["rank"],
+        { "rank": { "defaultValue": 100, "type": "number" } }
+      ],
+      "expected": { "rank": null }
+    },
+    {
+      "name": "date: epoch milliseconds",
+      "input": [
+        { "dueAt": 1736899200000 },
+        ["dueAt"],
+        { "dueAt": { "type": "date" } }
+      ],
+      "expected": { "dueAt": "2025-01-15T00:00:00.000Z" }
+    },
+    {
+      "name": "date: an explicit null clears the date",
+      "input": [{ "dueAt": null }, ["dueAt"], { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null }
+    },
+    {
+      "name": "date: an ISO-8601 string is rejected",
+      "input": [
+        { "dueAt": "2026-01-01T00:00:00.000Z" },
+        ["dueAt"],
+        { "dueAt": { "type": "date" } }
+      ],
+      "throws": true
+    },
+    {
+      "name": "dateNow: an update carries no implicit clock read",
+      "input": [
+        { "updatedAt": 1736899200000 },
+        ["updatedAt"],
+        { "updatedAt": { "type": "dateNow" } }
+      ],
+      "expected": { "updatedAt": "2025-01-15T00:00:00.000Z" }
+    },
+    {
+      "name": "dateNow: an explicit null clears the field rather than reading the clock",
+      "input": [
+        { "updatedAt": null },
+        ["updatedAt"],
+        { "updatedAt": { "type": "dateNow" } }
+      ],
+      "expected": { "updatedAt": null }
+    },
+    {
+      "name": "dateOnly: UTC midnight",
+      "input": [
+        { "dueOn": 1736899200000 },
+        ["dueOn"],
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "expected": { "dueOn": "2025-01-15T00:00:00.000Z" }
+    },
+    {
+      "name": "dateOnly: a mid-day epoch is rejected",
+      "input": [
+        { "dueOn": 1736942400000 },
+        ["dueOn"],
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a temporal key outside the allowed list is dropped before it can be rejected",
+      "input": [
+        { "dueOn": 1736942400000, "title": "Bug fix" },
+        ["title"],
+        { "dueOn": { "type": "dateOnly" }, "title": { "type": "string" } }
+      ],
+      "expected": { "title": "Bug fix" }
+    }
+  ]
+}

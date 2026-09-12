@@ -1,0 +1,280 @@
+{
+  "fn": "parseSyncActionOutput",
+  "description": "The server's decode of a sync action it receives back over the delta bus, as opposed to the client's parseSyncAction. The two are deliberately not interchangeable and a port must not share one implementation: this one requires `createdAt` and requires `data` to be present and non-null, where the client tolerates both being absent and substitutes an empty object. `createdAt` is written here as its ISO-8601 string; an implementation that decodes it to a date type converts to ISO-8601 UTC before comparing. The action letter is NOT validated at this layer — an unknown letter round-trips, and it is the client's parseSyncAction that rejects it.",
+  "cases": [
+    {
+      "name": "a full action",
+      "input": [
+        {
+          "action": "U",
+          "clientId": "c_abc123",
+          "clientTxId": "tx_def456",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": { "status": "closed" },
+          "groupId": "team_9f2",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "42"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "clientId": "c_abc123",
+        "clientTxId": "tx_def456",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": { "status": "closed" },
+        "groupId": "team_9f2",
+        "modelId": "t1",
+        "modelName": "Task",
+        "syncId": "42"
+      }
+    },
+    {
+      "name": "the optional keys stay absent when the wire omits them",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": {},
+        "modelId": "t1",
+        "modelName": "Task",
+        "syncId": "1"
+      }
+    },
+    {
+      "name": "null optional keys are dropped, not carried through as null",
+      "input": [
+        {
+          "action": "I",
+          "clientId": null,
+          "clientTxId": null,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "groupId": null,
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": {},
+        "modelId": "t1",
+        "modelName": "Task",
+        "syncId": "1"
+      }
+    },
+    {
+      "name": "an unknown action letter is not rejected here",
+      "input": [
+        {
+          "action": "X",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "expected": {
+        "action": "X",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": {},
+        "modelId": "t1",
+        "modelName": "Task",
+        "syncId": "1"
+      }
+    },
+    {
+      "name": "a sync id beyond 2^53 survives decoding",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "9007199254740993"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": {},
+        "modelId": "t1",
+        "modelName": "Task",
+        "syncId": "9007199254740993"
+      }
+    },
+    {
+      "name": "a missing data is rejected, unlike the client decode",
+      "input": [
+        {
+          "action": "D",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a null data is rejected, unlike the client decode",
+      "input": [
+        {
+          "action": "D",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": null,
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a scalar data is rejected",
+      "input": [
+        {
+          "action": "U",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": "title=x",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a missing createdAt is rejected",
+      "input": [
+        {
+          "action": "I",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "an epoch-number createdAt is rejected, unlike the client decode",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": 1736899200000,
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "an unparseable createdAt is rejected, not dropped",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "not a date",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a numeric syncId is rejected, not coerced",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": 1
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a non-numeric syncId string is rejected",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "abc"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "the client id spelling is not accepted here",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "id": "1",
+          "modelId": "t1",
+          "modelName": "Task"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a missing modelName is rejected",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelId": "t1",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a missing modelId is rejected",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "data": {},
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "null is not an action",
+      "input": [null],
+      "throws": true
+    },
+    {
+      "name": "a scalar is not an action",
+      "input": [42],
+      "throws": true
+    }
+  ]
+}

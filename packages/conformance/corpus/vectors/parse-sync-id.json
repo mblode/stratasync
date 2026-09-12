@@ -1,0 +1,73 @@
+{
+  "fn": "parseSyncId",
+  "description": "Validating a wire-encoded sync ID. One positional argument: the raw value. A sync ID is a decimal string of one or more digits and nothing else. A JSON number is REJECTED rather than coerced, because the log outgrows 2^53 and a double would silently round; this is the single most likely place for a port to be permissive and lose data. The value is returned verbatim — leading zeros are not stripped here, which is why compareSyncId, not string equality, is how two sync IDs are compared.",
+  "cases": [
+    { "name": "zero", "input": ["0"], "expected": "0" },
+    { "name": "a small value", "input": ["42"], "expected": "42" },
+    {
+      "name": "leading zeros are preserved, not normalized",
+      "input": ["007"],
+      "expected": "007"
+    },
+    {
+      "name": "a value just beyond 2^53",
+      "input": ["9007199254740993"],
+      "expected": "9007199254740993"
+    },
+    {
+      "name": "a value beyond 2^64",
+      "input": ["18446744073709551616"],
+      "expected": "18446744073709551616"
+    },
+    {
+      "name": "a number is rejected, not coerced",
+      "input": [42],
+      "throws": true
+    },
+    {
+      "name": "zero as a number is rejected",
+      "input": [0],
+      "throws": true
+    },
+    {
+      "name": "a number beyond 2^53 is rejected",
+      "input": [9007199254740993],
+      "throws": true
+    },
+    { "name": "null is rejected", "input": [null], "throws": true },
+    { "name": "an absent value is rejected", "input": [], "throws": true },
+    { "name": "a boolean is rejected", "input": [true], "throws": true },
+    { "name": "an empty string is rejected", "input": [""], "throws": true },
+    { "name": "a negative value is rejected", "input": ["-1"], "throws": true },
+    {
+      "name": "a decimal point is rejected",
+      "input": ["1.0"],
+      "throws": true
+    },
+    {
+      "name": "exponent notation is rejected",
+      "input": ["1e3"],
+      "throws": true
+    },
+    {
+      "name": "surrounding whitespace is rejected, not trimmed",
+      "input": [" 42"],
+      "throws": true
+    },
+    {
+      "name": "a plus sign is rejected",
+      "input": ["+42"],
+      "throws": true
+    },
+    {
+      "name": "non-digits are rejected",
+      "input": ["42abc"],
+      "throws": true
+    },
+    {
+      "name": "the field name is a diagnostic, not part of the contract",
+      "input": ["42", "Delta packet lastSyncId"],
+      "expected": "42"
+    }
+  ]
+}

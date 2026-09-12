@@ -8,8 +8,19 @@
     "schemas/model-snapshot.schema.json": "fef29439a61a5dfe6ebca7db308fdcec218226076b38594ffb5f4e9e30db4262",
     "schemas/scenario.schema.json": "e46b07a7cc4e7ee7b954d977cf5c69489549ee2f7acef9d568f69a821ebc4a1b",
     "schemas/vector.schema.json": "cacfad60f53771ab885a769fce13f7945911bf4071d66ec6a1b3d826932e96e3",
+    "vectors/build-insert-data.json": "93fa10b1530cf6df698c123f295f78034f35a90f35f5e5f87bc529495af3ea8b",
+    "vectors/build-update-data.json": "143a35887010e9e1c89cb209c0a8569533b29852eaf8c64829bc286071039f77",
     "vectors/compare-sync-id.json": "806e6b52e096eb32539f92d119b53c4c85dc16ea970419ccc7cecf8fc17e69d2",
-    "vectors/compute-schema-hash.json": "48ba311254c49829664b77ea638a6f146bdb9506a30f0c7125b40ea3b589f8d3"
+    "vectors/compute-schema-hash.json": "48ba311254c49829664b77ea638a6f146bdb9506a30f0c7125b40ea3b589f8d3",
+    "vectors/map-graphql-action.json": "5c517e8e9fd7004539596d43e4c27bff2f5196b58cf3c17213f9a71d6a8262c7",
+    "vectors/parse-bootstrap-line.json": "69d16576f5ffd2d3dd9c253e1c9169058fbb1b032a520aba16e434d9f5ec84a9",
+    "vectors/parse-delta-packet.json": "1a9dba176db9cb4b4b5567196c9d99bfe4bd9fa20b5249a6315f9061854c6f88",
+    "vectors/parse-sync-action-output.json": "bdd6ae249c8b4a0031e03ef253e2df053e705c83d0ec242cfd67ea50d9e3d989",
+    "vectors/parse-sync-action.json": "7fc0e0dd442eeddc254791f80e3db19f08f9960aea837851eef0db8986df556f",
+    "vectors/parse-sync-id.json": "3ba179104bf1c36ff106d7d5b21c373168c498a5d83da63faa34d6d42a4ad2da",
+    "vectors/parse-temporal-input.json": "cdc32837776e63a6a2bcc7fc672722f32786f0e3ca41add2ee959498d6e41310",
+    "vectors/read-ndjson-lines.json": "e936fce1d47a4727ea37e397ba0e62824885fe27ffb5409f130d18c3cee67319",
+    "vectors/serialize-sync-data.json": "710b04d593facb15e787b82afbd5e45eadb6a0e8143afdd0c386ed401d013657"
   },
   "protocolVersion": 1,
   "version": "2.4.1"
