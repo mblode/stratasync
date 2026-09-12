@@ -67,7 +67,7 @@ export const loadManifest = (): CorpusManifest =>
 
 /** The JSON Schema for one artifact kind, for validating the corpus itself. */
 export const loadSchema = (
-  kind: "scenario" | "vector" | "capabilities"
+  kind: "scenario" | "vector" | "capabilities" | "model-snapshot"
 ): unknown => readJson(join(corpusDir, "schemas", `${kind}.schema.json`));
 
 /**

@@ -11,6 +11,7 @@ import {
   loadManifest,
   loadScenarios,
   loadSchema,
+  loadVectorFile,
   loadVectors,
   supports,
 } from "../src/index.js";
@@ -18,6 +19,7 @@ import {
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validators = {
   capabilities: ajv.compile(loadSchema("capabilities") as object),
+  modelSnapshot: ajv.compile(loadSchema("model-snapshot") as object),
   scenario: ajv.compile(loadSchema("scenario") as object),
   vector: ajv.compile(loadSchema("vector") as object),
 };
@@ -50,6 +52,22 @@ describe("vectors", () => {
           `${stem}/${testCase.name} pins no outcome`
         ).toBeTruthy();
       }
+    });
+  }
+});
+
+describe("model snapshot documents", () => {
+  // The schema hash is only as portable as the document it is computed over,
+  // so every input in the compute-schema-hash vector has to be a document a
+  // port could have produced — not a shape that only this language emits.
+  const file = loadVectorFile("compute-schema-hash");
+
+  for (const testCase of file.cases) {
+    it(`${testCase.name} matches model-snapshot.schema.json`, () => {
+      expect(
+        validators.modelSnapshot(testCase.input),
+        fail(validators.modelSnapshot.errors)
+      ).toBeTruthy();
     });
   }
 });

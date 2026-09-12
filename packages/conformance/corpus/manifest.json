@@ -1,13 +1,15 @@
 {
   "files": {
-    "README.md": "b29c5fbc3ef49624ba9fdae5233cfec0d78abdfe31ae4f8af255efaf3b71ddf6",
+    "README.md": "3199c51a67bd782c9012757ea71c65cff8aa4745d9b3ff1efe3c058ddd8668e4",
     "capabilities/stratasync-ts.json": "72f4718cc79888e88fb7a4e2c6136236f3d90b102722646b36422edc6ec5aa4c",
     "scenarios/bootstrap-then-delta.json": "faca89d170d2c53c77994dd7ad7d316aa473f35b74b404177d17feb24d845502",
     "scenarios/schema-hash-mismatch-rebootstraps.json": "746a0ea5b5a0da296949b38b6761c91c990e1ce55128bc8722e6f281d1d55b43",
     "schemas/capabilities.schema.json": "bb4c03f0d7808a569ad218379c0ea0482696c0afb8ce975ea8527a1bfb9e7591",
+    "schemas/model-snapshot.schema.json": "fef29439a61a5dfe6ebca7db308fdcec218226076b38594ffb5f4e9e30db4262",
     "schemas/scenario.schema.json": "e46b07a7cc4e7ee7b954d977cf5c69489549ee2f7acef9d568f69a821ebc4a1b",
     "schemas/vector.schema.json": "cacfad60f53771ab885a769fce13f7945911bf4071d66ec6a1b3d826932e96e3",
-    "vectors/compare-sync-id.json": "806e6b52e096eb32539f92d119b53c4c85dc16ea970419ccc7cecf8fc17e69d2"
+    "vectors/compare-sync-id.json": "806e6b52e096eb32539f92d119b53c4c85dc16ea970419ccc7cecf8fc17e69d2",
+    "vectors/compute-schema-hash.json": "48ba311254c49829664b77ea638a6f146bdb9506a30f0c7125b40ea3b589f8d3"
   },
   "protocolVersion": 1,
   "version": "2.4.1"

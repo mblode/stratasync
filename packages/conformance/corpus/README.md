@@ -37,6 +37,13 @@ driver. The TypeScript side lives in `packages/core/tests/conformance-vectors.te
 `packages/conformance/tests/corpus.test.ts` validates the corpus itself against
 the schemas.
 
+`schemas/` holds one file per artifact kind plus, where a vector's `input` is a
+structure rather than a scalar, a schema for that structure — currently
+`model-snapshot.schema.json`, which describes the serialized model snapshot
+document `computeSchemaHash` consumes. Those are not new artifact kinds and
+nothing loads them as such; they exist so an argument shared across languages is
+specified rather than inferred from the examples.
+
 ### Scenarios — the engine state machine
 
 A scenario is an ordered script of operations against a live engine with a fake

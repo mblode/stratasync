@@ -40,6 +40,15 @@ export {
 } from "./schema/codec.js";
 export { computeSchemaHash } from "./schema/hash.js";
 export { ModelRegistry } from "./schema/registry.js";
+export {
+  MODEL_SNAPSHOT_VERSION,
+  serializeModelSnapshot,
+} from "./schema/snapshot.js";
+export type {
+  CanonicalModelEntry,
+  CanonicalProperty,
+  ModelSnapshotDocument,
+} from "./schema/snapshot.js";
 export type { PropertySerializer } from "./schema/types.js";
 export type {
   ModelMetadata,
