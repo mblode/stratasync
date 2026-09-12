@@ -1,77 +1,77 @@
-"use client";
-
-import { useCallback, useId } from "react";
-
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
+import { Packet } from "./packet";
 import type { Tone } from "./tone";
+import { toneFill } from "./tone";
 
 /**
- * The checkbox the whole page is built from.
+ * One task, the way a device shows it: a tick and a title.
  *
- * The house checkbox, not a hand-rolled one, so the tick draws itself the way
- * every other checkbox on the site does. Amber is not a second style: the
- * component paints itself from `--primary`, so a pending row reassigns that
- * one token locally and the fill, the border and the tick all follow.
+ * Display only. Every figure on the page runs itself, so the row is never a
+ * control, and a checkbox that looked pressable would invite a press that did
+ * nothing. The dot on the right is the one piece of state the page uses
+ * everywhere: amber means only this device knows, green means the server has
+ * it too.
  */
 export const TaskRow = ({
   className,
   done,
   note,
-  onToggle,
   title,
   tone = "neutral",
 }: {
   className?: string;
   done: boolean;
-  /** Right-aligned state, e.g. `Saving…`. */
+  /** A word or two beside the dot, e.g. `sending`. */
   note?: string;
-  onToggle?: () => void;
   title: string;
-  /** The tick's colour: whether the server knows about this yet. */
   tone?: Tone;
-}) => {
-  const id = useId();
-  const handleCheckedChange = useCallback(() => onToggle?.(), [onToggle]);
-
-  return (
-    <div
+}) => (
+  <div
+    className={cn(
+      "flex min-h-9 items-center gap-2.5 rounded-lg bg-background px-2.5 py-1.5",
+      className
+    )}
+  >
+    <span
+      aria-hidden="true"
       className={cn(
-        "flex min-h-9 items-center gap-2.5 rounded-lg bg-background px-2.5 py-1.5",
-        className
+        "flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors duration-300",
+        done
+          ? cn(
+              "border-transparent",
+              toneFill[tone === "neutral" ? "synced" : tone]
+            )
+          : "border-border bg-card"
       )}
     >
-      <Checkbox
-        checked={done}
-        className={cn(
-          "size-4 rounded-[4px]",
-          tone === "pending" &&
-            "[--primary-foreground:var(--warning-foreground)] [--primary:var(--warning)]",
-          onToggle ? "cursor-pointer" : "cursor-default"
-        )}
-        disabled={!onToggle}
-        id={id}
-        onCheckedChange={handleCheckedChange}
-      />
-
-      <Label
-        className={cn(
-          "truncate font-normal text-sm",
-          done && "text-muted-foreground line-through",
-          onToggle ? "cursor-pointer" : "cursor-default"
-        )}
-        htmlFor={id}
-      >
-        {title}
-      </Label>
-
-      {note ? (
-        <span className="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-          {note}
-        </span>
+      {done ? (
+        <svg
+          className="size-3 text-background"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.5"
+          viewBox="0 0 16 16"
+        >
+          <path d="M3.5 8.5l2.75 2.75L12.5 5" />
+        </svg>
       ) : null}
-    </div>
-  );
-};
+    </span>
+
+    <span
+      className={cn(
+        "truncate text-sm transition-colors duration-300",
+        done && "text-muted-foreground line-through"
+      )}
+    >
+      {title}
+    </span>
+    <span className="sr-only">{done ? ", done" : ", not done"}</span>
+
+    {tone === "neutral" ? null : (
+      <Packet className="ml-auto shrink-0" label={note} tone={tone} />
+    )}
+  </div>
+);

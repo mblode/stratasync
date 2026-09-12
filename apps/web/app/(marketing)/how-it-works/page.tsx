@@ -30,8 +30,8 @@ export const metadata: Metadata = {
 };
 
 /*
- * A `TechArticle`, not a `CollectionPage`: this is one argument built across
- * ten figures, not an index of separate pages. `author` and `publisher` point
+ * A `TechArticle`, not a `CollectionPage`: this is one line of code followed
+ * across six figures, not an index of separate pages. `author` and `publisher` point
  * at blode.co's existing nodes by `@id` rather than redefining them.
  */
 const jsonLd = {
