@@ -28,6 +28,7 @@ class SyncEngine(
     private val clientId: String,
 ) {
     private var checkpoint = storage.read()
+    private var privacyHidden = checkpoint.meta["privacyPending"] == JsonPrimitive(true)
     private var active = false
     private var generation = 0L
     private var groups = emptyList<String>()
@@ -41,28 +42,36 @@ class SyncEngine(
     private val buffered = mutableListOf<JsonObject>()
     private val modelNames = models.map { it.string("name") }.toSet()
     private val schemaHash = MessageDigest.getInstance("SHA-256").digest(canonical(JsonArray(models)).toByteArray()).joinToString("") { "%02x".format(it) }
-    var state: String = "disconnected"; private set
-    var lastError: Throwable? = null; private set
+    @Volatile var state: String = "disconnected"; private set
+    @Volatile var lastError: Throwable? = null; private set
     val cursor: String @Synchronized get() = checkpoint.meta.optionalString("lastSyncId") ?: "0"
     @Synchronized fun snapshot(): Checkpoint = checkpoint
     @Synchronized fun rows(): List<JsonObject> {
+        if (privacyHidden) return emptyList()
         var rows = checkpoint.rows
-        for (tx in checkpoint.outbox) rows = apply(rows, tx.string("model"), tx.string("modelId"), Wire.mutationCode(tx.string("action")), tx["payload"]!!.jsonObject)
+        for (tx in checkpoint.outbox.filter { it.optionalString("status") != "withheld" }) rows = apply(rows, tx.string("model"), tx.string("modelId"), Wire.mutationCode(tx.string("action")), tx["payload"]!!.jsonObject)
         return rows
     }
 
-    @Synchronized fun start(groups: List<String>) {
+    @Synchronized fun start(groups: List<String>, freshSnapshot: Boolean = false) {
         if (active) { require(this.groups == groups) { "Stop before changing sync groups" }; return }
         checkpoint = storage.read()
         val storedClient = checkpoint.meta.optionalString("clientId")
         require(storedClient == null || storedClient == clientId) { "Storage belongs to a different client; use an account-scoped store and stable client ID" }
         active = true; generation++; this.groups = groups.toList(); state = "connecting"; lastError = null
         val storedGroups = checkpoint.meta.array("subscribedGroups").map { it.jsonPrimitive.content }
-        val needsBootstrap = checkpoint.meta["bootstrapComplete"] != JsonPrimitive(true) || checkpoint.meta.optionalString("schemaHash") != schemaHash || storedGroups.toSet() != groups.toSet()
+        privacyHidden = checkpoint.meta["privacyPending"] == JsonPrimitive(true)
+        val needsBootstrap = freshSnapshot || privacyHidden || checkpoint.meta["bootstrapComplete"] != JsonPrimitive(true) || checkpoint.meta.optionalString("schemaHash") != schemaHash || storedGroups.toSet() != groups.toSet()
         // A process can die after send but before ack. Reuse the same idempotency keys.
-        persist(checkpoint.copy(outbox = checkpoint.outbox.map { tx -> if (tx.optionalString("syncId") == null) patch(tx, "status" to JsonPrimitive("pending")) else tx }))
-        if (needsBootstrap) bootstrap() else catchUp { connect() }
+        persist(checkpoint.copy(outbox = checkpoint.outbox.map { tx -> if (tx.optionalString("syncId") == null && tx.optionalString("status") != "withheld") patch(tx, "status" to JsonPrimitive("pending")) else tx }))
+        if (needsBootstrap) {
+            if (checkpoint.meta["bootstrapComplete"] == JsonPrimitive(true)) quarantine()
+            bootstrap()
+        } else catchUp { connect() }
     }
+
+    /** Polling adapters may request catch-up; at most one fetch is active. */
+    @Synchronized fun refresh() { if (active && !catchingUp) catchUp { flush() } }
 
     @Synchronized fun stop() {
         active = false; generation++; subscription?.cancel(); subscription = null
@@ -71,6 +80,7 @@ class SyncEngine(
     }
 
     @Synchronized fun mutate(action: String, model: String, id: String, payload: JsonObject = JsonObject(emptyMap())): String {
+        check(!privacyHidden) { "Access reconciliation is pending" }
         require(model in modelNames) { "Unregistered model: $model" }
         val code = Wire.mutationCode(action)
         val current = rows().find { it.string("model") == model && it.string("id") == id }
@@ -108,9 +118,14 @@ class SyncEngine(
                         put("clientId", clientId); put("lastSyncId", response.lastSyncId); put("firstSyncId", response.lastSyncId)
                         put("schemaHash", schemaHash); put("bootstrapComplete", true); put("subscribedGroups", JsonArray(groups.map(::JsonPrimitive)))
                     }
-                    persist(Checkpoint(response.rows, checkpoint.outbox, meta))
+                    val outbox = if (privacyHidden) checkpoint.outbox.map { tx ->
+                        val present = response.rows.any { it.string("model") == tx.string("model") && it.string("id") == tx.string("modelId") }
+                        patch(tx, "status" to JsonPrimitive(if (present) "pending" else "withheld"))
+                    } else checkpoint.outbox
+                    persist(Checkpoint(response.rows, outbox, meta))
+                    privacyHidden = false
                     catchingUp = false; retryAttempt = 0; state = "syncing"; lastError = null
-                    drain(); connect(); flush()
+                    drain(); if (active && epoch == generation) { connect(); flush() }
                 } catch (error: Throwable) { fail(error) }
             }, onFailure = { fail(it) })
         } }
@@ -144,18 +159,19 @@ class SyncEngine(
                         require(Wire.compareIds(watermark, requestedCursor) > 0) { "Paginated delta response did not advance cursor" }
                     }
                     receive(packet)
+                    if (!active || epoch != generation) return@synchronized
                     catchingUp = false
                     if (packet["hasMore"] == JsonPrimitive(true)) catchUp(after) else {
-                        retryAttempt = 0; lastError = null; state = "syncing"; drain(); after()
+                        retryAttempt = 0; lastError = null; state = "syncing"; drain(); if (active && epoch == generation) after()
                     }
                 } catch (error: Throwable) { fail(error) }
             }, onFailure = { error ->
                 catchingUp = false
                 when (error) {
-                    is BootstrapRequired -> bootstrap()
+                    is BootstrapRequired -> { quarantine(); bootstrap() }
                     is AuthenticationRequired -> fail(error)
                     else -> {
-                        lastError = error
+                        lastError = error; state = "offline"
                         retryTimer?.cancel()
                         val delay = minOf(300L shl minOf(retryAttempt++, 6), 30000)
                         retryTimer = runtime.schedule(delay) { synchronized(this) { if (active && epoch == generation) catchUp(after) } }
@@ -172,6 +188,12 @@ class SyncEngine(
 
     private fun receive(raw: JsonObject) {
         val packet = requireNotNull(Wire.packet(raw)) { "Invalid delta packet" }
+        if (packet.array("actions").any { it.jsonObject.string("action") in setOf("G", "S") }) {
+            // Fence old callbacks before acquiring a replacement snapshot. The durable latch
+            // survives process death; retained outbox entries must be re-authorized by presence.
+            stop(); active = true; quarantine(); bootstrap(); return
+        }
+        if (privacyHidden) return
         var base = checkpoint.rows
         var outbox = checkpoint.outbox
         var nextCursor = cursor
@@ -180,6 +202,7 @@ class SyncEngine(
             val syncId = action.string("id")
             if (Wire.compareIds(syncId, before) <= 0) continue
             val model = action.string("modelName"); val id = action.string("modelId"); val code = action.string("action")
+            if (code == "C") { if (Wire.compareIds(syncId, nextCursor) > 0) nextCursor = syncId; continue }
             require(code in setOf("I", "U", "D", "A", "V")) { "Extension action $code requires an adapter capability not yet implemented" }
             require(model in modelNames) { "Unregistered delta model $model" }
             val data = action["data"]!!.jsonObject
@@ -199,7 +222,7 @@ class SyncEngine(
     }
 
     private fun flush() {
-        if (!active || sending || catchingUp) return
+        if (!active || sending || catchingUp || privacyHidden) return
         val pending = checkpoint.outbox.filter { it.optionalString("status") == "pending" }.take(100)
         if (pending.isEmpty()) return
         val ids = pending.map { it.string("clientTxId") }.toSet()
@@ -235,6 +258,12 @@ class SyncEngine(
                 })
             } catch (error: Throwable) { fail(error) }
         } }
+    }
+    private fun quarantine() {
+        // Hide immediately even if disk fails. A host must gate cached data on fresh validation
+        // when reopening after a storage error (start(..., freshSnapshot = true)).
+        privacyHidden = true
+        persist(checkpoint.copy(meta = patch(checkpoint.meta, "privacyPending" to JsonPrimitive(true))))
     }
     private fun fail(error: Throwable) { stop(); lastError = error; state = "error" }
     private fun persist(next: Checkpoint) { storage.commit(next); checkpoint = next }
