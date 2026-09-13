@@ -56,3 +56,7 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: TypeScript driver verdict contract
+        if: matrix.node == 22
+        run: node scripts/check-driver-verdict.mjs -- node packages/client/dist/conformance/driver.js run

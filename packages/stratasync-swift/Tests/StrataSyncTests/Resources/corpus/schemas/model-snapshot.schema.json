@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stratasync.dev/conformance/model-snapshot.schema.json",
+  "title": "Strata Sync model snapshot document",
+  "description": "A serialized model registry snapshot: the written-down form of the schema every implementation agrees on. It exists so schema identity stops being an implicit IDL buried in one language's hashing code — a port can read this document, diff it, and compute the same hash policy without reimplementing a canonicalizer from prose.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["snapshotVersion", "models"],
+  "properties": {
+    "snapshotVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of this document's envelope, not of any caller's schema. It is excluded from the hashed projection on purpose: bumping the document format must not force every existing client to re-bootstrap."
+    },
+    "models": {
+      "type": "object",
+      "description": "Every registered model, keyed by registered model name. This object, and only this object, is what the schema hash is computed over, so adding or removing anything here changes the hash and re-bootstraps clients.",
+      "additionalProperties": { "$ref": "#/$defs/modelEntry" }
+    }
+  },
+  "$defs": {
+    "modelEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["meta", "properties"],
+      "description": "One model, split into model-level metadata and its properties so a port can diff the two independently.",
+      "properties": {
+        "meta": { "$ref": "#/$defs/modelMeta" },
+        "properties": {
+          "type": "object",
+          "description": "Properties keyed by property name. Keys are sorted on serialization so declaration order cannot leak into the hash.",
+          "additionalProperties": { "$ref": "#/$defs/property" }
+        }
+      }
+    },
+    "modelMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "loadStrategy"],
+      "description": "Model-level metadata. Optional keys are omitted rather than emitted as null, because an absent key and an explicit default must not hash differently.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Registered model name. Renaming a model is a schema change, which is why the name is inside the hashed region rather than being only the map key."
+        },
+        "loadStrategy": {
+          "enum": [
+            "instant",
+            "lazy",
+            "partial",
+            "explicitlyRequested",
+            "local"
+          ],
+          "description": "When rows for this model are fetched. It cannot change how a row decodes, so it is currently over-invalidating: changing it re-bootstraps clients that did not need it. Pinned by the conformance vector so a future narrowing of the hashed projection is a visible, deliberate edit."
+        },
+        "partialLoadMode": {
+          "enum": ["full", "regular", "lowPriority"],
+          "description": "Hydration priority for partial models. Present only when the model declares one."
+        },
+        "usedForPartialIndexes": {
+          "type": "boolean",
+          "description": "Whether this model feeds partial-index dependencies, which decides whether the server must keep it resident for index maintenance."
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "description": "Per-model version a caller bumps to force migration of that model alone, independently of whether its field set actually changed."
+        },
+        "tableName": {
+          "type": "string",
+          "description": "Storage table override. It changes where rows are read from, so a client that missed the change would query the wrong table."
+        },
+        "primaryKey": {
+          "type": "string",
+          "description": "Primary key field, emitted only when it is not the default `id`. A client that disagrees here would mis-identify rows rather than merely mis-render them."
+        },
+        "groupKey": {
+          "type": "string",
+          "description": "Field carrying the sync-group id. It determines which rows a client is entitled to, so it is part of schema identity rather than a local hint."
+        },
+        "indexes": {
+          "type": "array",
+          "description": "Composite indexes, sorted canonically. Omitted entirely when empty, so a model that declares none and a model whose list was emptied hash alike.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fields"],
+            "properties": {
+              "fields": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" },
+                "description": "Indexed fields in declaration order. Order is significant here and is NOT sorted — a composite index on (a, b) is not the index on (b, a)."
+              },
+              "unique": {
+                "type": "boolean",
+                "description": "Whether the index enforces uniqueness, which is a constraint a client must know about before it writes locally and expects the write to survive."
+              }
+            }
+          }
+        }
+      }
+    },
+    "property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "One property. `serializer` is absent by design: it is a pair of functions, so it has no JSON form and no cross-language meaning, and hashing it would make the hash depend on TypeScript identity.",
+      "properties": {
+        "type": {
+          "enum": [
+            "property",
+            "ephemeralProperty",
+            "reference",
+            "referenceModel",
+            "referenceCollection",
+            "backReference",
+            "referenceArray"
+          ],
+          "description": "What kind of thing this property holds. It decides how the value is decoded off the wire, so a mismatch here is silent data corruption rather than a visible error."
+        },
+        "nullable": {
+          "type": "boolean",
+          "description": "Whether the value may be null. A client that thinks a field is non-null will reject or crash on rows a newer server legitimately sends."
+        },
+        "indexed": {
+          "type": "boolean",
+          "description": "Whether the property is indexed locally. Present because local query plans are built from it, so a stale client would index a different set of fields."
+        },
+        "lazy": {
+          "type": "boolean",
+          "description": "Whether the value hydrates on first access rather than at load. It changes whether a value is expected to be present immediately after a read."
+        },
+        "referenceModel": {
+          "type": "string",
+          "description": "Target model for a reference. Repointing a reference at a different model is a schema change even when the property name and kind are unchanged."
+        },
+        "inverseProperty": {
+          "type": "string",
+          "description": "Name of the property on the far side of the relation, which is what lets a client maintain both ends after a local write."
+        },
+        "foreignKey": {
+          "type": "string",
+          "description": "Field holding the foreign key. It is where the relation is physically stored, so a client that disagrees reads the relation from the wrong field."
+        },
+        "through": {
+          "type": "string",
+          "description": "Join model for a many-to-many relation. Its absence on one side would make a client traverse a relation that has no backing rows."
+        }
+      }
+    }
+  }
+}

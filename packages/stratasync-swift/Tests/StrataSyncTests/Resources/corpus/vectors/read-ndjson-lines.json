@@ -1,0 +1,91 @@
+{
+  "fn": "readNdjsonLines",
+  "description": "Splitting an NDJSON response body into lines. One positional argument: the list of byte chunks the transport delivered, written here as UTF-8 strings so the vector can pin chunk boundaries. `expected` is the list of lines yielded, in order. Lines are trimmed and empty lines are skipped, so a trailing newline, a missing trailing newline, a blank line inside the body and CRLF endings all decode the same. This function does not parse JSON: a line that is not an object is yielded verbatim and rejected later by parseBootstrapLine.",
+  "cases": [
+    {
+      "name": "a single line with no trailing newline",
+      "input": [["{\"__class\":\"Task\",\"id\":\"t1\"}"]],
+      "expected": ["{\"__class\":\"Task\",\"id\":\"t1\"}"]
+    },
+    {
+      "name": "a single line with a trailing newline",
+      "input": [["{\"__class\":\"Task\",\"id\":\"t1\"}\n"]],
+      "expected": ["{\"__class\":\"Task\",\"id\":\"t1\"}"]
+    },
+    {
+      "name": "two lines, trailing newline present",
+      "input": [["{\"a\":1}\n{\"b\":2}\n"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "two lines, trailing newline absent",
+      "input": [["{\"a\":1}\n{\"b\":2}"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a blank line inside the body is skipped",
+      "input": [["{\"a\":1}\n\n{\"b\":2}\n"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a whitespace-only line is skipped",
+      "input": [["{\"a\":1}\n   \n{\"b\":2}\n"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "an empty body yields nothing",
+      "input": [[]],
+      "expected": []
+    },
+    {
+      "name": "an empty chunk yields nothing",
+      "input": [[""]],
+      "expected": []
+    },
+    {
+      "name": "a body of newlines only yields nothing",
+      "input": [["\n\n\n"]],
+      "expected": []
+    },
+    {
+      "name": "CRLF line endings are trimmed",
+      "input": [["{\"a\":1}\r\n{\"b\":2}\r\n"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a line split across chunk boundaries is rejoined",
+      "input": [["{\"a\":1}\n{\"b", "\":2}\n"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a newline split from its line by a chunk boundary",
+      "input": [["{\"a\":1}", "\n{\"b\":2}"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a trailing line with no newline is still flushed",
+      "input": [["{\"a\":1}\n", "{\"b\":2}"]],
+      "expected": ["{\"a\":1}", "{\"b\":2}"]
+    },
+    {
+      "name": "a line that is not an object is yielded verbatim",
+      "input": [["42\nnot json\n{\"a\":1}\n"]],
+      "expected": ["42", "not json", "{\"a\":1}"]
+    },
+    {
+      "name": "the _metadata_= prefixed line is yielded like any other",
+      "input": [
+        ["_metadata_={\"lastSyncId\":\"42\"}\n{\"__class\":\"Task\"}\n"]
+      ],
+      "expected": [
+        "_metadata_={\"lastSyncId\":\"42\"}",
+        "{\"__class\":\"Task\"}"
+      ]
+    },
+    {
+      "name": "a multi-byte character survives decoding",
+      "input": [["{\"title\":\"café\"}\n"]],
+      "expected": ["{\"title\":\"café\"}"]
+    }
+  ]
+}

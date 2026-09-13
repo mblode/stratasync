@@ -52,7 +52,13 @@
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "release": "turbo run build --filter='./packages/*' && changeset publish",
-    "prepare": "[ -n \"$CI\" ] || lefthook install"
+    "prepare": "[ -n \"$CI\" ] || lefthook install",
+    "native:corpus:check": "node scripts/check-native-corpus.mjs",
+    "native:corpus:sync": "node scripts/check-native-corpus.mjs --sync",
+    "test:swift": "npm run native:corpus:check && swift test",
+    "test:kotlin": "npm run native:corpus:check && cd packages/stratasync-kotlin && ./gradlew test",
+    "test:native": "npm run test:swift && npm run test:kotlin",
+    "test:swift:consumer": "python3 scripts/check-swift-consumer.py"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.1",

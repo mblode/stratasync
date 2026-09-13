@@ -1,0 +1,154 @@
+{
+  "fn": "computeSchemaHash",
+  "description": "The schema hash that gates client re-bootstrap, over a serialized model snapshot document (see schemas/model-snapshot.schema.json). Input is the whole document; only its `models` projection is hashed — `snapshotVersion` is deliberately excluded, so versioning the document does not by itself invalidate every persisted client hash. The algorithm is FNV-1a-64 over JSON.stringify({models}) with keys sorted and undefined dropped at every level, rendered as 16 lowercase hex chars. Two notes on intent: the `loadStrategy` case pins that the hash moves for a change that cannot affect how a row decodes, which is over-invalidation the current projection really has and a future narrowing must confront rather than hide; and the model-removal case shares its input with `one model` on purpose, because asserting that removal lands back on the earlier hash is the whole point of it.",
+  "cases": [
+    {
+      "name": "empty registry",
+      "input": { "models": {}, "snapshotVersion": 1 },
+      "expected": "fb3410099f25c7a1"
+    },
+    {
+      "name": "one model",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "ce5185a612a3fe8f"
+    },
+    {
+      "name": "two models, declared Task then User",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          },
+          "User": {
+            "meta": { "loadStrategy": "instant", "name": "User" },
+            "properties": {
+              "email": { "type": "property" },
+              "id": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "faca20e7d6421287"
+    },
+    {
+      "name": "two models, declared User then Task, same hash",
+      "input": {
+        "models": {
+          "User": {
+            "meta": { "loadStrategy": "instant", "name": "User" },
+            "properties": {
+              "email": { "type": "property" },
+              "id": { "type": "property" }
+            }
+          },
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "faca20e7d6421287"
+    },
+    {
+      "name": "a field added",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "done": { "type": "property" },
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "ce31ac8af61ceb6e"
+    },
+    {
+      "name": "a field's nullability flipped",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "nullable": true, "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "737277172824bbbe"
+    },
+    {
+      "name": "a field's type changed",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "referenceModel": "User", "type": "referenceModel" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "2ef9539971781503"
+    },
+    {
+      "name": "loadStrategy changed, hash moves by design",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "lazy", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "be4327130ffea6f2"
+    },
+    {
+      "name": "a model removed, back to the one-model hash",
+      "input": {
+        "models": {
+          "Task": {
+            "meta": { "loadStrategy": "instant", "name": "Task" },
+            "properties": {
+              "id": { "type": "property" },
+              "title": { "type": "property" }
+            }
+          }
+        },
+        "snapshotVersion": 1
+      },
+      "expected": "ce5185a612a3fe8f"
+    }
+  ]
+}

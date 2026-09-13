@@ -1,0 +1,44 @@
+name: Native SDKs
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  swift:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Swift suite and canonical corpus integrity
+        run: npm run test:swift
+      - name: Swift driver verdict contract
+        run: node scripts/check-driver-verdict.mjs -- python3 scripts/swift-conformance-driver.py run
+      - name: Isolated Git-package consumer
+        run: npm run test:swift:consumer
+  kotlin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Corpus, JVM engine, recovery and conformance
+        run: npm run test:kotlin
+      - name: Kotlin driver verdict contract
+        working-directory: packages/stratasync-kotlin
+        run: node ../../scripts/check-driver-verdict.mjs -- ./gradlew -q conformanceDriver -Pcommand=run
+      - name: Publish to isolated local Maven repository
+        working-directory: packages/stratasync-kotlin
+        run: ./gradlew publishSdkPublicationToFixtureRepository
+      - name: Resolve published artifact from a separate consumer
+        working-directory: packages/stratasync-kotlin
+        run: ./gradlew -p consumer-fixture run

@@ -31,6 +31,8 @@ packages/
   transport-graphql/  # GraphQL + WebSocket transport
   server/             # Server-side sync with Fastify + Drizzle
   conformance/        # Language-agnostic conformance corpus every implementation must pass
+  stratasync-swift/    # Apple SDK; root Package.swift is the SwiftPM entry
+  stratasync-kotlin/   # JVM SDK foundation; Gradle wrapper, JDK 21
 apps/
   docs/               # MDX docs content (docs.json); deployed via Blode.md — no package.json
   docs-worker/        # Cloudflare Worker routing stratasync.dev → docs + landing
@@ -66,4 +68,13 @@ Layer 4: next (depends on client, core, react)
 - **Git hooks via lefthook**: Pre-commit runs oxfmt + oxlint on staged files. Hooks install automatically via `npm install`.
 - **Internal deps use `"*"`**: All `@stratasync/*` inter-package dependencies are pinned as `"*"` (npm workspaces resolves them locally). Don't switch to `workspace:*` — `changeset publish` shells out to `npm publish`, which does not rewrite the `workspace:` protocol, so it would publish broken manifests.
 - **Coordinated versions**: All published packages are a changesets `fixed` group — they always release together at the same version.
-- **Conformance corpus**: `packages/conformance/corpus/` is the cross-language contract (vectors, scenarios, capability manifests). It is data, not code, and the Swift port in `donebear/packages/stratasync-swift` reads the same files. Editing a vector or scenario to make one language pass silently breaks the others — **fix the implementation, not the corpus**. After any corpus edit run `npm run lint:fix` **first** and `npm run corpus:manifest --workspace=packages/conformance` second — oxfmt formats the corpus JSON too, so regenerating before formatting leaves a stale manifest and a red suite. Read `packages/conformance/corpus/README.md` before adding to it.
+- **Conformance corpus**: `packages/conformance/corpus/` is the cross-language contract (vectors, scenarios, capability manifests). It is data, not code, and the Swift SDK here bundles a byte-checked copy and Kotlin reads them directly. Editing a vector or scenario to make one language pass silently breaks the others — **fix the implementation, not the corpus**. After any corpus edit run `npm run lint:fix` **first** and `npm run corpus:manifest --workspace=packages/conformance` second — oxfmt formats the corpus JSON too, so regenerating before formatting leaves a stale manifest and a red suite. Read `packages/conformance/corpus/README.md` before adding to it.
+
+## Native SDK checks
+
+- `npm run test:swift`: canonical corpus integrity and Swift package suite (macOS).
+- `npm run test:kotlin`: canonical corpus integrity and JVM conformance/recovery tests (JDK 21).
+- `npm run test:swift:consumer`: isolated Git SwiftPM consumer.
+- Native CI and lefthook invoke the same commands. Kotlin fixture publication and consumer resolution also run in CI.
+- Done Bear currently keeps a generated frozen SDK snapshot until a pinned remote SwiftPM release exists. Edit canonical Swift source here, never the snapshot.
+- Shared scenario coverage is Swift 11/11 and Kotlin 11/11. Both also run seven client wire-vector groups. Passing this corpus does not imply feature parity beyond its cases.

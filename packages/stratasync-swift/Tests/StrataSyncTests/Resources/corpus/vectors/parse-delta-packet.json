@@ -1,0 +1,316 @@
+{
+  "fn": "parseDeltaPacket",
+  "description": "Decoding a delta packet off the wire. One positional argument: the raw payload. Four shapes are accepted — a bare array of actions, a `{type:\"delta\", packet}` socket envelope, a direct `{actions, lastSyncId, hasMore}` object, and a single bare action — and anything else decodes to null rather than throwing. `lastSyncId` is the server's watermark and is taken verbatim when the payload supplies one, even when it sits behind the highest action in the same packet; it is only derived from the actions when the payload omits it. `hasMore` is absent unless the payload carries a real boolean. Action order is preserved exactly as received; the packet is not re-sorted.",
+  "cases": [
+    {
+      "name": "empty actions with an explicit watermark",
+      "input": [{ "actions": [], "lastSyncId": "42" }],
+      "expected": { "actions": [], "lastSyncId": "42" }
+    },
+    {
+      "name": "empty actions with no watermark falls back to zero",
+      "input": [{ "actions": [] }],
+      "expected": { "actions": [], "lastSyncId": "0" }
+    },
+    {
+      "name": "an empty bare array is an empty packet, not null",
+      "input": [[]],
+      "expected": { "actions": [], "lastSyncId": "0" }
+    },
+    {
+      "name": "hasMore true",
+      "input": [
+        {
+          "actions": [
+            { "action": "I", "id": "5", "modelId": "t1", "modelName": "Task" }
+          ],
+          "hasMore": true,
+          "lastSyncId": "5"
+        }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "5",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "hasMore": true,
+        "lastSyncId": "5"
+      }
+    },
+    {
+      "name": "hasMore false is carried, not dropped",
+      "input": [{ "actions": [], "hasMore": false, "lastSyncId": "5" }],
+      "expected": { "actions": [], "hasMore": false, "lastSyncId": "5" }
+    },
+    {
+      "name": "hasMore absent stays absent",
+      "input": [{ "actions": [], "lastSyncId": "5" }],
+      "expected": { "actions": [], "lastSyncId": "5" }
+    },
+    {
+      "name": "a non-boolean hasMore is discarded, not coerced",
+      "input": [{ "actions": [], "hasMore": "true", "lastSyncId": "5" }],
+      "expected": { "actions": [], "lastSyncId": "5" }
+    },
+    {
+      "name": "lastSyncId behind the highest action is kept verbatim",
+      "input": [
+        {
+          "actions": [
+            { "action": "I", "id": "9", "modelId": "t1", "modelName": "Task" }
+          ],
+          "lastSyncId": "5"
+        }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "9",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "5"
+      }
+    },
+    {
+      "name": "lastSyncId ahead of the highest action is kept verbatim",
+      "input": [
+        {
+          "actions": [
+            { "action": "I", "id": "3", "modelId": "t1", "modelName": "Task" }
+          ],
+          "lastSyncId": "100"
+        }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "3",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "100"
+      }
+    },
+    {
+      "name": "out-of-order actions keep their order and derive the max watermark",
+      "input": [
+        {
+          "actions": [
+            { "action": "U", "id": "7", "modelId": "t2", "modelName": "Task" },
+            { "action": "U", "id": "3", "modelId": "t1", "modelName": "Task" },
+            { "action": "U", "id": "5", "modelId": "t3", "modelName": "Task" }
+          ]
+        }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "U",
+            "data": {},
+            "id": "7",
+            "modelId": "t2",
+            "modelName": "Task"
+          },
+          {
+            "action": "U",
+            "data": {},
+            "id": "3",
+            "modelId": "t1",
+            "modelName": "Task"
+          },
+          {
+            "action": "U",
+            "data": {},
+            "id": "5",
+            "modelId": "t3",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "7"
+      }
+    },
+    {
+      "name": "the derived watermark compares numerically, not lexicographically",
+      "input": [
+        [
+          { "action": "U", "id": "9", "modelId": "t1", "modelName": "Task" },
+          { "action": "U", "id": "10", "modelId": "t2", "modelName": "Task" }
+        ]
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "U",
+            "data": {},
+            "id": "9",
+            "modelId": "t1",
+            "modelName": "Task"
+          },
+          {
+            "action": "U",
+            "data": {},
+            "id": "10",
+            "modelId": "t2",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "10"
+      }
+    },
+    {
+      "name": "the derived watermark survives beyond 2^53",
+      "input": [
+        [
+          {
+            "action": "U",
+            "id": "9007199254740993",
+            "modelId": "t1",
+            "modelName": "Task"
+          },
+          {
+            "action": "U",
+            "id": "9007199254740992",
+            "modelId": "t2",
+            "modelName": "Task"
+          }
+        ]
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "U",
+            "data": {},
+            "id": "9007199254740993",
+            "modelId": "t1",
+            "modelName": "Task"
+          },
+          {
+            "action": "U",
+            "data": {},
+            "id": "9007199254740992",
+            "modelId": "t2",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "9007199254740993"
+      }
+    },
+    {
+      "name": "non-object members of a bare array are skipped",
+      "input": [
+        [
+          { "action": "I", "id": "2", "modelId": "t1", "modelName": "Task" },
+          null,
+          7,
+          "nope"
+        ]
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "2",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "2"
+      }
+    },
+    {
+      "name": "the socket delta envelope",
+      "input": [
+        {
+          "packet": {
+            "actions": [
+              { "action": "I", "id": "5", "modelId": "t1", "modelName": "Task" }
+            ],
+            "lastSyncId": "5"
+          },
+          "type": "delta"
+        }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "5",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "5"
+      }
+    },
+    {
+      "name": "a single bare action becomes a one-action packet",
+      "input": [
+        { "action": "I", "id": "2", "modelId": "t1", "modelName": "Task" }
+      ],
+      "expected": {
+        "actions": [
+          {
+            "action": "I",
+            "data": {},
+            "id": "2",
+            "modelId": "t1",
+            "modelName": "Task"
+          }
+        ],
+        "lastSyncId": "2"
+      }
+    },
+    {
+      "name": "null is not a packet",
+      "input": [null],
+      "expected": null
+    },
+    {
+      "name": "a number is not a packet",
+      "input": [42],
+      "expected": null
+    },
+    {
+      "name": "a string is not a packet",
+      "input": ["{}"],
+      "expected": null
+    },
+    {
+      "name": "an unrelated object is not a packet",
+      "input": [{ "foo": "bar" }],
+      "expected": null
+    },
+    {
+      "name": "a numeric lastSyncId is rejected, not coerced",
+      "input": [{ "actions": [], "lastSyncId": 42 }],
+      "throws": true
+    },
+    {
+      "name": "one undecodable action fails the whole packet",
+      "input": [
+        {
+          "actions": [
+            { "action": "I", "id": "1", "modelId": "t1", "modelName": "Task" },
+            { "action": "X", "id": "2", "modelId": "t2", "modelName": "Task" }
+          ],
+          "lastSyncId": "2"
+        }
+      ],
+      "throws": true
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "id": "schema-hash-mismatch-rebootstraps",
+  "description": "A client whose persisted schema hash differs from its own re-bootstraps instead of decoding last version's rows with this version's codecs; a matching hash hydrates locally with no network call.",
+  "requires": ["bootstrap", "schemaHashGating"],
+  "seed": { "clientId": "c_test", "clock": 1700000000000 },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "dueAt": "optionalDate"
+      }
+    }
+  ],
+  "given": {
+    "meta": {
+      "lastSyncId": "50",
+      "schemaHash": "stale-hash",
+      "bootstrapComplete": true,
+      "subscribedGroups": ["w1"]
+    },
+    "rows": [
+      {
+        "model": "Task",
+        "id": "t1",
+        "fields": {
+          "id": "t1",
+          "workspaceId": "w1",
+          "title": "persisted under the old schema",
+          "dueAt": null
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "60",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "refetched under the current schema",
+            "dueAt": null
+          }
+        }
+      ]
+    },
+    { "op": "start", "groups": ["w1"] },
+    {
+      "op": "expect",
+      "label": "mismatched hash forces a full bootstrap, not a delta catch-up",
+      "state": "syncing",
+      "cursor": "60",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "refetched under the current schema" }
+        }
+      ],
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 },
+      "storage": { "lastSyncId": "60", "bootstrapComplete": true }
+    },
+    { "op": "stop" },
+    { "op": "start", "groups": ["w1"] },
+    {
+      "op": "expect",
+      "label": "second start hydrates locally: the stored hash now matches",
+      "state": "syncing",
+      "cursor": "60",
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 1 }
+    }
+  ]
+}

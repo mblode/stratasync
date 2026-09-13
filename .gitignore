@@ -14,3 +14,9 @@ dist/
 
 # Agent worktrees (git scaffolding, never committed)
 .claude/worktrees/
+
+# Native SDK build products
+.build/
+.swiftpm/
+.gradle/
+**/build/

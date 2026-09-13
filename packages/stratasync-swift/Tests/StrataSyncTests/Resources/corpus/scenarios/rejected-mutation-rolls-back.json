@@ -1,0 +1,142 @@
+{
+  "id": "rejected-mutation-rolls-back",
+  "description": "The server rejects a mutation. The optimistic state must not survive it: an update reverts to the value it was applied over, an insert disappears, and neither leaves an entry behind in the outbox to be retried.",
+  "requires": ["bootstrap", "outbox", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_reject_update", "tx_reject_insert"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "Bootstrapped title",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "mutate",
+      "action": "UPDATE",
+      "model": "Task",
+      "modelId": "t1",
+      "payload": {
+        "title": "Renamed locally"
+      }
+    },
+    {
+      "op": "advanceClock",
+      "ms": 50
+    },
+    {
+      "op": "expect",
+      "label": "optimistic and in flight",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Renamed locally"
+          }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_reject_update",
+          "action": "UPDATE",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "inflight"
+        }
+      ],
+      "transport": {
+        "mutateCount": 1
+      }
+    },
+    {
+      "op": "rejectMutation",
+      "clientTxId": "tx_reject_update",
+      "message": "Title is read-only for this actor"
+    },
+    {
+      "op": "expect",
+      "label": "the rejected update reverts to the value it was applied over",
+      "cursor": "100",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Bootstrapped title",
+            "sortOrder": 10
+          }
+        }
+      ],
+      "outbox": []
+    },
+    {
+      "op": "mutate",
+      "action": "INSERT",
+      "model": "Task",
+      "modelId": "t9",
+      "payload": {
+        "workspaceId": "w1",
+        "title": "Never accepted",
+        "sortOrder": 90
+      }
+    },
+    {
+      "op": "advanceClock",
+      "ms": 50
+    },
+    {
+      "op": "rejectMutation",
+      "clientTxId": "tx_reject_insert",
+      "message": "Workspace is over quota"
+    },
+    {
+      "op": "expect",
+      "label": "the rejected insert leaves no row and no queued retry",
+      "state": "syncing",
+      "cursor": "100",
+      "storeAbsent": [
+        {
+          "model": "Task",
+          "id": "t9"
+        }
+      ],
+      "outbox": [],
+      "transport": {
+        "mutateCount": 2
+      }
+    }
+  ]
+}

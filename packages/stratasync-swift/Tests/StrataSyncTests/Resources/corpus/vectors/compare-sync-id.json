@@ -1,0 +1,55 @@
+{
+  "fn": "compareSyncId",
+  "description": "Ordering of two wire-encoded sync IDs. Sync IDs are decimal strings that outgrow 2^53, so an implementation that parses them as a double is wrong here. Expected is the SIGN of the comparison (-1, 0, 1); the magnitude an implementation returns is not part of the contract.",
+  "cases": [
+    { "name": "equal", "input": ["1", "1"], "expected": 0 },
+    { "name": "less than, same length", "input": ["1", "2"], "expected": -1 },
+    { "name": "greater than, same length", "input": ["9", "8"], "expected": 1 },
+    { "name": "zero against zero", "input": ["0", "0"], "expected": 0 },
+    { "name": "zero is smallest", "input": ["0", "1"], "expected": -1 },
+    {
+      "name": "longer is larger, not lexicographically smaller",
+      "input": ["10", "9"],
+      "expected": 1
+    },
+    { "name": "shorter is smaller", "input": ["9", "100"], "expected": -1 },
+    {
+      "name": "leading zeros are insignificant",
+      "input": ["007", "7"],
+      "expected": 0
+    },
+    {
+      "name": "leading zeros do not make a value longer",
+      "input": ["0009", "10"],
+      "expected": -1
+    },
+    {
+      "name": "all zeros normalizes to zero",
+      "input": ["000", "0"],
+      "expected": 0
+    },
+    {
+      "name": "beyond 2^53: differs only in the last digit",
+      "input": ["9007199254740993", "9007199254740992"],
+      "expected": 1
+    },
+    {
+      "name": "beyond 2^53: a double would call these equal",
+      "input": ["9007199254740993", "9007199254740993"],
+      "expected": 0
+    },
+    {
+      "name": "far beyond 2^53",
+      "input": ["18446744073709551616", "18446744073709551615"],
+      "expected": 1
+    },
+    {
+      "name": "very long values compare by magnitude",
+      "input": [
+        "100000000000000000000000000000",
+        "99999999999999999999999999999"
+      ],
+      "expected": 1
+    }
+  ]
+}

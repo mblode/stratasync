@@ -74,7 +74,9 @@ const main = async (): Promise<number> => {
 
   const result = await runScenario(scenario);
   emit(result);
-  return result.ok ? 0 : 1;
+  // The protocol carries a scenario failure in `ok`; non-zero means
+  // the driver could not execute (invalid input or a crash).
+  return 0;
 };
 
 main()

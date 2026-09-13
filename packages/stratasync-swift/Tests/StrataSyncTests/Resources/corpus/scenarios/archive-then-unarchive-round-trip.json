@@ -1,0 +1,129 @@
+{
+  "id": "archive-then-unarchive-round-trip",
+  "description": "Archiving is a field write, not a delete: the row stays addressable with archivedAt stamped from the injected clock, the A action confirms it, and unarchiving clears the stamp. The timestamps are a determinism check — only advanceClock can move them.",
+  "requires": ["bootstrap", "outbox", "archive", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_archive", "tx_unarchive"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "archivedAt": "optionalDate"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "Live task",
+            "archivedAt": null
+          }
+        }
+      ]
+    },
+    { "op": "start", "groups": ["w1"] },
+    { "op": "socketOpen" },
+    { "op": "mutate", "action": "ARCHIVE", "model": "Task", "modelId": "t1" },
+    {
+      "op": "expect",
+      "label": "archivedAt is stamped from the injected clock, not the host clock",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "Live task", "archivedAt": 1700000000000 }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_archive",
+          "action": "ARCHIVE",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ]
+    },
+    { "op": "advanceClock", "ms": 50 },
+    { "op": "ackMutation", "clientTxId": "tx_archive", "syncId": "101" },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "A",
+            "clientId": "c_test",
+            "clientTxId": "tx_archive",
+            "data": { "archivedAt": 1700000000000 }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "the archive is confirmed and the row is still addressable",
+      "cursor": "101",
+      "outbox": [],
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "Live task", "archivedAt": 1700000000000 }
+        }
+      ]
+    },
+    { "op": "mutate", "action": "UNARCHIVE", "model": "Task", "modelId": "t1" },
+    { "op": "advanceClock", "ms": 50 },
+    { "op": "ackMutation", "clientTxId": "tx_unarchive", "syncId": "102" },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "102",
+        "actions": [
+          {
+            "syncId": "102",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "V",
+            "clientId": "c_test",
+            "clientTxId": "tx_unarchive",
+            "data": { "archivedAt": null }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "unarchiving clears the stamp",
+      "cursor": "102",
+      "outbox": [],
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": { "title": "Live task", "archivedAt": null }
+        }
+      ],
+      "transport": { "mutateCount": 2 }
+    }
+  ]
+}
