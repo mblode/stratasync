@@ -20,7 +20,7 @@ All eleven current engine scenarios and seven client wire-vector groups run agai
 
 Implemented: full bootstrap/hydration, decimal-string cursors, delta ordering, optimistic overlay, durable outbox checkpointing, replay with stable IDs, acknowledgment versus cursor confirmation, rejection rollback, field conflicts with server-wins resolution, archive/unarchive, catch-up pagination, schema invalidation, injected scheduling and generation fences on late callbacks.
 
-This is **not yet an Android-ready replacement for the entire Swift/TypeScript SDK**. Missing: Android SQLite and HTTP/WebSocket adapters, automatic account routing, membership-change reconciliation, lazy/partial loading, observation/Flow integration, history/undo and CRDT support. Unsupported extension actions stop the engine without advancing the cursor. Do not use it for production private-project data until membership revocation and cache isolation have their own implementation and tests. The conformance corpus is a baseline, not an exhaustive protocol specification.
+This is **not yet an Android-ready replacement for the entire Swift/TypeScript SDK**. Missing: Android SQLite and HTTP/WebSocket adapters, automatic account routing, lazy/partial loading, observation/Flow integration, history/undo and CRDT support. G/S membership events quarantine visible rows durably and replace the snapshot. Pending targets absent from the replacement remain withheld in the outbox and cannot render or replay; coverage actions advance the cursor without creating models. Six privacy tests cover restart, failed persistence, late acknowledgments and withheld replay. The host must still isolate account storage, clear it on sign-out, and gate reopened caches with `start(groups, freshSnapshot = true)` after unknown access/storage failures. The conformance corpus is a baseline, not an exhaustive protocol specification.
 
 ## Ownership and adapters
 
@@ -32,7 +32,7 @@ This is **not yet an Android-ready replacement for the entire Swift/TypeScript S
 
 Transport methods must return promptly, run network I/O outside the caller thread and complete exactly once. Callbacks are serialized by the engine; responses after stop/restart are discarded. Transport transaction objects use the SDK's semantic fields (`model`, `modelId`, spelled-out `action`, `payload`, `clientTxId`); an HTTP adapter must map these to the server request shape and handle auth without embedding credentials in checkpoints. Network failures retry; authentication failures stop and require host recovery.
 
-`SystemSyncRuntime` owns a scheduler; close it when discarding its engine. Tests use an injected clock and seeded IDs. The host observes `rows()`, `snapshot()`, `state` and `lastError`; a lifecycle-aware Flow adapter is still required for Compose.
+`SystemSyncRuntime` owns a scheduler; close it when discarding its engine. Tests use an injected clock and seeded IDs. `refresh()` supports foreground REST polling through the same serialized catch-up path. The host observes `rows()`, `snapshot()`, `state` and `lastError`; a lifecycle-aware Flow adapter is still required for Compose.
 
 ## Publishing
 
