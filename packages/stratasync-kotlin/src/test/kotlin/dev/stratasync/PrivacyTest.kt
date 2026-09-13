@@ -63,6 +63,17 @@ class PrivacyTest {
         val next = SyncEngine(models, storage, nextTransport, runtime(), "c1")
         next.start(emptyList(), freshSnapshot = true); assertTrue(next.rows().isEmpty())
     }
+    @Test fun hostMayReauthorizeOnlyAbsentInsertsAgainstFreshBootstrap() {
+        val transport = ScriptedTransport().apply {
+            bootstraps.add(Bootstrap(emptyList(), "100")); bootstraps.add(Bootstrap(emptyList(), "102", listOf("w1")))
+        }
+        val engine = SyncEngine(models, MemorySyncStorage(), transport, runtime(), "c1", canReplayAbsentInsert = { tx, snapshot ->
+            tx["payload"]!!.jsonObject.optionalString("workspaceId") in snapshot.authorizedGroups.orEmpty()
+        })
+        engine.start(emptyList()); engine.mutate("INSERT", "Task", "new", obj("""{"workspaceId":"w1","title":"offline"}"""))
+        transport.deliver(event)
+        assertEquals("new", engine.rows().single().string("id")); assertEquals(1, transport.counts["mutateCount"])
+    }
     @Test fun coverageActionAdvancesCursorWithoutCreatingAModel() {
         val transport = ScriptedTransport().apply { bootstraps.add(Bootstrap(emptyList(), "100")) }
         val engine = SyncEngine(models, MemorySyncStorage(), transport, runtime(), "c1")

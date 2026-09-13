@@ -10,7 +10,7 @@ interface SyncTransport {
     fun mutate(clientId: String, transactions: List<JsonObject>, complete: (Result<List<MutationResult>>) -> Unit)
     fun subscribe(cursor: String, groups: List<String>, onPacket: (JsonObject) -> Unit, onConnection: (Boolean) -> Unit): Cancellation
 }
-data class Bootstrap(val rows: List<JsonObject>, val lastSyncId: String)
+data class Bootstrap(val rows: List<JsonObject>, val lastSyncId: String, val authorizedGroups: List<String>? = null)
 data class MutationResult(val clientTxId: String, val syncId: String? = null, val error: String? = null)
 class BootstrapRequired : Exception("Server requires a new snapshot")
 class AuthenticationRequired : Exception("Authentication required")
@@ -26,6 +26,7 @@ class SyncEngine(
     private val transport: SyncTransport,
     private val runtime: SyncRuntime,
     private val clientId: String,
+    private val canReplayAbsentInsert: (JsonObject, Bootstrap) -> Boolean = { _, _ -> false },
 ) {
     private var checkpoint = storage.read()
     private var privacyHidden = checkpoint.meta["privacyPending"] == JsonPrimitive(true)
@@ -120,7 +121,8 @@ class SyncEngine(
                     }
                     val outbox = if (privacyHidden) checkpoint.outbox.map { tx ->
                         val present = response.rows.any { it.string("model") == tx.string("model") && it.string("id") == tx.string("modelId") }
-                        patch(tx, "status" to JsonPrimitive(if (present) "pending" else "withheld"))
+                        val authorizedInsert = tx.string("action") == "INSERT" && canReplayAbsentInsert(tx, response)
+                        patch(tx, "status" to JsonPrimitive(if (present || authorizedInsert) "pending" else "withheld"))
                     } else checkpoint.outbox
                     persist(Checkpoint(response.rows, outbox, meta))
                     privacyHidden = false
