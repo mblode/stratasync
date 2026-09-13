@@ -76,5 +76,5 @@ Layer 4: next (depends on client, core, react)
 - `npm run test:kotlin`: canonical corpus integrity and JVM conformance/recovery tests (JDK 21).
 - `npm run test:swift:consumer`: isolated Git SwiftPM consumer.
 - Native CI and lefthook invoke the same commands. Kotlin fixture publication and consumer resolution also run in CI.
-- Done Bear currently keeps a generated frozen SDK snapshot until a pinned remote SwiftPM release exists. Edit canonical Swift source here, never the snapshot.
+- Done Bear consumes this repository directly through SwiftPM at an immutable revision. Edit SDK source here; upgrading the consumer requires updating its Xcode project and Package.resolved, then running iOS tests/build.
 - Shared scenario coverage is Swift 11/11 and Kotlin 11/11. Both also run seven client wire-vector groups. Passing this corpus does not imply feature parity beyond its cases.

@@ -1,6 +1,6 @@
 # StrataSync Swift
 
-Canonical Apple-platform local-first sync engine. SwiftPM entry point is ../../Package.swift. Done Bear consumes a temporary frozen snapshot until a pinned remote release exists.
+Canonical Apple-platform local-first sync engine. SwiftPM entry point is ../../Package.swift. Done Bear consumes this repository directly through SwiftPM, pinned to an immutable revision.
 
 ## Commands
 
