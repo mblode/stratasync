@@ -1,0 +1,475 @@
+{
+  "fn": "parseSyncAction",
+  "description": "Decoding one sync-log action off the delta wire. `input` is the raw JSON object; `expected` is the decoded action, with keys that were not set left ABSENT rather than null. The log spells an action as a single letter (I insert, U update, D delete, A archive, V unarchive) plus the extension letters C, G and S; this is deliberately not how the same action is spelled in a mutation request, which uses INSERT/UPDATE/DELETE/ARCHIVE/UNARCHIVE (see map-graphql-action.json). `createdAt` is written here as its ISO-8601 string: an implementation that decodes it to a date type converts to ISO-8601 UTC before comparing.",
+  "cases": [
+    {
+      "name": "insert",
+      "input": [
+        {
+          "action": "I",
+          "data": { "title": "Bug fix" },
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "1"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "data": { "title": "Bug fix" },
+        "id": "1",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "update",
+      "input": [
+        {
+          "action": "U",
+          "data": { "status": "closed" },
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "2"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": { "status": "closed" },
+        "id": "2",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "archive",
+      "input": [
+        {
+          "action": "A",
+          "data": { "archivedAt": 1736899200000 },
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "3"
+        }
+      ],
+      "expected": {
+        "action": "A",
+        "data": { "archivedAt": 1736899200000 },
+        "id": "3",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "unarchive",
+      "input": [
+        {
+          "action": "V",
+          "data": { "archivedAt": null },
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "4"
+        }
+      ],
+      "expected": {
+        "action": "V",
+        "data": { "archivedAt": null },
+        "id": "4",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "delete with no data at all",
+      "input": [
+        { "action": "D", "modelId": "t1", "modelName": "Task", "syncId": "5" }
+      ],
+      "expected": {
+        "action": "D",
+        "data": {},
+        "id": "5",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "delete with data null decodes the same as no data",
+      "input": [
+        {
+          "action": "D",
+          "data": null,
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "6"
+        }
+      ],
+      "expected": {
+        "action": "D",
+        "data": {},
+        "id": "6",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "delete with data an empty object",
+      "input": [
+        {
+          "action": "D",
+          "data": {},
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "7"
+        }
+      ],
+      "expected": {
+        "action": "D",
+        "data": {},
+        "id": "7",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "a scalar data is discarded, not coerced",
+      "input": [
+        {
+          "action": "U",
+          "data": "title=x",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "8"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": {},
+        "id": "8",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "an array data is discarded",
+      "input": [
+        {
+          "action": "U",
+          "data": [{ "title": "x" }],
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "9"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": {},
+        "id": "9",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "extension action C",
+      "input": [
+        { "action": "C", "modelId": "t1", "modelName": "Task", "syncId": "27" }
+      ],
+      "expected": {
+        "action": "C",
+        "data": {},
+        "id": "27",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "extension action G",
+      "input": [
+        {
+          "action": "G",
+          "modelId": "u1",
+          "modelName": "SyncGroups",
+          "syncId": "28"
+        }
+      ],
+      "expected": {
+        "action": "G",
+        "data": {},
+        "id": "28",
+        "modelId": "u1",
+        "modelName": "SyncGroups"
+      }
+    },
+    {
+      "name": "extension action S",
+      "input": [
+        { "action": "S", "modelId": "t1", "modelName": "Task", "syncId": "29" }
+      ],
+      "expected": {
+        "action": "S",
+        "data": {},
+        "id": "29",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "unknown action letter",
+      "input": [
+        { "action": "X", "modelId": "t1", "modelName": "Task", "syncId": "10" }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a lowercase action letter is not the same action",
+      "input": [
+        { "action": "i", "modelId": "t1", "modelName": "Task", "syncId": "11" }
+      ],
+      "throws": true
+    },
+    {
+      "name": "the spelled-out mutation name is not a log action",
+      "input": [
+        {
+          "action": "INSERT",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "12"
+        }
+      ],
+      "throws": true
+    },
+    {
+      "name": "an empty action",
+      "input": [
+        { "action": "", "modelId": "t1", "modelName": "Task", "syncId": "13" }
+      ],
+      "throws": true
+    },
+    {
+      "name": "a non-string action",
+      "input": [
+        { "action": 1, "modelId": "t1", "modelName": "Task", "syncId": "14" }
+      ],
+      "throws": true
+    },
+    {
+      "name": "id is the fallback spelling of syncId",
+      "input": [
+        { "action": "I", "id": "15", "modelId": "t1", "modelName": "Task" }
+      ],
+      "expected": {
+        "action": "I",
+        "data": {},
+        "id": "15",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "syncId wins when both spellings are present",
+      "input": [
+        {
+          "action": "I",
+          "id": "99",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "16"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "data": {},
+        "id": "16",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "a sync id beyond 2^53 survives decoding",
+      "input": [
+        {
+          "action": "I",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "9007199254740993"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "data": {},
+        "id": "9007199254740993",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "a numeric sync id is rejected, not coerced",
+      "input": [
+        { "action": "I", "id": 4, "modelId": "t1", "modelName": "Task" }
+      ],
+      "throws": true
+    },
+    {
+      "name": "missing sync id",
+      "input": [{ "action": "I", "modelId": "t1", "modelName": "Task" }],
+      "throws": true
+    },
+    {
+      "name": "missing modelName",
+      "input": [{ "action": "I", "modelId": "t1", "syncId": "17" }],
+      "throws": true
+    },
+    {
+      "name": "missing modelId",
+      "input": [{ "action": "I", "modelName": "Task", "syncId": "18" }],
+      "throws": true
+    },
+    {
+      "name": "missing action",
+      "input": [{ "modelId": "t1", "modelName": "Task", "syncId": "19" }],
+      "throws": true
+    },
+    {
+      "name": "idempotency keys are echoed back",
+      "input": [
+        {
+          "action": "U",
+          "clientId": "c_abc123",
+          "clientTxId": "tx_def456",
+          "data": { "status": "closed" },
+          "groupId": "team_9f2",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "20"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "clientId": "c_abc123",
+        "clientTxId": "tx_def456",
+        "data": { "status": "closed" },
+        "groupId": "team_9f2",
+        "id": "20",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "non-string idempotency keys are dropped, not coerced",
+      "input": [
+        {
+          "action": "U",
+          "clientId": 7,
+          "clientTxId": null,
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "21"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": {},
+        "id": "21",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "groups keeps only its string members",
+      "input": [
+        {
+          "action": "U",
+          "groups": ["g1", 5, "g2", null],
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "22"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": {},
+        "groups": ["g1", "g2"],
+        "id": "22",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "a non-array groups is absent, not empty",
+      "input": [
+        {
+          "action": "U",
+          "groups": "g1",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "23"
+        }
+      ],
+      "expected": {
+        "action": "U",
+        "data": {},
+        "id": "23",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "createdAt as an ISO-8601 string",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "24"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "data": {},
+        "id": "24",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "createdAt as epoch milliseconds",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": 1736899200000,
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "25"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "createdAt": "2025-01-15T00:00:00.000Z",
+        "data": {},
+        "id": "25",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    },
+    {
+      "name": "an unparseable createdAt is dropped rather than failing the action",
+      "input": [
+        {
+          "action": "I",
+          "createdAt": "not a date",
+          "modelId": "t1",
+          "modelName": "Task",
+          "syncId": "26"
+        }
+      ],
+      "expected": {
+        "action": "I",
+        "data": {},
+        "id": "26",
+        "modelId": "t1",
+        "modelName": "Task"
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "implementation": "stratasync-kotlin",
+  "language": "kotlin",
+  "protocolVersion": 1,
+  "corpusVersion": "2.5.1",
+  "capabilities": [
+    "bootstrap",
+    "websocket",
+    "deltaFetch",
+    "outbox",
+    "rebase",
+    "archive",
+    "schemaHashGating"
+  ],
+  "notes": {
+    "syncGroups": "Not implemented: membership-change actions fail closed. Do not use this initial SDK for production private-project synchronization yet.",
+    "partialLoad": "Not implemented.",
+    "undoRedo": "Not implemented.",
+    "crdt": "Not implemented.",
+    "loadStrategies": "Full snapshot only; no lazy or partial loading."
+  }
+}

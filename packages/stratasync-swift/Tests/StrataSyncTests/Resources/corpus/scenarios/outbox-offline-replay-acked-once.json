@@ -1,0 +1,139 @@
+{
+  "id": "outbox-offline-replay-acked-once",
+  "description": "A mutation made while the transport is down stays queued, is replayed once on reconnect, and the server ack moves it to awaiting-sync rather than sending it a second time.",
+  "requires": ["bootstrap", "outbox", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_offline_1"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": []
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "expect",
+      "label": "bootstrapped with an empty outbox",
+      "state": "syncing",
+      "cursor": "100",
+      "outbox": [],
+      "transport": {
+        "bootstrapCount": 1,
+        "mutateCount": 0
+      }
+    },
+    {
+      "op": "socketClose",
+      "code": 1006
+    },
+    {
+      "op": "transportError",
+      "kind": "network",
+      "on": "mutate"
+    },
+    {
+      "op": "mutate",
+      "action": "INSERT",
+      "model": "Task",
+      "modelId": "t1",
+      "payload": {
+        "workspaceId": "w1",
+        "title": "written offline",
+        "sortOrder": 10
+      }
+    },
+    {
+      "op": "expect",
+      "label": "the local change is optimistic and queued, nothing sent yet",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "written offline"
+          }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_offline_1",
+          "action": "INSERT",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ],
+      "transport": {
+        "mutateCount": 0
+      }
+    },
+    {
+      "op": "advanceClock",
+      "ms": 50
+    },
+    {
+      "op": "expect",
+      "label": "the send failed offline, so the entry is queued again \u2014 not dropped",
+      "outbox": [
+        {
+          "clientTxId": "tx_offline_1",
+          "action": "INSERT",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ],
+      "transport": {
+        "mutateCount": 1,
+        "deltaFetchCount": 0
+      }
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "ackMutation",
+      "clientTxId": "tx_offline_1",
+      "syncId": "101"
+    },
+    {
+      "op": "expect",
+      "label": "reconnect replays it exactly once and the ack parks it awaiting the cursor",
+      "state": "syncing",
+      "outbox": [
+        {
+          "clientTxId": "tx_offline_1",
+          "action": "INSERT",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "inflight"
+        }
+      ],
+      "transport": {
+        "mutateCount": 2,
+        "deltaFetchCount": 1
+      }
+    }
+  ]
+}

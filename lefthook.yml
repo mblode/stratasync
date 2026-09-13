@@ -13,3 +13,14 @@ pre-commit:
       run: npx oxlint --fix {staged_files}
       stage_fixed: true
       fail_text: "Lint errors found that could not be auto-fixed."
+    # Rung 1: byte-exact corpus resources and real native suites. CI runs the
+    # same npm commands, so an unavailable local toolchain is not a silent pass.
+    - name: native-corpus
+      glob: "{Package.swift,packages/conformance/**,packages/stratasync-swift/**,scripts/check-native-corpus.mjs}"
+      run: npm run native:corpus:check
+    - name: swift-sdk
+      glob: "{Package.swift,packages/stratasync-swift/**,packages/conformance/corpus/**}"
+      run: npm run test:swift
+    - name: kotlin-sdk
+      glob: "{packages/stratasync-kotlin/**,packages/conformance/corpus/**}"
+      run: npm run test:kotlin

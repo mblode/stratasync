@@ -1,0 +1,91 @@
+{
+  "id": "cursor-too-old-forces-rebootstrap",
+  "description": "The server answers a delta fetch with bootstrapRequired: the client's cursor has fallen off the retained window. The client must take a fresh snapshot rather than retrying the fetch, and must not keep retrying once the snapshot lands.",
+  "requires": ["bootstrap", "deltaFetch", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "From the first snapshot",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    { "op": "start", "groups": ["w1"] },
+    { "op": "socketOpen" },
+    {
+      "op": "expect",
+      "label": "steady state on the first snapshot",
+      "state": "syncing",
+      "cursor": "100",
+      "transport": { "bootstrapCount": 1, "deltaFetchCount": 0 }
+    },
+    { "op": "socketClose", "code": 1006 },
+    { "op": "transportError", "kind": "bootstrapRequired", "on": "deltas" },
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "900",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": {
+            "id": "t2",
+            "workspaceId": "w1",
+            "title": "From the replacement snapshot",
+            "sortOrder": 20
+          }
+        }
+      ]
+    },
+    { "op": "socketOpen" },
+    {
+      "op": "expect",
+      "label": "the catch-up fetch was answered with bootstrapRequired, so a second snapshot replaced the store",
+      "state": "syncing",
+      "cursor": "900",
+      "transport": { "bootstrapCount": 2, "deltaFetchCount": 1 },
+      "store": [
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": { "title": "From the replacement snapshot" }
+        }
+      ],
+      "storeAbsent": [{ "model": "Task", "id": "t1" }],
+      "storage": { "bootstrapComplete": true, "lastSyncId": "900" }
+    },
+    { "op": "advanceClock", "ms": 60000 },
+    {
+      "op": "expect",
+      "label": "recovery is one-shot: no retry loop of fetches or snapshots",
+      "state": "syncing",
+      "cursor": "900",
+      "transport": { "bootstrapCount": 2, "deltaFetchCount": 1 }
+    }
+  ]
+}

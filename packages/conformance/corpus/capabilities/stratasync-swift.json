@@ -1,0 +1,22 @@
+{
+  "implementation": "stratasync-swift",
+  "language": "swift",
+  "protocolVersion": 1,
+  "corpusVersion": "2.5.1",
+  "capabilities": [
+    "bootstrap",
+    "websocket",
+    "deltaFetch",
+    "outbox",
+    "rebase",
+    "archive",
+    "schemaHashGating"
+  ],
+  "notes": {
+    "syncGroups": "Existing local privacy tests; not declared until a shared scenario exercises membership changes.",
+    "undoRedo": "Existing local history tests; no shared corpus scenario yet.",
+    "partialLoad": "Not declared by the shared scenario driver.",
+    "loadStrategies": "Not declared by the shared scenario driver.",
+    "crdt": "Not implemented."
+  }
+}

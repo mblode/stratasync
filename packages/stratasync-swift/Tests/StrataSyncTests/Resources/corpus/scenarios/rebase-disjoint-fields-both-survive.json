@@ -1,0 +1,122 @@
+{
+  "id": "rebase-disjoint-fields-both-survive",
+  "description": "A local optimistic update and a server delta touch the same row but different fields. Field-level conflict detection means neither is rolled back: the server field lands and the pending local field is re-applied on top.",
+  "requires": ["bootstrap", "outbox", "rebase", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000,
+    "txIds": ["tx_rebase_disjoint"]
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "id": "t1",
+            "workspaceId": "w1",
+            "title": "Bootstrapped title",
+            "sortOrder": 10
+          }
+        }
+      ]
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "mutate",
+      "action": "UPDATE",
+      "model": "Task",
+      "modelId": "t1",
+      "payload": {
+        "sortOrder": 20
+      }
+    },
+    {
+      "op": "expect",
+      "label": "the local field is optimistic and pending",
+      "cursor": "100",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Bootstrapped title",
+            "sortOrder": 20
+          }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_rebase_disjoint",
+          "action": "UPDATE",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "op": "deliverDelta",
+      "packet": {
+        "lastSyncId": "101",
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "U",
+            "clientId": "c_other",
+            "data": {
+              "title": "Renamed by someone else"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "expect",
+      "label": "disjoint fields do not conflict: server title, local sortOrder, mutation still pending",
+      "cursor": "101",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Renamed by someone else",
+            "sortOrder": 20
+          }
+        }
+      ],
+      "outbox": [
+        {
+          "clientTxId": "tx_rebase_disjoint",
+          "action": "UPDATE",
+          "model": "Task",
+          "modelId": "t1",
+          "status": "pending"
+        }
+      ]
+    }
+  ]
+}

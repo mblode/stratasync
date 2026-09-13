@@ -1,0 +1,206 @@
+{
+  "fn": "buildInsertData",
+  "description": "Building the row an INSERT mutation writes, from the request payload and the model's field specs. Positional arguments: the model id (null to let the store assign one), the payload, and the field specs by column. The SHAPE IS DRIVEN BY THE FIELD SPECS, not by the payload: every declared column appears in the result even when the payload omitted it, and a payload key with no spec is dropped. Each codec kind has its own answer for an absent or null value — `stringNull` yields null, `number` yields its default or 0, `string` yields its default and is otherwise left unset, and the temporal kinds yield null. A key whose value the reference implementation leaves unset is written here as an ABSENT key, since no port has a second empty value to distinguish from null. Dates are written as ISO-8601 strings. The `dateNow` kind reads the wall clock when its value is absent and so is only pinned here with an explicit value.",
+  "cases": [
+    {
+      "name": "a supplied model id becomes the row id",
+      "input": [
+        "t1",
+        { "title": "Bug fix" },
+        { "title": { "type": "string" } }
+      ],
+      "expected": { "id": "t1", "title": "Bug fix" }
+    },
+    {
+      "name": "a null model id leaves the row id unset",
+      "input": [
+        null,
+        { "title": "Bug fix" },
+        { "title": { "type": "string" } }
+      ],
+      "expected": { "title": "Bug fix" }
+    },
+    {
+      "name": "a payload key with no field spec is dropped",
+      "input": [
+        "t1",
+        { "sneaky": "drop me", "title": "Bug fix" },
+        { "title": { "type": "string" } }
+      ],
+      "expected": { "id": "t1", "title": "Bug fix" }
+    },
+    {
+      "name": "string: absent with no default is left unset",
+      "input": ["t1", {}, { "title": { "type": "string" } }],
+      "expected": { "id": "t1" }
+    },
+    {
+      "name": "string: absent falls back to the default",
+      "input": [
+        "t1",
+        {},
+        { "title": { "defaultValue": "Untitled", "type": "string" } }
+      ],
+      "expected": { "id": "t1", "title": "Untitled" }
+    },
+    {
+      "name": "string: null falls back to the default, same as absent",
+      "input": [
+        "t1",
+        { "title": null },
+        { "title": { "defaultValue": "Untitled", "type": "string" } }
+      ],
+      "expected": { "id": "t1", "title": "Untitled" }
+    },
+    {
+      "name": "string: an empty string is a value, not an absent field",
+      "input": [
+        "t1",
+        { "title": "" },
+        { "title": { "defaultValue": "Untitled", "type": "string" } }
+      ],
+      "expected": { "id": "t1", "title": "" }
+    },
+    {
+      "name": "stringNull: absent is null, not unset",
+      "input": ["t1", {}, { "note": { "type": "stringNull" } }],
+      "expected": { "id": "t1", "note": null }
+    },
+    {
+      "name": "stringNull: null stays null",
+      "input": ["t1", { "note": null }, { "note": { "type": "stringNull" } }],
+      "expected": { "id": "t1", "note": null }
+    },
+    {
+      "name": "stringNull: a default does not apply",
+      "input": [
+        "t1",
+        {},
+        { "note": { "defaultValue": "n/a", "type": "stringNull" } }
+      ],
+      "expected": { "id": "t1", "note": null }
+    },
+    {
+      "name": "stringNull: a value passes through",
+      "input": ["t1", { "note": "hi" }, { "note": { "type": "stringNull" } }],
+      "expected": { "id": "t1", "note": "hi" }
+    },
+    {
+      "name": "number: absent with no default is zero",
+      "input": ["t1", {}, { "rank": { "type": "number" } }],
+      "expected": { "id": "t1", "rank": 0 }
+    },
+    {
+      "name": "number: absent falls back to the default",
+      "input": [
+        "t1",
+        {},
+        { "rank": { "defaultValue": 100, "type": "number" } }
+      ],
+      "expected": { "id": "t1", "rank": 100 }
+    },
+    {
+      "name": "number: null falls back to the default, same as absent",
+      "input": [
+        "t1",
+        { "rank": null },
+        { "rank": { "defaultValue": 100, "type": "number" } }
+      ],
+      "expected": { "id": "t1", "rank": 100 }
+    },
+    {
+      "name": "number: zero is a value, not an absent field",
+      "input": [
+        "t1",
+        { "rank": 0 },
+        { "rank": { "defaultValue": 100, "type": "number" } }
+      ],
+      "expected": { "id": "t1", "rank": 0 }
+    },
+    {
+      "name": "number: a negative value passes through",
+      "input": ["t1", { "rank": -5 }, { "rank": { "type": "number" } }],
+      "expected": { "id": "t1", "rank": -5 }
+    },
+    {
+      "name": "date: absent is null",
+      "input": ["t1", {}, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null, "id": "t1" }
+    },
+    {
+      "name": "date: null is null",
+      "input": ["t1", { "dueAt": null }, { "dueAt": { "type": "date" } }],
+      "expected": { "dueAt": null, "id": "t1" }
+    },
+    {
+      "name": "date: epoch milliseconds",
+      "input": [
+        "t1",
+        { "dueAt": 1736899200000 },
+        { "dueAt": { "type": "date" } }
+      ],
+      "expected": { "dueAt": "2025-01-15T00:00:00.000Z", "id": "t1" }
+    },
+    {
+      "name": "date: an ISO-8601 string is rejected",
+      "input": [
+        "t1",
+        { "dueAt": "2026-01-01T00:00:00.000Z" },
+        { "dueAt": { "type": "date" } }
+      ],
+      "throws": true
+    },
+    {
+      "name": "dateOnly: absent is null",
+      "input": ["t1", {}, { "dueOn": { "type": "dateOnly" } }],
+      "expected": { "dueOn": null, "id": "t1" }
+    },
+    {
+      "name": "dateOnly: UTC midnight",
+      "input": [
+        "t1",
+        { "dueOn": 1736899200000 },
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "expected": { "dueOn": "2025-01-15T00:00:00.000Z", "id": "t1" }
+    },
+    {
+      "name": "dateOnly: a mid-day epoch is rejected",
+      "input": [
+        "t1",
+        { "dueOn": 1736942400000 },
+        { "dueOn": { "type": "dateOnly" } }
+      ],
+      "throws": true
+    },
+    {
+      "name": "dateNow: an explicit value is honoured over the clock",
+      "input": [
+        "t1",
+        { "createdAt": 1736899200000 },
+        { "createdAt": { "type": "dateNow" } }
+      ],
+      "expected": { "createdAt": "2025-01-15T00:00:00.000Z", "id": "t1" }
+    },
+    {
+      "name": "every declared column appears even when the payload is empty",
+      "input": [
+        "t1",
+        {},
+        {
+          "dueAt": { "type": "date" },
+          "note": { "type": "stringNull" },
+          "rank": { "type": "number" },
+          "title": { "defaultValue": "Untitled", "type": "string" }
+        }
+      ],
+      "expected": {
+        "dueAt": null,
+        "id": "t1",
+        "note": null,
+        "rank": 0,
+        "title": "Untitled"
+      }
+    }
+  ]
+}
