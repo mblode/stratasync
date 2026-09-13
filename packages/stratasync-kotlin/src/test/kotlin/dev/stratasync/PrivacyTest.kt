@@ -73,6 +73,7 @@ class PrivacyTest {
         engine.start(emptyList()); engine.mutate("INSERT", "Task", "new", obj("""{"workspaceId":"w1","title":"offline"}"""))
         transport.deliver(event)
         assertEquals("new", engine.rows().single().string("id")); assertEquals(1, transport.counts["mutateCount"])
+        assertEquals(JsonArray(listOf(JsonPrimitive("w1"))), engine.snapshot().meta["authorizedGroups"])
     }
     @Test fun coverageActionAdvancesCursorWithoutCreatingAModel() {
         val transport = ScriptedTransport().apply { bootstraps.add(Bootstrap(emptyList(), "100")) }

@@ -117,6 +117,7 @@ class SyncEngine(
                     for (row in response.rows) { require(row.string("model") in modelNames); row.string("id"); row["fields"]!!.jsonObject }
                     val meta = buildJsonObject {
                         put("clientId", clientId); put("lastSyncId", response.lastSyncId); put("firstSyncId", response.lastSyncId)
+                        response.authorizedGroups?.let { put("authorizedGroups", JsonArray(it.map(::JsonPrimitive))) }
                         put("schemaHash", schemaHash); put("bootstrapComplete", true); put("subscribedGroups", JsonArray(groups.map(::JsonPrimitive)))
                     }
                     val outbox = if (privacyHidden) checkpoint.outbox.map { tx ->
