@@ -14,10 +14,19 @@ import { siteConfig, zoneRootJsonLd } from "../lib/config.ts";
 const read = (relativePath: string) =>
   readFileSync(path.join(process.cwd(), relativePath), "utf8");
 
-assert.ok(siteConfig.title.startsWith(siteConfig.heading));
+assert.ok(
+  siteConfig.title.startsWith(`${siteConfig.name}:`),
+  "zone root title must be Rule 8 Product: what it does"
+);
 assert.ok(siteConfig.title.length <= 60, "title exceeds 60 characters");
+assert.match(siteConfig.title, /Linear/u);
+assert.match(siteConfig.title, /TypeScript/u);
+assert.ok(
+  siteConfig.description.length <= 160,
+  "description exceeds 160 characters"
+);
 assert.match(siteConfig.heading, /^Local-first sync engine for TypeScript$/u);
-assert.match(siteConfig.description, /local-first TypeScript/u);
+assert.match(siteConfig.description, /local-first Linear sync engine for TypeScript/u);
 assert.match(siteConfig.answer, /developer library for application data sync/u);
 assert.match(siteConfig.answer, /not a network-management platform/u);
 
