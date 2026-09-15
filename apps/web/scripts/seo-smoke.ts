@@ -25,10 +25,23 @@ assert.ok(
   siteConfig.description.length <= 160,
   "description exceeds 160 characters"
 );
-assert.match(siteConfig.heading, /^Local-first sync engine for TypeScript$/u);
-assert.match(siteConfig.description, /local-first Linear sync engine for TypeScript/u);
-assert.match(siteConfig.answer, /developer library for application data sync/u);
-assert.match(siteConfig.answer, /not a network-management platform/u);
+assert.match(
+  siteConfig.heading,
+  /^The local-first sync engine Linear never open-sourced$/u
+);
+assert.match(
+  siteConfig.description,
+  /local-first Linear sync engine for TypeScript/u
+);
+assert.match(siteConfig.answer, /Linear's sync engine for TypeScript/u);
+assert.match(
+  siteConfig.disambiguation,
+  /developer library for application data sync/u
+);
+assert.match(
+  siteConfig.disambiguation,
+  /Not a strata-management or network-management product/u
+);
 
 const schema = JSON.stringify(zoneRootJsonLd);
 assert.match(schema, new RegExp(siteConfig.heading, "u"));
@@ -49,8 +62,10 @@ assert.ok(
 );
 
 const docsHome = read("../docs/index.mdx");
-assert.match(docsHome, /title: Local-first sync engine for TypeScript/u);
-assert.match(docsHome, /not a network-management platform/u);
+assert.match(
+  docsHome,
+  /not a strata-management or network-management product/u
+);
 
 const openGraph = read("app/opengraph-image.tsx");
 assert.match(openGraph, /title: "Local-first sync engine for TypeScript"/u);
