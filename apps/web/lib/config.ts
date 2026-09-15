@@ -16,7 +16,7 @@ export const siteConfig = {
     "Strata Sync is an open-source implementation of Linear's sync engine for TypeScript. Local reads, offline writes, one server-ordered log, on your own Postgres. MIT.",
   /** Search snippet. Under 160 characters. */
   description:
-    "Open-source, local-first sync engine for TypeScript, React and Next.js: Linear's server-sequenced architecture on your own Postgres, with offline writes, Yjs and undo. MIT.",
+    "Open-source, local-first Linear sync engine for TypeScript, React and Next.js: server-sequenced on your own Postgres, with offline writes, Yjs and undo. MIT.",
   /**
    * Disambiguation for the "strata sync" query, which Search Console shows
    * mostly means strata (body-corporate) management software in Australia.
@@ -41,17 +41,17 @@ export const siteConfig = {
   },
   name: "Strata Sync",
   /**
-   * Browser tab and search title. Under 60 characters, category term first,
-   * brand last, so a "linear sync engine open source" result reads as the
-   * answer rather than a brand name nobody has searched for yet.
+   * Browser tab and search title. Under 60 characters. Brand first, then
+   * what it is (zone Rule 8: `Product: what it does`, colon not pipe), so
+   * brand queries that already rank around position 4–5 can match the snippet.
    */
-  title: "Open-source Linear sync engine for TypeScript | Strata Sync",
+  title: "Strata Sync: local-first Linear sync engine for TypeScript",
   /**
    * Last content revision, surfaced in the sitemap and JSON-LD. Bump when the
    * page copy changes; a `new Date()` here would claim a fresh edit on every
    * build.
    */
-  updatedAt: "2026-09-01",
+  updatedAt: "2026-09-15",
   url: "https://blode.co/stratasync",
 } as const;
 
