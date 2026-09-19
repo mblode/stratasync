@@ -2,5 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "turbo run build --filter=web",
   "outputDirectory": "apps/web/.next",
-  "ignoreCommand": "if [ \"$VERCEL_ENV\" = \"preview\" ]; then exit 0; fi; exit 1"
+  "ignoreCommand": "case \"$VERCEL_GIT_COMMIT_MESSAGE\" in *\"[skip ci]\"*) exit 0 ;; esac; if [ \"$VERCEL_ENV\" = \"preview\" ]; then exit 0; fi; exit 1"
 }
