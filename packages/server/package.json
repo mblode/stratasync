@@ -71,7 +71,10 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "dev": "tsc --watch -p tsconfig.build.json",
     "check-types": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:postgres": ": \"${STRATASYNC_TEST_DATABASE_URL:?Set an isolated local database URL}\" && vitest run tests/postgres",
+    "bench:delta": ": \"${STRATASYNC_TEST_DATABASE_URL:?Set an isolated local database URL}\" && DELTA_BENCHMARK=1 vitest run benchmarks/delta-read.bench.test.ts",
+    "check-types:postgres": "tsc -p tsconfig.postgres.json"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",
@@ -82,6 +85,7 @@
     "@stratasync/conformance": "*",
     "@types/node": "^25.5.0",
     "fastify": "^5.12.1",
+    "postgres": "^3.4.9",
     "redis": "^5.11.0",
     "ws": "^8.21.3"
   },
