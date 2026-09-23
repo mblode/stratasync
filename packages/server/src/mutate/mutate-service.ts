@@ -25,20 +25,39 @@ import type {
 const SYNC_ACTION_DEDUP_CONSTRAINT =
   "sync_actions_client_id_client_tx_id_unique";
 
+/**
+ * Whether `error` is the dedup unique violation on (clientId, clientTxId).
+ *
+ * drizzle-orm 1.x wraps every driver error in a DrizzleQueryError whose
+ * `cause` is the driver's error, so the cause chain is walked. node-postgres
+ * names the constraint `constraint`; postgres.js names it `constraint_name`.
+ */
 const isSyncDedupUniqueConstraintError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null) {
-    return false;
+  let current: unknown = error;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (typeof current !== "object" || current === null) {
+      return false;
+    }
+
+    const maybeError = current as {
+      cause?: unknown;
+      code?: unknown;
+      constraint?: unknown;
+      constraint_name?: unknown;
+    };
+
+    if (
+      maybeError.code === "23505" &&
+      (maybeError.constraint === SYNC_ACTION_DEDUP_CONSTRAINT ||
+        maybeError.constraint_name === SYNC_ACTION_DEDUP_CONSTRAINT)
+    ) {
+      return true;
+    }
+
+    current = maybeError.cause;
   }
 
-  const maybeError = error as {
-    code?: unknown;
-    constraint?: unknown;
-  };
-
-  return (
-    maybeError.code === "23505" &&
-    maybeError.constraint === SYNC_ACTION_DEDUP_CONSTRAINT
-  );
+  return false;
 };
 
 const formatWarningMessage = (error: unknown): string =>
@@ -546,6 +565,13 @@ export class MutateService {
       // Widen the batch's working groups only once the membership row has
       // actually committed, so later transactions in the same batch validate
       // against a group that exists. A rolled-back insert widens nothing.
+      // Publish before any further await. The DAO's advisory lock makes ids
+      // commit-ordered, and a live session drops any syncId at or below the
+      // highest one it has delivered — so an await between commit and publish
+      // (e.g. a slow onAfterMutation hook) would let a later commit publish
+      // first and the earlier action would never reach live clients.
+      MutateService.publishSyncAction(workResult.syncAction, onAction);
+
       if (
         workResult.grantedGroupId !== null &&
         !context.groups.includes(workResult.grantedGroupId)
@@ -585,8 +611,6 @@ export class MutateService {
           );
         }
       }
-
-      MutateService.publishSyncAction(workResult.syncAction, onAction);
 
       return {
         result: MutateService.createSuccessResult(

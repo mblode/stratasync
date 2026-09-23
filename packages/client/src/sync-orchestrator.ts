@@ -76,8 +76,10 @@ export class SyncOrchestrator {
   private deltaReplayGate = new Gate();
   /**
    * Serial executor for state-mutating work (mutations + delta application).
+   * Lives as long as the orchestrator: reset() never replaces it, so mutual
+   * exclusion holds across stop()/start().
    */
-  private stateQueue = new AsyncQueue();
+  private readonly stateQueue = new AsyncQueue();
   private running = false;
   private runToken = 0;
   /**
@@ -315,10 +317,19 @@ export class SyncOrchestrator {
       }
       if (this.groupChangePending) {
         await this.applyPendingOutboxTransactions(true);
+        if (!this.isRunActive(activeRunToken)) {
+          return;
+        }
         await this.storage.setMeta({
           groupChangePending: false,
           updatedAt: this.runtime.now(),
         });
+        // A stop() during either await must leave the cancelled run stopped:
+        // falling through would mark it "syncing" and open a subscription
+        // on a transport reset() already closed.
+        if (!this.isRunActive(activeRunToken)) {
+          return;
+        }
         this.groupChangePending = false;
       }
 
@@ -546,9 +557,12 @@ export class SyncOrchestrator {
     this.transportConnectionCleanup = null;
     await this.transport.close();
     await this.packetQueue.drain();
-    // Start fresh queues; a fresh Gate is open (no holds).
+    // The packet queue is drained, so a fresh one is equivalent. The state
+    // queue is deliberately kept: a state-lock operation of the cancelled run
+    // (a mutation, a coverage load) may still be mid-write, and the next run's
+    // operations must queue behind it rather than overlap it on a fresh chain.
+    // A fresh Gate is open (no holds).
     this.packetQueue = new AsyncQueue();
-    this.stateQueue = new AsyncQueue();
     this.deltaReplayGate = new Gate();
     this.deferredConflictTxs = [];
     this.clientId = "";
@@ -568,19 +582,36 @@ export class SyncOrchestrator {
   /**
    * Forces an immediate sync
    */
-  async syncNow(): Promise<void> {
+  syncNow(): Promise<void> {
+    return this.syncNowForRun();
+  }
+
+  /**
+   * `syncNow`, optionally bound to one run: once that run is cancelled the
+   * fetched page is dropped and nothing further is done on its behalf.
+   */
+  private async syncNowForRun(runToken?: number): Promise<void> {
+    const isStale = (): boolean =>
+      runToken !== undefined && !this.isRunActive(runToken);
     try {
-      await this.deltaPipeline.fetchAndApplyDeltaPages(this.cursor.lastSyncId);
+      await this.deltaPipeline.fetchAndApplyDeltaPages(
+        this.cursor.lastSyncId,
+        runToken === undefined ? {} : { runToken }
+      );
     } catch (error) {
       if (
-        await this.deltaPipeline.handleBootstrapRequired(
+        !isStale() &&
+        (await this.deltaPipeline.handleBootstrapRequired(
           error,
           this.deltaSubscription
-        )
+        ))
       ) {
         return;
       }
       throw error;
+    }
+    if (isStale()) {
+      return;
     }
 
     // Process pending outbox
@@ -628,17 +659,22 @@ export class SyncOrchestrator {
       return;
     }
 
+    // Bind the continuation to this run: `running` alone is true again once
+    // a stop()/start() lands mid-sync, and the stale continuation would then
+    // open a second subscription and report "syncing" for a run still
+    // starting up.
+    const { runToken } = this;
     (async () => {
       try {
-        await this.syncNow();
-        if (this.running && !this.deltaSubscription) {
+        await this.syncNowForRun(runToken);
+        if (this.isRunActive(runToken) && !this.deltaSubscription) {
           this.deltaPipeline.startDeltaSubscription(this.cursor.lastSyncId);
         }
-        if (this.running) {
+        if (this.isRunActive(runToken)) {
           this.setState("syncing");
         }
       } catch (error) {
-        if (this.running) {
+        if (this.isRunActive(runToken)) {
           this.handleSyncError(
             error instanceof Error ? error : new Error("Failed to reconnect")
           );

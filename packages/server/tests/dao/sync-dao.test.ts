@@ -23,7 +23,8 @@ const syncGroupMemberships = pgTable("sync_group_memberships", {
 });
 
 const createSelectDb = (
-  rowsByTable: Record<string, Record<string, unknown>[]>
+  rowsByTable: Record<string, Record<string, unknown>[]>,
+  executeResult: unknown = [{ last_value: null }]
 ) => {
   const db = {} as SyncDb;
   const getTableName = (table: unknown): string => {
@@ -39,6 +40,9 @@ const createSelectDb = (
   Object.assign(db, {
     delete() {
       throw new Error("delete is not used in these tests");
+    },
+    execute() {
+      return Promise.resolve(executeResult);
     },
     insert() {
       throw new Error("insert is not used in these tests");
@@ -91,6 +95,22 @@ describe("SyncDao suite", () => {
 
     await expect(dao.getEarliestSyncId()).resolves.toBe(0n);
     await expect(swapped.getEarliestSyncId()).resolves.toBe(9n);
+  });
+
+  it("reports one above the allocated high-water mark once retention empties the table", async () => {
+    // postgres.js returns the row list itself.
+    const postgresJs = new SyncDao(
+      createSelectDb({ sync_actions: [] }, [{ last_value: "7" }]),
+      { syncActions, syncGroupMemberships }
+    );
+    // node-postgres wraps rows in a result object.
+    const nodePostgres = new SyncDao(
+      createSelectDb({ sync_actions: [] }, { rows: [{ last_value: 7n }] }),
+      { syncActions, syncGroupMemberships }
+    );
+
+    await expect(postgresJs.getEarliestSyncId()).resolves.toBe(8n);
+    await expect(nodePostgres.getEarliestSyncId()).resolves.toBe(8n);
   });
 
   it("returns the first sync id when rows exist", async () => {

@@ -1326,15 +1326,21 @@ describe("reverse-done alignment", () => {
       fullMetadata: { lastSyncId: "10" },
       fullRows: nativeSaveRows,
       startingSyncId: 100,
-    })
+    }),
+    batching?: { batchDelay: number; batchMutations: boolean }
   ) =>
     createSyncClient({
       batchMutations: false,
+      ...batching,
       reactivity: noopReactivityAdapter,
       schema: nativeSaveSchema,
       storage,
       transport,
     });
+
+  // Keeps saves unsent when a delta arrives: an in-flight write is sequenced
+  // after the delta by the server and is not a rebase conflict.
+  const unsent = { batchDelay: 60_000, batchMutations: true };
 
   it("persists native model saves through the outbox and reloads pending state", async () => {
     const storage = new InMemoryStorage();
@@ -1532,7 +1538,7 @@ describe("reverse-done alignment", () => {
       fullRows: nativeSaveRows,
       startingSyncId: 100,
     });
-    const client = createNativeSaveClient(storage, transport);
+    const client = createNativeSaveClient(storage, transport, unsent);
     const conflicts: Extract<SyncClientEvent, { type: "rebaseConflict" }>[] =
       [];
     const unsubscribe = client.onEvent((event) => {
@@ -1604,7 +1610,7 @@ describe("reverse-done alignment", () => {
       fullRows: nativeSaveRows,
       startingSyncId: 100,
     });
-    const client = createNativeSaveClient(storage, transport);
+    const client = createNativeSaveClient(storage, transport, unsent);
 
     try {
       await client.start();

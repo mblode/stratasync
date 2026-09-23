@@ -55,6 +55,12 @@ export class WebSocketManager {
   private lastSubscribeError: Error | null = null;
   private readonly retryConfig: RetryConfig;
   private shouldReconnect = true;
+  /**
+   * Bumped by close(). A connect attempt started under an older generation
+   * must not open a socket, and events from a socket this manager no longer
+   * owns must not touch the current one.
+   */
+  private generation = 0;
 
   constructor(
     wsEndpoint: string,
@@ -87,6 +93,7 @@ export class WebSocketManager {
       return this.connectPromise;
     }
 
+    const { generation } = this;
     const connectPromise = (async () => {
       this.shouldReconnect = true;
       this.setConnectionState(
@@ -96,7 +103,7 @@ export class WebSocketManager {
       const token = await resolveAuthToken(this.auth);
 
       // close() may have been called while we were waiting on auth.
-      if (!this.shouldReconnect) {
+      if (!this.shouldReconnect || generation !== this.generation) {
         return;
       }
 
@@ -108,6 +115,9 @@ export class WebSocketManager {
       this.socket = socket;
 
       socket.addEventListener("open", () => {
+        if (this.socket !== socket) {
+          return;
+        }
         this.reconnectAttempts = 0;
         if (this.subscribeRetryTimer) {
           clearTimeout(this.subscribeRetryTimer);
@@ -122,6 +132,9 @@ export class WebSocketManager {
       });
 
       socket.addEventListener("message", (event) => {
+        if (this.socket !== socket) {
+          return;
+        }
         // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
         this.handleMessage(event).catch(() => {
           // Message parse errors are ignored.
@@ -129,6 +142,11 @@ export class WebSocketManager {
       });
 
       socket.addEventListener("close", () => {
+        // A socket replaced after close() still delivers its own close event
+        // later; it must not null out (and reconnect over) the live socket.
+        if (this.socket !== socket) {
+          return;
+        }
         this.socket = null;
         this.setSubscribedReady(false);
         this.setConnectionState("disconnected");
@@ -138,6 +156,9 @@ export class WebSocketManager {
       });
 
       socket.addEventListener("error", () => {
+        if (this.socket !== socket) {
+          return;
+        }
         this.setSubscribedReady(false);
         this.setConnectionState("error");
       });
@@ -147,8 +168,22 @@ export class WebSocketManager {
     try {
       await connectPromise;
     } catch (error) {
-      this.setSubscribedReady(false);
-      this.setConnectionState("error");
+      // An attempt close() orphaned (its auth lookup failed late) no longer
+      // owns the manager's state; a newer connection may be live by now.
+      if (generation === this.generation) {
+        this.setSubscribedReady(false);
+        this.setConnectionState("error");
+        // No socket means no close event to drive the retry: schedule it
+        // here (with backoff and the retry budget), or a live subscription is
+        // left with no socket, no attempt and no timer.
+        if (
+          this.shouldReconnect &&
+          this.subscriptions.size > 0 &&
+          !this.reconnectTimer
+        ) {
+          this.scheduleReconnect();
+        }
+      }
       throw error;
     } finally {
       if (this.connectPromise === connectPromise) {
@@ -310,6 +345,10 @@ export class WebSocketManager {
    */
   close(): Promise<void> {
     this.shouldReconnect = false;
+    this.generation += 1;
+    // An attempt still resolving auth is now stale; let the next connect()
+    // start a fresh one instead of joining it.
+    this.connectPromise = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -420,6 +459,7 @@ export class WebSocketManager {
     this.reconnectAttempts += 1;
 
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
       this.connect().catch(() => {
         // Connection errors are handled by retry logic
