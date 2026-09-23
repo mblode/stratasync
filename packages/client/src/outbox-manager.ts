@@ -101,6 +101,14 @@ export class OutboxManager {
   private readonly claimedTxIds = new Set<string>();
 
   /**
+   * Claimed clientTxIds discarded (rebase conflict, cross-tab confirmation)
+   * while their batch waited on `sendQueue`. The batch closure still holds
+   * them, so `sendClaimedBatch` skips them: a transaction reported as dropped
+   * must never reach the server afterwards. Cleared on release.
+   */
+  private readonly discardedClaims = new Set<string>();
+
+  /**
    * Transactions whose send failed at the transport, in queue order, that no
    * later send has carried yet. Every send carries them first, so a later
    * transaction (say `update X`) never reaches the server ahead of an earlier
@@ -119,11 +127,11 @@ export class OutboxManager {
   /**
    * Strictly increasing sequence stamped on every queued transaction.
    *
-   * `createdAt` is only millisecond-resolution, so transactions created in the
-   * same tick tie. The outbox replay order breaks that tie on `batchIndex`
-   * (see `storage-idb/stores/outbox.ts`), which without this counter fell
-   * through to comparing random `clientTxId`s — so `create X` followed by
-   * `update X` in one tick could replay in the wrong order after a reload.
+   * The outbox replays in `batchIndex` order (see `storage-idb/stores/outbox.ts`).
+   * `createdAt` cannot order it: it is millisecond-resolution (transactions
+   * created in one tick tie) and wall-clock (it steps backwards on NTP
+   * corrections), so `create X` followed by `update X` could replay in the
+   * wrong order after a reload.
    */
   private nextBatchIndex = 0;
   /**
@@ -364,7 +372,17 @@ export class OutboxManager {
     }
     for (const tx of transactions) {
       this.claimedTxIds.delete(tx.clientTxId);
+      this.discardedClaims.delete(tx.clientTxId);
     }
+  }
+
+  private withoutDiscarded(transactions: Transaction[]): Transaction[] {
+    if (this.discardedClaims.size === 0) {
+      return transactions;
+    }
+    return transactions.filter(
+      (tx) => !this.discardedClaims.has(tx.clientTxId)
+    );
   }
 
   /** Prepends the transport-failed transactions still owed to the server. */
@@ -415,11 +433,20 @@ export class OutboxManager {
   }
 
   private async sendClaimedBatch(
-    transactions: Transaction[],
+    claimed: Transaction[],
     version: number
   ): Promise<void> {
-    const markedSent = await this.markTransactionsSent(transactions, version);
+    const markedSent = await this.markTransactionsSent(
+      this.withoutDiscarded(claimed),
+      version
+    );
     if (!markedSent) {
+      return;
+    }
+    // Checked again with no await before `mutate`: a rebase may have dropped
+    // a transaction while it was being marked sent.
+    const transactions = this.withoutDiscarded(claimed);
+    if (transactions.length === 0) {
       return;
     }
 
@@ -490,7 +517,7 @@ export class OutboxManager {
       }
       this.onTransactionStateChange?.(tx);
     }
-    this.retryBacklog.push(...transactions);
+    this.retryBacklog.push(...this.withoutDiscarded(transactions));
   }
 
   private async handleInvalidMutationBatch(
@@ -510,6 +537,7 @@ export class OutboxManager {
       (tx) => tx.clientTxId !== error.clientTxId
     );
 
+    await this.adoptPersistedOriginal(rejectedTx);
     rejectedTx.state = "failed";
     rejectedTx.lastError = error.message;
     await this.storage.updateOutboxTransaction(rejectedTx.clientTxId, {
@@ -544,6 +572,23 @@ export class OutboxManager {
     }
   }
 
+  /**
+   * Rebase persists each pending transaction's rebased `original` through
+   * `storage.updateOutboxTransaction`, onto the row it read from storage. A
+   * storage that returns copies (IndexedDB) leaves the object held by the send
+   * batch with the pre-rebase snapshot, so a rejection must roll back to the
+   * persisted one, or it restores a value the server has since overwritten.
+   */
+  private async adoptPersistedOriginal(tx: Transaction): Promise<void> {
+    const outbox = await this.storage.getOutbox();
+    const persisted = outbox.find(
+      (entry) => entry.clientTxId === tx.clientTxId
+    );
+    if (persisted?.original !== undefined) {
+      tx.original = persisted.original;
+    }
+  }
+
   private removeRejectedTransaction(tx: Transaction): Promise<void> {
     return this.discardTransaction(tx.clientTxId);
   }
@@ -554,6 +599,15 @@ export class OutboxManager {
    * id in the in-memory echo-suppression set so that set stays bounded.
    */
   async discardTransaction(clientTxId: string): Promise<void> {
+    const batched = this.pendingBatch.length;
+    this.pendingBatch = this.pendingBatch.filter(
+      (tx) => tx.clientTxId !== clientTxId
+    );
+    if (this.pendingBatch.length !== batched) {
+      this.claimedTxIds.delete(clientTxId);
+    } else if (this.claimedTxIds.has(clientTxId)) {
+      this.discardedClaims.add(clientTxId);
+    }
     await this.storage.removeFromOutbox(clientTxId);
     this.localClientTxIds.delete(clientTxId);
     this.retryBacklog = this.retryBacklog.filter(
@@ -607,6 +661,7 @@ export class OutboxManager {
           });
         }
       } else {
+        await this.adoptPersistedOriginal(tx);
         tx.state = "failed";
         tx.lastError = txResult.error ?? "Unknown error";
         tx.retryCount += 1;
@@ -874,6 +929,7 @@ export class OutboxManager {
     this.pendingBatch = [];
     this.localClientTxIds.clear();
     this.claimedTxIds.clear();
+    this.discardedClaims.clear();
     this.retryBacklog = [];
     // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
     this.sendQueue = Promise.resolve();

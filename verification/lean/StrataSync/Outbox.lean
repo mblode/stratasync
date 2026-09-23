@@ -3,7 +3,10 @@
 
     packages/client/src/outbox-manager.ts   (queueTransaction, flushBatch,
       dispatchBatch/sendQueue, sendBatch, handleTransportFailure,
-      processPendingTransactions, seedBatchIndex)
+      processPendingTransactions, seedBatchIndex, discardTransaction,
+      adoptPersistedOriginal)
+    packages/storage-idb/src/stores/outbox.ts (compareTransactions)
+    packages/core/src/sync/rebase.ts (rebaseTransactions, in-flight rows)
     packages/server/src/mutate/mutate-service.ts (dedup by clientTxId; only
       the contract the client relies on)
 
@@ -29,6 +32,15 @@
        Counterexample + corrected model.
     4. Server-side dedup makes any duplicate that remains (crash replay,
        cross-tab) harmless: what the server applies is the deduped log.
+    5. Replay order (storage-idb `compareTransactions`).
+       BUG (fixed): ordering by `createdAt` first replayed `update X` before
+       `create X` after the wall clock stepped back. Counterexample + fix.
+    6. Rollback snapshot of a rejected in-flight transaction.
+       BUG (fixed): the send batch's copy missed the rebased `original`
+       persisted to IndexedDB. Counterexample + fix.
+    7. Server-wins rebase vs. transactions the server holds or will receive.
+       BUG (fixed): a dropped, "rejected" transaction was still applied by the
+       server. Counterexample + fix.
 -/
 
 namespace StrataSync.Outbox
@@ -602,5 +614,189 @@ theorem mem_applyDedup (applied log : List Nat) (i : Nat) :
 theorem exactly_once_effect (log : List Nat) :
     (applyDedup [] log).Nodup ∧ ∀ i, i ∈ applyDedup [] log ↔ i ∈ log :=
   ⟨applyDedup_nodup [] log List.nodup_nil, fun i => by simp [mem_applyDedup]⟩
+
+/-! ## 5. Replay order when the wall clock steps backwards
+
+`storage-idb/src/stores/outbox.ts` `compareTransactions` orders the persisted
+outbox for replay. A row is `(batchIndex?, createdAt, clientTxId)`;
+`batchIndex` is the strictly increasing sequence `queueTransaction` stamps,
+`createdAt` is `Date.now()`, which an NTP correction can move backwards.
+
+BUG (fixed): the original comparator ordered by `createdAt` first, so after a
+backwards clock step `update X` (stamped later) replayed before `create X`.
+Fixed: `batchIndex` first; rows persisted before stamping (no `batchIndex`)
+predate every stamped row and go first, among themselves by `createdAt`. -/
+
+structure Row where
+  idx : Option Nat
+  createdAt : Nat
+  key : Nat
+  deriving DecidableEq, Repr
+
+/-- `a` replays strictly before `b` under the original comparator. -/
+def origBefore (a b : Row) : Bool :=
+  if a.createdAt ≠ b.createdAt then a.createdAt < b.createdAt
+  else
+    let ia := a.idx.getD 9007199254740991
+    let ib := b.idx.getD 9007199254740991
+    if ia ≠ ib then ia < ib else a.key < b.key
+
+/-- `a` replays strictly before `b` under the fixed comparator. -/
+def fixBefore (a b : Row) : Bool :=
+  match a.idx, b.idx with
+  | none, some _ => true
+  | some _, none => false
+  | ia, ib =>
+    if ia.getD 0 ≠ ib.getD 0 then ia.getD 0 < ib.getD 0
+    else if a.createdAt ≠ b.createdAt then a.createdAt < b.createdAt
+    else a.key < b.key
+
+/-- `create X` stamped 0 at t = 10000; the clock steps back a second; then
+    `update X` stamped 1 at t = 9000. -/
+def createRow : Row := ⟨some 0, 10000, 1⟩
+def updateRow : Row := ⟨some 1, 9000, 0⟩
+
+theorem bug_replay_order_clock_step :
+    origBefore updateRow createRow = true ∧
+      createRow.idx = some 0 ∧ updateRow.idx = some 1 := by
+  decide
+
+/-- The original comparator does not respect the queue sequence. -/
+theorem bug_replay_respects_sequence :
+    ¬ ∀ a b : Row, ∀ i j, a.idx = some i → b.idx = some j → i < j →
+      origBefore a b = true :=
+  fun h => absurd (h createRow updateRow 0 1 rfl rfl (by decide)) (by decide)
+
+/-- Fixed: stamped rows replay in sequence order whatever their clocks say. -/
+theorem fixed_replay_respects_sequence (a b : Row) (i j : Nat)
+    (ha : a.idx = some i) (hb : b.idx = some j) (hij : i < j) :
+    fixBefore a b = true ∧ fixBefore b a = false := by
+  simp only [fixBefore, ha, hb, Option.getD_some]
+  constructor
+  · simp [Nat.ne_of_lt hij, hij]
+  · simp [Nat.ne_of_gt hij, Nat.not_lt.mpr (Nat.le_of_lt hij)]
+
+/-- Fixed: a legacy (unstamped) row replays before every stamped one. -/
+theorem fixed_legacy_first (a b : Row) (i : Nat) (ha : a.idx = none)
+    (hb : b.idx = some i) : fixBefore a b = true ∧ fixBefore b a = false := by
+  simp [fixBefore, ha, hb]
+
+/-- Fixed: `fixBefore` is irreflexive and asymmetric, so it is a consistent
+    strict order for `toSorted`. -/
+theorem fixed_before_asymm (a b : Row) : ¬ (fixBefore a b = true ∧ fixBefore b a = true) := by
+  rintro ⟨h1, h2⟩
+  rcases a with ⟨_ | i, ca, ka⟩ <;> rcases b with ⟨_ | j, cb, kb⟩ <;>
+    simp only [fixBefore, Option.getD_none, Option.getD_some] at h1 h2 <;>
+    (repeat' split at h1) <;> (repeat' split at h2) <;> simp_all <;> omega
+
+/-! ## 6. A rejection rolls back to the rebased `original`
+
+`handleMutateResult` rolls a rejected transaction back with the object the
+send batch holds. Rebase (`delta-pipeline.ts` `updatePendingOriginals` /
+`handleConflict`) folds each later server write of the tracked field into the
+row it read from storage and persists that. IndexedDB returns copies, so the
+batch's object keeps the pre-rebase snapshot.
+
+State: the batch's copy `mem`, the persisted copy `stored`, and the server's
+current value of the field. Steps: a foreign server write `v` (rebased into
+`stored` only), and the rejection. -/
+
+structure RollbackState where
+  mem : Nat
+  stored : Nat
+  server : Nat
+  deriving DecidableEq, Repr
+
+def RollbackState.init (v : Nat) : RollbackState := ⟨v, v, v⟩
+
+/-- A foreign server write of `v` to the tracked field, rebased into storage. -/
+def RollbackState.foreign (s : RollbackState) (v : Nat) : RollbackState :=
+  { s with stored := v, server := v }
+
+def RollbackState.run (v0 : Nat) (writes : List Nat) : RollbackState :=
+  writes.foldl RollbackState.foreign (RollbackState.init v0)
+
+/-- Original: the rollback restores the batch's object. -/
+def origRollback (s : RollbackState) : Nat := s.mem
+
+/-- Fixed: `adoptPersistedOriginal` re-reads the persisted row first. -/
+def fixRollback (s : RollbackState) : Nat := s.stored
+
+theorem bug_rollback_stale_original :
+    origRollback (RollbackState.run 0 [1]) ≠ (RollbackState.run 0 [1]).server := by
+  decide
+
+theorem RollbackState.run_stored (v0 : Nat) (writes : List Nat) :
+    (RollbackState.run v0 writes).stored = (RollbackState.run v0 writes).server := by
+  unfold RollbackState.run
+  suffices ∀ s : RollbackState, s.stored = s.server →
+      (writes.foldl RollbackState.foreign s).stored =
+        (writes.foldl RollbackState.foreign s).server from this _ rfl
+  induction writes with
+  | nil => intro s h; exact h
+  | cons w rest ih => intro s _; exact ih _ rfl
+
+/-- Fixed: a rejected write is rolled back to the value the server holds, not
+    to one a later server write overwrote. -/
+theorem fixed_rollback_to_server (v0 : Nat) (writes : List Nat) :
+    fixRollback (RollbackState.run v0 writes) = (RollbackState.run v0 writes).server :=
+  RollbackState.run_stored v0 writes
+
+/-! ## 7. Server-wins never drops a write the server will apply
+
+A foreign action conflicts with a pending transaction `t` whose echo is not in
+the packet, so the server sequences `t` after it. Where `t` is when the rebase
+drops it decides whether the server applies it:
+
+* `batched`   in `pendingBatch`
+* `waiting`   dispatched, its job queued on `sendQueue`, storage "queued"
+* `inFlight`  `transport.mutate` called, storage "sent"
+* `acked`     storage "awaitingSync"
+
+BUG (fixed): server-wins dropped `t` in every phase, emitting
+`mutationRejected` and rolling it back, although an in-flight or acked `t` is
+committed after the foreign write, and a batched or waiting `t` was still sent
+(`pendingBatch` and the job's closure kept it).
+Fixed: `rebaseTransactions` skips "sent"/"awaitingSync" rows (the server's
+ack or rejection settles them), and `discardTransaction` removes a dropped
+row from `pendingBatch` or marks its claim so `sendClaimedBatch` skips it.
+
+Modelling assumption: the rebase reads the row's state and discards it within
+one phase. A row read as "queued" whose `mutate` starts before the discard
+lands is not covered (the window is the rebase's own awaits). -/
+
+inductive Phase | batched | waiting | inFlight | acked
+  deriving DecidableEq, Repr
+
+def Phase.stored : Phase → String
+  | .batched | .waiting => "queued"
+  | .inFlight => "sent"
+  | .acked => "awaitingSync"
+
+/-- Original: dropped (and reported rejected) whatever the state. -/
+def origDrops (_ : Phase) : Bool := true
+
+/-- Original: a dropped transaction still reaches the server in every phase. -/
+def origApplied (_ : Phase) : Bool := true
+
+/-- Fixed `rebaseTransactions`: only a "queued" row is a conflict candidate. -/
+def fixDrops (p : Phase) : Bool := p.stored == "queued"
+
+/-- Fixed outbox: a dropped queued row is never handed to `mutate`. -/
+def fixApplied (p : Phase) : Bool := !(fixDrops p)
+
+theorem bug_rejected_but_applied : ∃ p, origDrops p = true ∧ origApplied p = true :=
+  ⟨.inFlight, rfl, rfl⟩
+
+/-- Fixed: the client reports a write as rejected by the rebase exactly when
+    the server will never apply it. -/
+theorem fixed_dropped_iff_not_applied (p : Phase) :
+    fixDrops p = true ↔ fixApplied p = false := by
+  cases p <;> decide
+
+/-- Fixed: a write already held by the server is never dropped. -/
+theorem fixed_inflight_kept (p : Phase) (h : p = .inFlight ∨ p = .acked) :
+    fixDrops p = false := by
+  rcases h with h | h <;> subst h <;> decide
 
 end StrataSync.Outbox

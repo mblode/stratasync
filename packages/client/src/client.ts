@@ -181,16 +181,14 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         }
         break;
       }
+      // An update-like `original` holds only the fields the write touched.
+      // With the row gone from the map (deleted by the server, or evicted)
+      // there is nothing to revert: setting it would insert a partial ghost
+      // row, and the storage copy never saw the optimistic write.
       case "U": {
-        if (!original) {
-          break;
-        }
-        if (existing) {
+        if (original && existing) {
           map.update(tx.modelId, original as Record<string, unknown>);
           emitModelChange(tx.modelName, tx.modelId, "update");
-        } else {
-          map.set(tx.modelId, original as Record<string, unknown>);
-          emitModelChange(tx.modelName, tx.modelId, "insert");
         }
         break;
       }
@@ -202,9 +200,6 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
             captureArchiveState(original as Record<string, unknown> | undefined)
           );
           emitModelChange(tx.modelName, tx.modelId, "update");
-        } else if (original) {
-          map.set(tx.modelId, original as Record<string, unknown>);
-          emitModelChange(tx.modelName, tx.modelId, "insert");
         }
         break;
       }

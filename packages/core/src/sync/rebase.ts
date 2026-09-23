@@ -179,6 +179,17 @@ const detectConflict = (
   };
 };
 
+/**
+ * A transaction the server already holds ("sent", or acked and "awaitingSync")
+ * is not a conflict candidate. Its echo is not in this batch, so every action
+ * here is sequenced before it: the server applies it after them, and its ack
+ * or rejection settles it. Dropping it would roll back and report as rejected
+ * a write the server is about to commit. It stays pending, so its `original`
+ * is still rebased (see rebaseOriginals) in case the server does reject it.
+ */
+const isInFlight = (tx: Transaction): boolean =>
+  tx.state === "sent" || tx.state === "awaitingSync";
+
 const isUpdateLike = (tx: Transaction): boolean =>
   tx.action === "U" || tx.action === "A" || tx.action === "V";
 
@@ -273,7 +284,11 @@ export const rebaseTransactions = (
     }
 
     for (const tx of relatedTxs) {
-      if (processed.has(tx.clientTxId) || echoedTxIds.has(tx.clientTxId)) {
+      if (
+        processed.has(tx.clientTxId) ||
+        echoedTxIds.has(tx.clientTxId) ||
+        isInFlight(tx)
+      ) {
         continue;
       }
 
