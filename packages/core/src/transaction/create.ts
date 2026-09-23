@@ -214,6 +214,20 @@ export const createUndoTransaction = (
       );
     }
     case "A": {
+      // Re-archiving an already archived row undoes to its previous timestamp.
+      const previousArchivedAt = readArchivedAt(tx.original);
+      if (previousArchivedAt !== undefined) {
+        return createArchiveTransaction(
+          clientId,
+          tx.modelName,
+          tx.modelId,
+          {
+            archivedAt: previousArchivedAt,
+            original: captureArchiveState(tx.payload),
+          },
+          runtime
+        );
+      }
       return createUnarchiveTransaction(
         clientId,
         tx.modelName,
@@ -223,6 +237,20 @@ export const createUndoTransaction = (
       );
     }
     case "V": {
+      // Unarchiving a row known not to be archived undoes to "not archived".
+      if (
+        tx.original !== undefined &&
+        "archivedAt" in tx.original &&
+        tx.original.archivedAt === null
+      ) {
+        return createUnarchiveTransaction(
+          clientId,
+          tx.modelName,
+          tx.modelId,
+          { original: createUnarchivePatch() },
+          runtime
+        );
+      }
       return createArchiveTransaction(
         clientId,
         tx.modelName,

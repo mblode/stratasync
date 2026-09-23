@@ -1,0 +1,5 @@
+name = "StrataSync"
+defaultTargets = ["StrataSync"]
+
+[[lean_lib]]
+name = "StrataSync"

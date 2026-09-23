@@ -19,17 +19,30 @@ export const MAX_RETRY_COUNT = 5;
 const hasTransactionStore = (db: IDBPDatabase): boolean =>
   db.objectStoreNames.contains(TRANSACTION_STORE);
 
+/**
+ * Replay order: queue order.
+ *
+ * `batchIndex` is the outbox manager's monotone sequence, so it is the primary
+ * key. `createdAt` is wall-clock time and steps backwards on NTP corrections,
+ * so ordering by it first could replay `update X` ahead of `create X`. Rows
+ * persisted before transactions carried a `batchIndex` predate every stamped
+ * row, so they replay first, among themselves by `createdAt`.
+ */
 const compareTransactions = (a: Transaction, b: Transaction): number => {
+  const aStamped = a.batchIndex !== undefined;
+  const bStamped = b.batchIndex !== undefined;
+  if (aStamped !== bStamped) {
+    return aStamped ? 1 : -1;
+  }
+
+  const batchIndexDiff = (a.batchIndex ?? 0) - (b.batchIndex ?? 0);
+  if (batchIndexDiff !== 0) {
+    return batchIndexDiff;
+  }
+
   const createdAtDiff = a.createdAt - b.createdAt;
   if (createdAtDiff !== 0) {
     return createdAtDiff;
-  }
-
-  const batchIndexDiff =
-    (a.batchIndex ?? Number.MAX_SAFE_INTEGER) -
-    (b.batchIndex ?? Number.MAX_SAFE_INTEGER);
-  if (batchIndexDiff !== 0) {
-    return batchIndexDiff;
   }
 
   return a.clientTxId.localeCompare(b.clientTxId);

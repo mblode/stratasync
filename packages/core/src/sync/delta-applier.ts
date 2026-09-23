@@ -68,7 +68,11 @@ interface RegistryLike {
 }
 
 /**
- * Merges data into an existing row and writes it back.
+ * Merges data into an existing row and writes it back. Returns false, writing
+ * nothing, when the row is not stored locally: deltas apply only to loaded
+ * rows, and an archive/unarchive carries no full row, so writing the data
+ * alone would persist a stub missing every other field (a partially loaded
+ * model that never fetched it, or a row deleted earlier in the packet).
  */
 const mergeAndPut = async (
   target: DeltaTarget,
@@ -76,13 +80,17 @@ const mergeAndPut = async (
   modelId: string,
   data: Record<string, unknown>,
   overrides?: Record<string, unknown>
-): Promise<void> => {
+): Promise<boolean> => {
   const existing = await target.get(modelName, modelId);
+  if (!existing) {
+    return false;
+  }
   await target.put(modelName, modelId, {
     ...existing,
     ...data,
     ...overrides,
   });
+  return true;
 };
 
 /**
@@ -123,25 +131,23 @@ const applySingleAction = async (
     }
 
     case "A": {
-      await mergeAndPut(
+      return mergeAndPut(
         target,
         modelName,
         modelId,
         data,
         createArchivePayload(readArchivedAt(data))
       );
-      return true;
     }
 
     case "V": {
-      await mergeAndPut(
+      return mergeAndPut(
         target,
         modelName,
         modelId,
         data,
         createUnarchivePatch()
       );
-      return true;
     }
     default: {
       return false;

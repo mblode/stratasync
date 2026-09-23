@@ -4,8 +4,19 @@ import {
   createArchivePayload,
   createUnarchivePatch,
   createUnarchivePayload,
+  readArchivedAt,
   replaceUndefinedWithNull,
 } from "@stratasync/core";
+
+/**
+ * True when a pre-unarchive snapshot records an explicit `archivedAt: null`,
+ * i.e. the row was known not to be archived. A snapshot without the field
+ * carries no archive state.
+ */
+const wasKnownUnarchived = (original?: Record<string, unknown>): boolean =>
+  original !== undefined &&
+  "archivedAt" in original &&
+  original.archivedAt === null;
 
 export interface HistoryOperation {
   action: TransactionAction;
@@ -191,25 +202,47 @@ export class HistoryManager {
         break;
       }
       case "A": {
-        undo = {
-          action: "V",
-          modelId,
-          modelName,
-          original: captureArchiveState(payload),
-          payload: createUnarchivePayload(),
-        };
+        // Re-archiving an already archived row must undo to its previous
+        // timestamp, not unarchive it.
+        const previousArchivedAt = readArchivedAt(original);
+        undo =
+          previousArchivedAt === undefined
+            ? {
+                action: "V",
+                modelId,
+                modelName,
+                original: captureArchiveState(payload),
+                payload: createUnarchivePayload(),
+              }
+            : {
+                action: "A",
+                modelId,
+                modelName,
+                original: captureArchiveState(payload),
+                payload: createArchivePayload(previousArchivedAt),
+              };
         break;
       }
       case "V": {
-        undo = {
-          action: "A",
-          modelId,
-          modelName,
-          original: createUnarchivePatch(),
-          payload: createArchivePayload(
-            captureArchiveState(original).archivedAt ?? undefined
-          ),
-        };
+        // Unarchiving a row that was known not to be archived must undo to
+        // "not archived", not archive it at the current time.
+        undo = wasKnownUnarchived(original)
+          ? {
+              action: "V",
+              modelId,
+              modelName,
+              original: createUnarchivePatch(),
+              payload: createUnarchivePayload(),
+            }
+          : {
+              action: "A",
+              modelId,
+              modelName,
+              original: createUnarchivePatch(),
+              payload: createArchivePayload(
+                captureArchiveState(original).archivedAt ?? undefined
+              ),
+            };
         break;
       }
       default: {

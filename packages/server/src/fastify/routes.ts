@@ -258,11 +258,11 @@ export const registerSyncRoutes = (
       const input: MutateInput = { batchId, transactions };
 
       const result = await mutateService.mutate(syncUser, input, (action) => {
-        // The DAO's insert-order advisory lock guarantees IDs are allocated in
-        // commit order, but this post-commit publish still races: two committed
-        // actions can be handed to `onAction` out of order relative to their
-        // IDs. Tolerated here — a fully ordered fix would require transactional
-        // NOTIFY (publish inside the commit), which is out of scope.
+        // The DAO's insert-order advisory lock allocates IDs in commit order,
+        // but publishes (from this and other processes) can still reach a
+        // subscriber out of ID order. Live WebSocket sessions tolerate that:
+        // they treat a delta as a notification and read any lower committed
+        // IDs they have not seen from `sync_actions` before sending it.
         if (deltaPublisher) {
           const groups = resolvePublishedDeltaGroups(
             action.groupId,

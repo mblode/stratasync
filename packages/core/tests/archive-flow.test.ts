@@ -138,7 +138,10 @@ test("applyDeltas preserves archive fallback and unarchive clearing", async () =
   assert.equal(rows.get("Task:task-1")?.archivedAt, null);
 });
 
-test("applyDeltas upserts archive state when the row is missing", async () => {
+// An archive carries only `archivedAt` (see server archive-mutation.ts), so
+// upserting it for a row that is not stored would persist a stub. Deltas apply
+// only to loaded rows; see tests/delta-applier-absent-row.test.ts.
+test("applyDeltas skips archive state when the row is missing", async () => {
   const rows = new Map<string, Record<string, unknown>>();
   const target = {
     delete(modelName: string, id: string): void {
@@ -166,7 +169,7 @@ test("applyDeltas upserts archive state when the row is missing", async () => {
     },
   };
 
-  await applyDeltas(
+  const result = await applyDeltas(
     {
       actions: [
         {
@@ -183,13 +186,10 @@ test("applyDeltas upserts archive state when the row is missing", async () => {
     registry
   );
 
-  const upsertedRow = rows.get("Task:task-2");
-  assert.equal(upsertedRow?.title, "Archived task");
-  assert.equal(typeof upsertedRow?.archivedAt, "number");
-  assert.ok(
-    (upsertedRow?.archivedAt as number) > 0,
-    "archivedAt should be a positive timestamp"
-  );
+  assert.equal(rows.has("Task:task-2"), false);
+  assert.equal(result.archives, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.lastSyncId, "1");
 });
 
 test("applyDeltas advances sync state for unknown models", async () => {

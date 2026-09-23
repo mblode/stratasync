@@ -11,6 +11,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { getTableConfig } from "drizzle-orm/pg-core";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import type { RawSyncActionRow } from "../core/sync-action.js";
@@ -39,6 +40,9 @@ const isUniqueViolation = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   (error as { code?: unknown }).code === UNIQUE_VIOLATION;
+
+const quoteIdentifier = (identifier: string): string =>
+  `"${identifier.replaceAll('"', '""')}"`;
 
 const ensureBigint = (value: bigint | string): bigint => {
   if (typeof value === "bigint") {
@@ -107,7 +111,20 @@ export class SyncDao {
   }
 
   /**
-   * Gets the earliest sync ID in storage.
+   * Gets the lowest sync ID a client can still be caught up from: every id
+   * below it has been pruned or was never committed.
+   *
+   * That is the lowest retained id while `sync_actions` holds rows. Once
+   * retention has emptied the table, the lowest retained id no longer exists,
+   * but the id sequence still records the highest id ever allocated, and any
+   * id at or below it may have been committed and pruned since — so the floor
+   * is one above it. Returns 0 only when no id was ever allocated (or the id
+   * column is not backed by a sequence, in which case nothing is known).
+   *
+   * The sequence counts ids consumed by rolled-back or still-open
+   * transactions too, so on an empty table the floor can sit above the last
+   * committed id. That only errs towards a needless bootstrap, never towards
+   * a silent gap.
    */
   async getEarliestSyncId(): Promise<bigint> {
     const idCol = getColumn(this.tables.syncActions, "id");
@@ -119,7 +136,39 @@ export class SyncDao {
       .limit(1);
 
     const [result] = rows;
-    return result ? ensureBigint(result.id as bigint | string) : 0n;
+    if (result) {
+      return ensureBigint(result.id as bigint | string);
+    }
+
+    const allocated = await this.getAllocatedSyncIdHighWater();
+    return allocated > 0n ? allocated + 1n : 0n;
+  }
+
+  /**
+   * The highest id the `sync_actions` id sequence has handed out, committed
+   * or not (0 when it has never been used or the column has no sequence).
+   */
+  private async getAllocatedSyncIdHighWater(): Promise<bigint> {
+    const idCol = getColumn(this.tables.syncActions, "id");
+    const { name, schema } = getTableConfig(this.tables.syncActions);
+    const qualifiedName = schema
+      ? `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`
+      : quoteIdentifier(name);
+    const result = await this.db.execute(
+      sql`select pg_sequence_last_value(pg_get_serial_sequence(${qualifiedName}, ${idCol.name})) as last_value`
+    );
+    const rows = Array.isArray(result)
+      ? result
+      : (result as { rows?: unknown[] } | null)?.rows;
+    const lastValue = (rows?.[0] as { last_value?: unknown } | undefined)
+      ?.last_value;
+    if (typeof lastValue === "bigint" || typeof lastValue === "string") {
+      return ensureBigint(lastValue);
+    }
+    if (typeof lastValue === "number") {
+      return BigInt(lastValue);
+    }
+    return 0n;
   }
 
   /**
@@ -135,6 +184,35 @@ export class SyncDao {
       .select()
       .from(this.tables.syncActions)
       .where(and(gt(idCol, afterId), this.visibleGroupCondition(groups)))
+      .orderBy(asc(idCol))
+      .limit(limit);
+
+    return rows as unknown as RawSyncActionRow[];
+  }
+
+  /**
+   * Gets the sync actions visible to `groups` in the closed window
+   * `(afterId, throughId]`, ascending. A live WebSocket session uses it to
+   * fill the ids between its cursor and a live delta that arrived ahead of
+   * them (see `ClientSession.fillGapBefore`).
+   */
+  async getSyncActionsThrough(
+    afterId: bigint,
+    throughId: bigint,
+    groups: string[],
+    limit: number
+  ): Promise<RawSyncActionRow[]> {
+    const idCol = getColumn(this.tables.syncActions, "id");
+    const rows = await this.db
+      .select()
+      .from(this.tables.syncActions)
+      .where(
+        and(
+          gt(idCol, afterId),
+          lte(idCol, throughId),
+          this.visibleGroupCondition(groups)
+        )
+      )
       .orderBy(asc(idCol))
       .limit(limit);
 

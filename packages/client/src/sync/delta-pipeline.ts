@@ -213,8 +213,9 @@ export class DeltaPipeline {
 
     // Process deltas in background. The loop handles its own stream errors;
     // anything escaping here came from the error path itself, so surface it.
+    const runToken = this.ctx.getRunToken();
     this.processDeltaStream().catch((error: unknown) => {
-      if (this.ctx.isRunning()) {
+      if (this.ctx.isRunActive(runToken)) {
         this.ctx.recordError(error);
       }
     });
@@ -253,8 +254,12 @@ export class DeltaPipeline {
 
         const { value, done } = await subscription.next();
         if (done) {
+          // Bound to this loop's run and subscription: after a stop()+start()
+          // (or a replacement subscription) the stream that ended is no
+          // longer ours to reopen, and reopening it would leak a second one.
           const shouldRestart =
-            this.ctx.isRunning() &&
+            this.ctx.isRunActive(runToken) &&
+            this.ctx.getDeltaSubscription() === subscription &&
             this.ctx.getConnectionState() === "connected";
           if (this.ctx.getDeltaSubscription() === subscription) {
             this.ctx.setDeltaSubscription(null);
@@ -314,11 +319,15 @@ export class DeltaPipeline {
    * resumes the live stream from the new cursor. Shared by cursor-too-old
    * recovery and by group-change reconciliation.
    */
-  private async bootstrapAndResume(): Promise<void> {
+  private async bootstrapAndResume(runToken: number): Promise<void> {
     await this.ctx.runWithStateLock(async () => {
-      const activeRunToken = this.ctx.getRunToken();
-      await this.deps.runBootstrap(activeRunToken);
-      if (!this.ctx.isRunActive(activeRunToken)) {
+      // The lock may only be granted after a stop()+start(): never run this
+      // run's recovery under the next run's token.
+      if (!this.ctx.isRunActive(runToken)) {
+        return;
+      }
+      await this.deps.runBootstrap(runToken);
+      if (!this.ctx.isRunActive(runToken)) {
         return;
       }
       const privacyReconcile = this.ctx.isGroupChangePending();
@@ -334,17 +343,20 @@ export class DeltaPipeline {
       }
     });
 
-    if (!this.ctx.isRunActive(this.ctx.getRunToken())) {
+    if (!this.ctx.isRunActive(runToken)) {
       return;
     }
 
     await this.deps.processOutboxTransactions();
-    if (this.ctx.isRunning() && !this.ctx.getDeltaSubscription()) {
+    // `isRunning()` is true again once the next start() ran, so only the run
+    // token tells this continuation apart from the next run's own resume.
+    if (!this.ctx.isRunActive(runToken)) {
+      return;
+    }
+    if (!this.ctx.getDeltaSubscription()) {
       this.startDeltaSubscription(this.ctx.cursor.lastSyncId);
     }
-    if (this.ctx.isRunning()) {
-      this.ctx.setState("syncing");
-    }
+    this.ctx.setState("syncing");
   }
 
   /**
@@ -427,7 +439,7 @@ export class DeltaPipeline {
     if (!this.ctx.isRunActive(runToken)) {
       return;
     }
-    await this.bootstrapAndResume();
+    await this.bootstrapAndResume(runToken);
   }
 
   /**
@@ -488,6 +500,17 @@ export class DeltaPipeline {
 
     const flush = async (): Promise<void> => {
       if (bufferedLastSyncId === null) {
+        return;
+      }
+      if (
+        options.runToken !== undefined &&
+        !this.ctx.isRunActive(options.runToken)
+      ) {
+        // The run that fetched these pages is gone (fetchDeltaPage returns
+        // null once it is). Never apply them inside a later run: its cursor,
+        // groups and storage may differ, and the next run re-fetches anyway.
+        buffered = [];
+        bufferedLastSyncId = null;
         return;
       }
       const merged: DeltaPacket = {
@@ -672,9 +695,20 @@ export class DeltaPipeline {
     const deferredOps: DeferredMapOp[] = [];
     await this.collectDeferredDeltaOps(filteredPacket.actions, deferredOps);
 
-    const syncCursorAdvanced = await this.updateSyncMetadata(
-      filteredPacket.lastSyncId
-    );
+    // The cursor this packet moves to. It is persisted only after the
+    // identity-map batch below: if any step in between throws (an outbox
+    // storage write, getMeta, the conflict handler), the cursor still sits
+    // below the packet, so the resubscribe/catch-up redelivers it and the
+    // in-memory maps catch up. Advancing first left storage and cursor correct
+    // but the maps permanently behind, since a packet at or below the cursor
+    // is filtered as stale. The rows are already durable, so the persisted
+    // cursor still never passes rows that are not on disk.
+    const nextSyncId = isSyncIdGreaterThan(
+      filteredPacket.lastSyncId,
+      this.ctx.cursor.lastSyncId
+    )
+      ? filteredPacket.lastSyncId
+      : this.ctx.cursor.lastSyncId;
 
     // Snapshot the instance-local clientTxIds for echo suppression BEFORE
     // finishOutboxProcessing confirms (and therefore removes) them. Echo
@@ -686,7 +720,7 @@ export class DeltaPipeline {
       this.ctx.getOutboxManager()?.getLocalClientTxIds()
     );
 
-    await this.finishOutboxProcessing(filteredPacket.actions);
+    await this.finishOutboxProcessing(filteredPacket.actions, nextSyncId);
 
     const ownClientTxIds = DeltaPipeline.buildOwnClientTxIds(
       filteredPacket.actions,
@@ -718,7 +752,10 @@ export class DeltaPipeline {
       // refreshSync only fires after both have completed.
       // Also remove rolled-back clientTxIds from ownClientTxIds so the
       // server merge's modelChange event emits properly for the model.
+      // Taken before the handler runs, so a throw here cannot leave these
+      // rollbacks queued to run a second time on the redelivered packet.
       const deferredConflictTxs = this.ctx.getDeferredConflictTxs();
+      this.ctx.setDeferredConflictTxs([]);
       const conflictHandler = this.ctx.getConflictHandler();
       for (const tx of deferredConflictTxs) {
         conflictHandler?.(tx);
@@ -726,22 +763,30 @@ export class DeltaPipeline {
           ownClientTxIds.delete(tx.clientTxId);
         }
       }
-      this.ctx.setDeferredConflictTxs([]);
 
+      // An own echo may only be skipped while nothing else in this packet has
+      // written the row: an earlier foreign row predates our write, so once it
+      // is merged the echo row is the only thing that restores our value (the
+      // echoed tx is confirmed and no longer replayed below).
+      const writtenKeys = new Set<string>();
       for (const op of deferredOps) {
         const map = this.ctx.identityMaps.getMap(op.modelName);
+        const key = getModelKey(op.modelName, op.id);
         const isOwnOptimisticEcho =
           op.type === "merge" &&
           typeof op.clientTxId === "string" &&
           ownClientTxIds.has(op.clientTxId) &&
+          !writtenKeys.has(key) &&
           map.has(op.id);
         if (isOwnOptimisticEcho) {
           continue;
         }
         if (op.type === "merge" && op.data) {
           map.merge(op.id, op.data, { serialized: true });
+          writtenKeys.add(key);
         } else if (op.type === "delete") {
           map.delete(op.id);
+          writtenKeys.add(key);
         }
       }
       applyPendingTransactionsToIdentityMaps(
@@ -749,6 +794,8 @@ export class DeltaPipeline {
         replayablePending
       );
     });
+
+    const syncCursorAdvanced = await this.updateSyncMetadata(nextSyncId);
 
     this.emitModelChangeEvents(filteredPacket.actions, ownClientTxIds);
     await this.emitOutboxCount();
@@ -870,12 +917,16 @@ export class DeltaPipeline {
         changes: Record<string, unknown>
       ) => {
         const existing = await read(modelName, id);
-        const pk = this.ctx.registry.getPrimaryKey(modelName);
-        stage(
-          modelName,
-          id,
-          existing ? { ...existing, ...changes } : { ...changes, [pk]: id }
-        );
+        // An update carries only the changed fields. With no base row (a
+        // partially loaded model that never fetched it, or one deleted
+        // earlier in this packet) there is nothing to update: staging the
+        // fields alone would persist and hydrate a stub missing every other
+        // field. Deltas apply only to loaded instances; a later load fetches
+        // the full row.
+        if (!existing) {
+          return;
+        }
+        stage(modelName, id, { ...existing, ...changes });
       },
       put: (modelName: string, id: string, data: Record<string, unknown>) => {
         const pk = this.ctx.registry.getPrimaryKey(modelName);
@@ -925,14 +976,21 @@ export class DeltaPipeline {
     return advanced;
   }
 
+  /**
+   * Confirms the packet's own transactions and completes those awaiting a
+   * sync id at or below `upToSyncId` (the cursor this packet moves to, which
+   * is persisted only after the identity-map batch). Completing them before
+   * the cursor is persisted is safe: their rows are already durable.
+   */
   private async finishOutboxProcessing(
-    actions: SyncAction[]
+    actions: SyncAction[],
+    upToSyncId: SyncId
   ): Promise<Set<string>> {
     const outboxManager = this.ctx.getOutboxManager();
     const confirmedTxIds =
       (await outboxManager?.confirmFromActions(actions)) ?? new Set<string>();
     if (outboxManager) {
-      await outboxManager.completeUpToSyncId(this.ctx.cursor.lastSyncId);
+      await outboxManager.completeUpToSyncId(upToSyncId);
     }
     return confirmedTxIds;
   }

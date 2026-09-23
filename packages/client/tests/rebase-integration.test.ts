@@ -415,7 +415,10 @@ describe("rebase integration", () => {
     });
 
     const client = createSyncClient({
-      batchMutations: false,
+      // Unsent when the delta arrives: an in-flight write is sequenced after
+      // it by the server and is not a rebase conflict.
+      batchDelay: 60_000,
+      batchMutations: true,
       reactivity: noopReactivityAdapter,
       schema,
       storage,
@@ -546,7 +549,10 @@ describe("rebase integration", () => {
     });
 
     const client = createSyncClient({
-      batchMutations: false,
+      // Unsent when the delta arrives: an in-flight write is sequenced after
+      // it by the server and is not a rebase conflict.
+      batchDelay: 60_000,
+      batchMutations: true,
       reactivity: noopReactivityAdapter,
       schema,
       storage,
@@ -607,7 +613,10 @@ describe("rebase integration", () => {
     });
 
     const client = createSyncClient({
-      batchMutations: false,
+      // Unsent when the delta arrives: an in-flight write is sequenced after
+      // it by the server and is not a rebase conflict.
+      batchDelay: 60_000,
+      batchMutations: true,
       reactivity: noopReactivityAdapter,
       schema,
       storage,
@@ -681,7 +690,10 @@ describe("rebase integration", () => {
     });
 
     const client = createSyncClient({
-      batchMutations: false,
+      // Unsent when the delta arrives: an in-flight write is sequenced after
+      // it by the server and is not a rebase conflict.
+      batchDelay: 60_000,
+      batchMutations: true,
       reactivity: noopReactivityAdapter,
       schema,
       storage,
@@ -813,7 +825,10 @@ describe("rebase integration", () => {
     });
 
     const client = createSyncClient({
-      batchMutations: false,
+      // Unsent when the delta arrives: an in-flight write is sequenced after
+      // it by the server and is not a rebase conflict.
+      batchDelay: 60_000,
+      batchMutations: true,
       reactivity: noopReactivityAdapter,
       schema,
       storage,
