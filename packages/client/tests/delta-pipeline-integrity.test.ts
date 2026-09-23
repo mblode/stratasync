@@ -518,6 +518,42 @@ describe("an update for a row that is not stored locally", () => {
     }
   });
 
+  it("does not create a stub row for an archive or unarchive", async () => {
+    const { client, storage, transport } = await startClient();
+    try {
+      const syncWaiter = waitForSync(client, "21");
+      transport.emitDelta({
+        actions: [
+          {
+            action: "A",
+            clientId: "other-client",
+            data: { archivedAt: 1_736_899_200_000 },
+            id: "20",
+            modelId: "task-unloaded",
+            modelName: "Task",
+          },
+          {
+            action: "V",
+            clientId: "other-client",
+            data: { archivedAt: null },
+            id: "21",
+            modelId: "task-unloaded-2",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "21",
+      });
+      await syncWaiter;
+
+      expect(await storage.get("Task", "task-unloaded")).toBeNull();
+      expect(await storage.get("Task", "task-unloaded-2")).toBeNull();
+      expect(client.getCached("Task", "task-unloaded")).toBeFalsy();
+      expect(client.getCached("Task", "task-unloaded-2")).toBeFalsy();
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("does not resurrect a row deleted earlier in the same packet", async () => {
     const { client, storage, transport } = await startClient();
     try {
