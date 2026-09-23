@@ -490,6 +490,17 @@ export class DeltaPipeline {
       if (bufferedLastSyncId === null) {
         return;
       }
+      if (
+        options.runToken !== undefined &&
+        !this.ctx.isRunActive(options.runToken)
+      ) {
+        // The run that fetched these pages is gone (fetchDeltaPage returns
+        // null once it is). Never apply them inside a later run: its cursor,
+        // groups and storage may differ, and the next run re-fetches anyway.
+        buffered = [];
+        bufferedLastSyncId = null;
+        return;
+      }
       const merged: DeltaPacket = {
         actions: buffered,
         lastSyncId: bufferedLastSyncId,
