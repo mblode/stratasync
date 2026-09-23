@@ -29,6 +29,14 @@
        close() during an in-flight connect loses the next connect), and the
        corrected model: at most one live socket, `disconnected` implies no
        socket, and an active subscription always has a connection on the way.
+       A third bug (an orphaned attempt's auth failure reports `error` over
+       the live connection) and the proof that such a failure is inert.
+    5. The state lock across reset(): replacing `stateQueue` lets a cancelled
+       run's task overlap the next run's (counterexample); keeping the queue
+       gives mutual exclusion and FIFO across any number of resets.
+    6. Gate wakeup timing: a `whenOpen()` waiter may resume after a new hold.
+       Proof that this is harmless: for every interleaving, with no gate
+       precondition on live packets, applied actions are exactly 1 … cursor.
 -/
 
 namespace StrataSync.Orchestrator
@@ -789,9 +797,14 @@ structure WCfg where
   guardEvents : Bool
   /-- close() bumps the generation and drops `connectPromise` -/
   closeOrphansAttempt : Bool
+  /-- connect()'s catch only reports `error` for an attempt of the current
+  generation -/
+  guardStaleFailure : Bool
 
-def wsOriginal : WCfg := ⟨false, false⟩
-def wsFixed : WCfg := ⟨true, true⟩
+def wsOriginal : WCfg := ⟨false, false, false⟩
+/-- The code after the first two fixes, before the stale-failure guard. -/
+def wsNoStaleGuard : WCfg := ⟨true, true, false⟩
+def wsFixed : WCfg := ⟨true, true, true⟩
 
 structure W where
   socket : Option Nat
@@ -811,6 +824,7 @@ inductive WEv
   | subscribe          -- subscribe(): register + connect()
   | resolve            -- the in-flight connect's auth lookup resolves
   | resolveStale       -- an orphaned attempt's auth lookup resolves
+  | failStale          -- an orphaned attempt's auth lookup throws
   | close              -- close()
   | openEv (k : Nat)   -- socket k fires "open"
   | closeEv (k : Nat)  -- socket k fires "close"
@@ -834,6 +848,12 @@ def wstep (c : WCfg) (w : W) : WEv → W
         else { w with attempt := false }
       else w
   | .resolveStale => { w with staleAttempts := w.staleAttempts - 1 }
+  | .failStale =>
+      if w.staleAttempts > 0 then
+        let w' := { w with staleAttempts := w.staleAttempts - 1 }
+        -- `catch { this.setConnectionState("error"); throw }`
+        if c.guardStaleFailure then w' else { w' with conn := .error }
+      else w
   | .close =>
       let w' := { w with shouldReconnect := false, timer := false, subs := 0,
                          live := w.live.filter (fun k => some k != w.socket),
@@ -881,6 +901,18 @@ connects. Test: "connects after a close() that interrupted an in-flight connect"
 theorem bug_ws_close_during_connect_strands_subscription :
     let w := wrun wsOriginal W.init [.subscribe, .close, .subscribe, .resolve]
     w.subs = 1 ∧ w.socket = none ∧ w.attempt = false ∧ w.timer = false := by
+  decide
+
+/-- BUG 6 (websocket.ts connect() catch). close() orphans an attempt still
+waiting on auth; the next subscribe() opens and connects socket 0. When the
+orphaned auth lookup then throws, connect()'s catch reports `error` for the
+manager although socket 0 is live and connected. Test:
+packages/transport-graphql/tests/websocket-lifecycle.test.ts ("ignores an auth
+failure from a connect attempt close() orphaned"). -/
+theorem bug_ws_stale_auth_failure_reports_error :
+    let w := wrun wsNoStaleGuard W.init
+      [.subscribe, .close, .subscribe, .resolve, .openEv 0, .failStale]
+    w.conn = .error ∧ w.socket = some 0 ∧ w.live = [0] := by
   decide
 
 inductive WReach (c : WCfg) : W → Prop
@@ -949,6 +981,9 @@ theorem winv_step (w : W) (e : WEv) (h : WInv w) : WInv (wstep wsFixed w e) := b
         refine ⟨?_, ?_, ?_, ?_, ?_⟩ <;> simp_all
       · exact ⟨h1, h2, h3, h4, h5⟩
   | resolveStale => exact ⟨h1, h2, h3, h4, h5⟩
+  | failStale =>
+      simp only [wstep, wsFixed, ite_true]
+      split <;> exact ⟨h1, h2, h3, h4, h5⟩
   | close =>
       simp only [wstep, wsFixed, ite_true]
       refine ⟨?_, ?_, ?_, ?_, ?_⟩
@@ -1048,13 +1083,314 @@ theorem ws_attempt_productive {w : W} (h : WReach wsFixed w) (ha : w.attempt = t
   have hr := ((winv_reach h).2.2.1 ha).1
   simp [wstep, ha, hr]
 
+/-- An orphaned attempt that fails is inert: it touches nothing but its own
+bookkeeping, so the reported state, the socket and the live set are those of
+the current generation. -/
+theorem ws_stale_failure_inert (w : W) :
+    (wstep wsFixed w .failStale).conn = w.conn ∧
+    (wstep wsFixed w .failStale).socket = w.socket ∧
+    (wstep wsFixed w .failStale).live = w.live ∧
+    (wstep wsFixed w .failStale).subs = w.subs := by
+  simp only [wstep, wsFixed, ite_true]
+  split <;> simp
+
 /-- The corrected WebSocketManager on the two bug traces. -/
 theorem ws_fixed_on_bug_traces :
     let a := wrun wsFixed W.init
       [.subscribe, .resolve, .openEv 0, .close, .subscribe, .resolve, .openEv 1, .closeEv 0]
     let b := wrun wsFixed a [.timerFire, .resolve]
     let c := wrun wsFixed W.init [.subscribe, .close, .subscribe, .resolveStale, .resolve]
-    a.conn = .connected ∧ b.live = [1] ∧ c.socket.isSome = true := by
+    let d := wrun wsFixed W.init
+      [.subscribe, .close, .subscribe, .resolve, .openEv 0, .failStale]
+    a.conn = .connected ∧ b.live = [1] ∧ c.socket.isSome = true ∧
+      d.conn = .connected := by
+  decide
+
+
+/-! ## 5. The state lock across reset() (sync-orchestrator.ts)
+
+`reset()` used to replace `stateQueue` with a fresh `AsyncQueue` without
+draining it. A task of the cancelled run that already holds the lock keeps
+running on the orphaned chain, and the next run's first `runWithStateLock`
+starts at once on the fresh chain: two state-lock tasks run together.
+
+`chains` is every promise chain a state-lock task can be on: the head is the
+one `stateQueue` currently points at, the rest were orphaned by `reset()`. `run`
+enqueues on the head; `.then` firings and settlements happen on any chain. -/
+
+structure RQ where
+  chains : List (List TS)
+
+def RQ.init : RQ := ⟨[[]]⟩
+
+inductive RQEv | run | fire (i : Nat) | settle (i : Nat) (ok : Bool) | reset
+
+def modAt (f : List TS → List TS) : List (List TS) → Nat → List (List TS)
+  | [], _ => []
+  | c :: cs, 0 => f c :: cs
+  | c :: cs, n + 1 => c :: modAt f cs n
+
+/-- `replace`: `reset()` does `this.stateQueue = new AsyncQueue()` (the code as
+written); otherwise it keeps the queue (the fix). -/
+def rqstep (replace : Bool) (q : RQ) : RQEv → RQ
+  | .run => ⟨modAt enqueue q.chains 0⟩
+  | .fire i => ⟨modAt startNext q.chains i⟩
+  | .settle i ok => ⟨modAt (settle ok) q.chains i⟩
+  | .reset => if replace then ⟨[] :: q.chains⟩ else q
+
+def rqrun (replace : Bool) (q : RQ) : List RQEv → RQ
+  | [] => q
+  | e :: es => rqrun replace (rqstep replace q e) es
+
+def totalRunning : List (List TS) → Nat
+  | [] => 0
+  | c :: cs => nRunning c + totalRunning cs
+
+/-- BUG 7 (sync-orchestrator.ts reset()). A mutation of the old run holds the
+state lock; stop() replaces the queue; the next run's state-lock task starts
+while the old one still runs. Test:
+packages/client/tests/orchestrator-state-lock-reset.test.ts. -/
+theorem bug_state_lock_overlaps_across_reset :
+    totalRunning (rqrun true RQ.init [.run, .fire 0, .reset, .run, .fire 0]).chains = 2 := by
+  decide
+
+inductive RQReach (replace : Bool) : RQ → Prop
+  | init : RQReach replace RQ.init
+  | step {q} (e : RQEv) : RQReach replace q → RQReach replace (rqstep replace q e)
+
+/-- With the fix there is only ever one chain, and it is a reachable queue. -/
+theorem rq_single_chain {q : RQ} (h : RQReach false q) : ∃ l, q.chains = [l] ∧ QReach l := by
+  induction h with
+  | init => exact ⟨[], rfl, .init⟩
+  | step e _ ih =>
+      obtain ⟨l, hl, hr⟩ := ih
+      cases e with
+      | run => exact ⟨enqueue l, by simp [rqstep, hl, modAt], .step .run hr⟩
+      | fire i =>
+          cases i with
+          | zero => exact ⟨startNext l, by simp [rqstep, hl, modAt], .step .fire hr⟩
+          | succ n => exact ⟨l, by simp [rqstep, hl, modAt], hr⟩
+      | settle i ok =>
+          cases i with
+          | zero => exact ⟨settle ok l, by simp [rqstep, hl, modAt], .step (.settle ok) hr⟩
+          | succ n => exact ⟨l, by simp [rqstep, hl, modAt], hr⟩
+      | reset => exact ⟨l, by simp [rqstep, hl], hr⟩
+
+/-- Mutual exclusion holds across any number of stop()/start() cycles. -/
+theorem state_lock_mutex_across_reset {q : RQ} (h : RQReach false q) :
+    totalRunning q.chains ≤ 1 := by
+  obtain ⟨l, hl, hr⟩ := rq_single_chain h
+  rw [hl]
+  simp only [totalRunning]
+  have := queue_mutex l (queue_reach_shape hr)
+  omega
+
+/-- And FIFO across reset: a task the next run enqueued (a later index) only
+starts once every task of the cancelled run has settled. -/
+theorem state_lock_fifo_across_reset {q : RQ} (h : RQReach false q) :
+    ∃ l, q.chains = [l] ∧ ∀ i j, i < j →
+      (getAt l j = some .running ∨ ∃ r, getAt l j = some (.done r)) →
+      ∃ r, getAt l i = some (.done r) := by
+  obtain ⟨l, hl, hr⟩ := rq_single_chain h
+  exact ⟨l, hl, fun i j hij hj => queue_fifo l (queue_reach_shape hr) i j hij hj⟩
+
+theorem state_lock_fixed_on_bug_trace :
+    totalRunning (rqrun false RQ.init [.run, .fire 0, .reset, .run, .fire 0]).chains = 1 := by
+  decide
+
+/-! ## 6. Gate wakeup timing (gate.ts + delta-pipeline.ts)
+
+`whenOpen()` waiters are resolved by the releasing call, but each resumes in a
+later microtask, by which point another catch-up may have taken a new hold. So
+`processDeltaStream` can hand a live packet to `packetQueue` while the gate is
+closed. The only caller of `whenOpen()` is that loop, and nothing downstream
+assumes the gate is open: `applyDeltaPacket` applies only the actions above the
+cursor, and every packet source (the subscription, each catch-up) starts at the
+cursor it was opened at and emits contiguous ranges in order through the FIFO
+`packetQueue`. This section proves that is enough: for every interleaving of
+sources, emissions, applications and gate holds/releases — emission has no gate
+precondition at all — the applied actions are exactly `1, 2, …, cursor`, each
+once and in order. The gate is an ordering optimization, not a safety
+mechanism, so the late wakeup is left as it is.
+
+A packet `(s, e)` carries the actions `s+1 … e`. -/
+
+structure DP where
+  cursor : Nat
+  applied : List Nat
+  /-- packetQueue, head first -/
+  queue : List (Nat × Nat)
+  /-- each source's position: the end of the last packet it emitted -/
+  srcs : List Nat
+  holds : Nat
+
+def DP.init : DP := ⟨0, [], [], [], 0⟩
+
+inductive DEv
+  | open_           -- startDeltaSubscription / fetchAndApplyDeltaPages from the cursor
+  | emit (i e : Nat) -- source i enqueues the packet (srcs[i], e), gate open or not
+  | apply           -- packetQueue runs its head: filter to actions > cursor, apply
+  | hold
+  | release
+
+def dstep (d : DP) : DEv → DP
+  | .open_ => { d with srcs := d.srcs ++ [d.cursor] }
+  | .emit i e =>
+      match getAt d.srcs i with
+      | some s =>
+          if s ≤ e then { d with queue := d.queue ++ [(s, e)], srcs := setAt d.srcs i e }
+          else d
+      | none => d
+  | .apply =>
+      match d.queue with
+      | [] => d
+      | (s, e) :: t =>
+          let from_ := max d.cursor s
+          { d with queue := t, cursor := max d.cursor e,
+                   applied := d.applied ++ List.range' (from_ + 1) (e - from_) }
+  | .hold => { d with holds := d.holds + 1 }
+  | .release => { d with holds := d.holds - 1 }
+
+def drun (d : DP) : List DEv → DP
+  | [] => d
+  | e :: es => drun (dstep d e) es
+
+inductive DReach : DP → Prop
+  | init : DReach DP.init
+  | step {d} (e : DEv) : DReach d → DReach (dstep d e)
+
+/-- The cursor once everything queued has been applied. -/
+def finalCursor : Nat → List (Nat × Nat) → Nat
+  | c, [] => c
+  | c, (_, e) :: t => finalCursor (max c e) t
+
+/-- Every queued packet starts at or below the cursor it will be applied at. -/
+def okQ : Nat → List (Nat × Nat) → Prop
+  | _, [] => True
+  | c, (s, e) :: t => s ≤ c ∧ okQ (max c e) t
+
+theorem finalCursor_ge (c : Nat) (q : List (Nat × Nat)) : c ≤ finalCursor c q := by
+  induction q generalizing c with
+  | nil => simp [finalCursor]
+  | cons p t ih =>
+      obtain ⟨s, e⟩ := p
+      have := ih (max c e)
+      simp only [finalCursor]
+      omega
+
+theorem finalCursor_append (c : Nat) (q : List (Nat × Nat)) (s e : Nat) :
+    finalCursor c (q ++ [(s, e)]) = max (finalCursor c q) e := by
+  induction q generalizing c with
+  | nil => simp [finalCursor]
+  | cons p t ih =>
+      obtain ⟨s', e'⟩ := p
+      simp only [List.cons_append, finalCursor]
+      exact ih _
+
+theorem okQ_append (c : Nat) (q : List (Nat × Nat)) (s e : Nat) (h : okQ c q)
+    (hs : s ≤ finalCursor c q) : okQ c (q ++ [(s, e)]) := by
+  induction q generalizing c with
+  | nil => simpa [okQ, finalCursor] using hs
+  | cons p t ih =>
+      obtain ⟨s', e'⟩ := p
+      simp only [okQ] at h
+      simp only [List.cons_append, okQ]
+      exact ⟨h.1, ih _ h.2 (by simpa [finalCursor] using hs)⟩
+
+theorem mem_setAt {α} (l : List α) (i : Nat) (b x : α) (h : x ∈ setAt l i b) :
+    x ∈ l ∨ x = b := by
+  induction l generalizing i with
+  | nil => simp [setAt] at h
+  | cons a t ih =>
+      cases i with
+      | zero =>
+          simp only [setAt, List.mem_cons] at h
+          rcases h with h | h
+          · exact Or.inr h
+          · exact Or.inl (List.mem_cons_of_mem _ h)
+      | succ n =>
+          simp only [setAt, List.mem_cons] at h
+          rcases h with h | h
+          · exact Or.inl (h ▸ List.mem_cons_self)
+          · rcases ih n h with h | h
+            · exact Or.inl (List.mem_cons_of_mem _ h)
+            · exact Or.inr h
+
+def DInv (d : DP) : Prop :=
+  d.applied = List.range' 1 d.cursor ∧
+  okQ d.cursor d.queue ∧
+  ∀ s ∈ d.srcs, s ≤ finalCursor d.cursor d.queue
+
+theorem dinv_step (d : DP) (ev : DEv) (h : DInv d) : DInv (dstep d ev) := by
+  obtain ⟨h1, h2, h3⟩ := h
+  cases ev with
+  | open_ =>
+      simp only [dstep]
+      refine ⟨h1, h2, ?_⟩
+      intro s hs
+      simp only [List.mem_append, List.mem_singleton] at hs
+      rcases hs with hs | hs
+      · exact h3 s hs
+      · rw [hs]; exact finalCursor_ge _ _
+  | emit i e =>
+      simp only [dstep]
+      split
+      · rename_i s hs
+        split
+        · rename_i hse
+          have hsf := h3 s (getAt_mem _ _ _ hs)
+          refine ⟨h1, okQ_append _ _ _ _ h2 hsf, ?_⟩
+          intro x hx
+          simp only [finalCursor_append]
+          rcases mem_setAt _ _ _ _ hx with hx | hx
+          · have := h3 x hx; omega
+          · omega
+        · exact ⟨h1, h2, h3⟩
+      · exact ⟨h1, h2, h3⟩
+  | apply =>
+      simp only [dstep]
+      split
+      · exact ⟨h1, h2, h3⟩
+      · rename_i s e t hq
+        rw [hq] at h2 h3
+        simp only [okQ] at h2
+        obtain ⟨hs, ht⟩ := h2
+        have hmax : max d.cursor s = d.cursor := by omega
+        refine ⟨?_, ht, ?_⟩
+        · simp only [hmax, h1]
+          rw [show d.cursor + 1 = 1 + d.cursor by omega, List.range'_append_1]
+          congr 1
+          omega
+        · intro x hx
+          simpa [finalCursor] using h3 x hx
+  | hold => exact ⟨h1, h2, h3⟩
+  | release => exact ⟨h1, h2, h3⟩
+
+theorem dinv_reach {d : DP} (h : DReach d) : DInv d := by
+  induction h with
+  | init => exact ⟨rfl, trivial, by simp [DP.init]⟩
+  | step e _ ih => exact dinv_step _ e ih
+
+/-- Whatever the gate did, the applied actions are exactly `1 … cursor`: none
+skipped, none applied twice, all in order. -/
+theorem delta_applied_gap_free {d : DP} (h : DReach d) :
+    d.applied = List.range' 1 d.cursor :=
+  (dinv_reach h).1
+
+theorem delta_applied_nodup {d : DP} (h : DReach d) : d.applied.Nodup := by
+  rw [delta_applied_gap_free h]
+  exact List.nodup_range'
+
+/-- The late-wakeup interleaving itself: a catch-up holds the gate, releases it
+(waking the stream loop), a second catch-up takes a new hold before the loop
+resumes, and the loop enqueues a live packet while the gate is closed. The
+live packet is applied first; the catch-up's overlapping page is filtered to
+its new tail. -/
+theorem gate_late_wakeup_harmless :
+    let d := drun DP.init
+      [.open_, .open_, .hold, .release, .open_, .hold,
+       .emit 0 5, .emit 2 8, .apply, .apply, .release]
+    d.holds = 0 ∧ d.cursor = 8 ∧ d.applied = [1, 2, 3, 4, 5, 6, 7, 8] := by
   decide
 
 end StrataSync.Orchestrator

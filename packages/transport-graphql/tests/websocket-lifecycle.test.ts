@@ -178,4 +178,50 @@ describe("WebSocketManager lifecycle", () => {
     subscription.unsubscribe();
     await manager.close();
   });
+
+  it("ignores an auth failure from a connect attempt close() orphaned", async () => {
+    let failToken: ((error: Error) => void) | null = null;
+    let calls = 0;
+    const manager = new WebSocketManager(
+      "wss://example.com/ws",
+      {
+        getAccessToken: () => {
+          calls += 1;
+          if (calls === 1) {
+            // oxlint-disable-next-line avoid-new -- hold the first auth lookup open
+            return new Promise<string>((_resolve, reject) => {
+              failToken = reject;
+            });
+          }
+          return "tok";
+        },
+      },
+      retryConfig,
+      MockWebSocket as unknown as typeof WebSocket
+    );
+    managers.push(manager);
+
+    // Run 1 subscribes; its connect() is waiting on the auth provider.
+    manager.subscribe({ afterSyncId: "0" });
+    await flush();
+
+    // stop() + start(): run 2 connects and its socket opens.
+    await manager.close();
+    manager.subscribe({ afterSyncId: "0" });
+    await flush();
+    const [socketB] = instances;
+    socketB?.simulateOpen();
+    expect(manager.getConnectionState()).toBe("connected");
+
+    // Run 1's orphaned auth lookup now fails. It belongs to a generation
+    // close() already retired and must not report an error on run 2's socket.
+    (failToken as ((error: Error) => void) | null)?.(new Error("auth down"));
+    await flush();
+    await flush();
+
+    expect(manager.getConnectionState()).toBe("connected");
+    expect(liveSockets()).toEqual([socketB]);
+
+    await manager.close();
+  });
 });

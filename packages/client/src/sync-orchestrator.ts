@@ -76,8 +76,10 @@ export class SyncOrchestrator {
   private deltaReplayGate = new Gate();
   /**
    * Serial executor for state-mutating work (mutations + delta application).
+   * Lives as long as the orchestrator: reset() never replaces it, so mutual
+   * exclusion holds across stop()/start().
    */
-  private stateQueue = new AsyncQueue();
+  private readonly stateQueue = new AsyncQueue();
   private running = false;
   private runToken = 0;
   /**
@@ -555,9 +557,12 @@ export class SyncOrchestrator {
     this.transportConnectionCleanup = null;
     await this.transport.close();
     await this.packetQueue.drain();
-    // Start fresh queues; a fresh Gate is open (no holds).
+    // The packet queue is drained, so a fresh one is equivalent. The state
+    // queue is deliberately kept: a state-lock operation of the cancelled run
+    // (a mutation, a coverage load) may still be mid-write, and the next run's
+    // operations must queue behind it rather than overlap it on a fresh chain.
+    // A fresh Gate is open (no holds).
     this.packetQueue = new AsyncQueue();
-    this.stateQueue = new AsyncQueue();
     this.deltaReplayGate = new Gate();
     this.deferredConflictTxs = [];
     this.clientId = "";
