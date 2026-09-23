@@ -244,6 +244,17 @@ export const rebaseTransactions = (
   const processed = new Set<string>();
   const keptAfterConflict = new Set<string>();
 
+  // Every pending transaction whose own echo appears anywhere in this batch
+  // was committed by the server after any action sequenced before the echo,
+  // so it is confirmed, never a conflict, even when a conflicting foreign
+  // action precedes the echo in the same batch.
+  const echoedTxIds = new Set<string>();
+  for (const action of serverActions) {
+    if (action.clientId === options.clientId && action.clientTxId) {
+      echoedTxIds.add(action.clientTxId);
+    }
+  }
+
   // Process each server action
   for (const action of serverActions) {
     const key = `${action.modelName}:${action.modelId}`;
@@ -262,7 +273,7 @@ export const rebaseTransactions = (
     }
 
     for (const tx of relatedTxs) {
-      if (processed.has(tx.clientTxId)) {
+      if (processed.has(tx.clientTxId) || echoedTxIds.has(tx.clientTxId)) {
         continue;
       }
 

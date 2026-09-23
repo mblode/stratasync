@@ -511,6 +511,28 @@ theorem pipelineNew_converges (srv m : Row) (acts : List PAct)
     pipelineNew srv m acts [] = storageAfter srv acts := by
   rw [pipelineNew_rebase srv m acts [] hforeign]; rfl
 
+/-! ### Combined fix (rebase pre-scan + echo suppression)
+
+Same packet: a foreign title write (20) then the echo of ours (21). The old
+rebase reported our tx as a conflict; the rollback plus the un-suppressed
+echo happened to converge. Fixing the rebase alone confirms the tx, the echo
+is then suppressed and the map shows the foreign title — so both fixes are
+needed together. -/
+
+def cActs : List PAct := [⟨{ title := some (some .c) }, false⟩, ⟨pMine, true⟩]
+
+theorem rebase_fix_confirms :
+    (rebaseNew [⟨1, [.title]⟩] [⟨[.title], none⟩, ⟨[.title], some 1⟩]).confirmed = [1] := by
+  decide
+
+theorem bug_rebase_fix_alone_diverges :
+    pipelineOld pSrv (pMine.apply pSrv) cActs [] ≠ storageAfter pSrv cActs := by
+  decide
+
+theorem combined_fix_converges :
+    pipelineNew pSrv (pMine.apply pSrv) cActs [] = storageAfter pSrv cActs :=
+  pipelineNew_converges _ _ _ ⟨_, List.mem_cons_self .., rfl⟩
+
 /-! ## 5. Undo/redo inverse laws for archive state
 
 `archivedAt : Option Val` (`none` = not archived). History operations carry a
