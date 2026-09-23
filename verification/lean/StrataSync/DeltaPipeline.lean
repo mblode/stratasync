@@ -13,9 +13,15 @@
        applied actions are exactly the server log up to the cursor, in order,
        with no duplicates and no skips. Group-change latch and bootstrap
        included. Plus the contract this relies on (contiguous sources).
-    4. Crash safety: the persisted cursor never passes durably written rows.
+    4. Crash safety: the persisted cursor never passes durably written rows,
+       and the in-memory cursor never passes the identity maps.
+       BUG (fixed): the cursor was advanced before the identity-map batch,
+       so a throw in between left the maps permanently behind.
     5. BUG (fixed): a catch-up buffer from a dead run was flushed into the
        next run. Counterexample + corrected model.
+    6. BUG (fixed): stream-end restart and re-bootstrap resume checked
+       `isRunning()` instead of their run token.
+    7. BUG (fixed): an update for an absent row staged a stub row.
 -/
 
 namespace StrataSync.DeltaPipeline
@@ -501,7 +507,12 @@ theorem noncontiguous_source_skips :
 
 The durable/visible effects of one packet `(lo, hi]` in code order, one atomic
 step per await. `rows`/`maps` = the log prefix reflected in storage rows /
-identity maps; `mem`/`persisted` = cursor in memory / in meta. -/
+identity maps; `mem`/`persisted` = cursor in memory / in meta.
+
+A throw (or crash) at any await stops the sequence. After a throw the session
+keeps its in-memory state and resubscribes/catches up from `mem`, which
+redelivers the packet only if `mem < hi`; after a crash the restart reloads
+the maps from storage and resumes from `persisted`. -/
 
 structure Durable where
   rows : Nat
@@ -514,7 +525,7 @@ inductive Op
   | writeBatch (hi : Nat)      -- collectDeferredDeltaOps → storage.writeBatch
   | advanceMem (hi : Nat)      -- cursor.advance: guard + set `_lastSyncId`
   | persistMeta                -- cursor.advance: storage.setMeta lands
-  | pruneSyncActions | confirmOutbox | completeOutbox | readPending
+  | pruneSyncActions | confirmOutbox | completeOutbox | readPending | readMeta
   | identityBatch (hi : Nat)   -- identityMaps.batch(...)
 
 def exec (d : Durable) : Op → Durable
@@ -524,10 +535,19 @@ def exec (d : Durable) : Op → Durable
   | .identityBatch hi => { d with maps := max d.maps hi }
   | _ => d
 
-def packetOps (hi : Nat) : List Op :=
+/-- Original order: the cursor was advanced and persisted right after the row
+write, before the outbox steps, `getMeta` and the identity-map batch. -/
+def packetOpsOld (hi : Nat) : List Op :=
   [.addSyncActions, .rebaseOutbox, .coverage, .writeBatch hi, .advanceMem hi,
    .persistMeta, .pruneSyncActions, .confirmOutbox, .completeOutbox,
-   .readPending, .identityBatch hi]
+   .readPending, .readMeta, .identityBatch hi]
+
+/-- Fixed order: the cursor moves only once the identity-map batch has run
+(`completeOutbox` is told the target cursor explicitly). -/
+def packetOps (hi : Nat) : List Op :=
+  [.addSyncActions, .rebaseOutbox, .coverage, .writeBatch hi, .confirmOutbox,
+   .completeOutbox, .readPending, .readMeta, .identityBatch hi, .advanceMem hi,
+   .persistMeta, .pruneSyncActions]
 
 def DInv (d : Durable) : Prop := d.persisted ≤ d.mem ∧ d.mem ≤ d.rows
 
@@ -539,25 +559,72 @@ theorem crash_safe (d : Durable) (hi : Nat) (h : DInv d) :
   obtain ⟨h1, h2⟩ := h
   intro k
   match k with
-  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 =>
+  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 =>
     simp [packetOps, exec, DInv] <;> omega
-  | k + 11 =>
-    have : (packetOps hi).take (k + 11) = packetOps hi := by
+  | k + 12 =>
+    have : (packetOps hi).take (k + 12) = packetOps hi := by
       simp [packetOps]
     rw [this]; simp [packetOps, exec, DInv]; omega
 
-/-- Observation (not changed in code): the cursor is advanced (and persisted)
-before the identity-map batch. If a step in between throws (e.g. an outbox
-storage write in `confirmFromActions`), storage is correct but the in-memory
-maps lag the cursor, and the resubscribe from that cursor never redelivers the
-packet: maps stay behind until the next reload. -/
-theorem maps_lag_after_post_advance_throw :
+/-- The original order was crash-safe too; its problem was the maps. -/
+theorem crash_safe_old (d : Durable) (hi : Nat) (h : DInv d) :
+    ∀ k, DInv (((packetOpsOld hi).take k).foldl exec d) := by
+  obtain ⟨h1, h2⟩ := h
+  intro k
+  match k with
+  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 =>
+    simp [packetOpsOld, exec, DInv] <;> omega
+  | k + 12 =>
+    have : (packetOpsOld hi).take (k + 12) = packetOpsOld hi := by
+      simp [packetOpsOld]
+    rw [this]; simp [packetOpsOld, exec, DInv]; omega
+
+/-- **BUG (fixed).** In the original order the cursor was advanced (and
+persisted) before the identity-map batch. If a step in between throws (an
+outbox storage write in `confirmFromActions`, `getMeta`), storage and cursor
+are correct but the in-memory maps lag the cursor, and the resubscribe from
+that cursor never redelivers the packet: the maps stay behind until the next
+reload. Regression test: `delta-pipeline-integrity.test.ts`. -/
+theorem bug_maps_lag_after_post_advance_throw :
     let d0 : Durable := { rows := 10, mem := 10, persisted := 10, maps := 10 }
     -- ops up to and including persistMeta, pruneSyncActions; confirmOutbox throws
-    let d1 := ((packetOps 20).take 7).foldl exec d0
-    d1.persisted = 20 ∧ d1.rows = 20 ∧ d1.maps = 10 ∧
+    let d1 := ((packetOpsOld 20).take 7).foldl exec d0
+    d1.persisted = 20 ∧ d1.rows = 20 ∧ d1.maps = 10 ∧ d1.maps < d1.mem ∧
       -- redelivery of the same packet is fully filtered as stale
       (window [11, 20] d1.mem 20) = [] := by decide
+
+/-- **Theorem (maps never lag, fixed).** Throw after any number of steps of
+the fixed order: the in-memory cursor never passes the identity maps, while
+the durability invariant still holds. So either the cursor is still below the
+packet (it is redelivered and re-applied) or the maps already reflect it. -/
+theorem maps_never_lag (d : Durable) (hi : Nat) (h : DInv d)
+    (hm : d.mem ≤ d.maps) :
+    ∀ k, let d' := ((packetOps hi).take k).foldl exec d
+      DInv d' ∧ d'.mem ≤ d'.maps := by
+  obtain ⟨h1, h2⟩ := h
+  intro k
+  match k with
+  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 =>
+    simp [packetOps, exec, DInv] <;> omega
+  | k + 12 =>
+    have : (packetOps hi).take (k + 12) = packetOps hi := by
+      simp [packetOps]
+    rw [this]; simp [packetOps, exec, DInv]; omega
+
+/-- Corollary: after a throw at any step, either the packet's range is still
+ahead of the cursor (redelivered) or the maps cover it. -/
+theorem throw_redelivers_or_maps_cover (d : Durable) (hi : Nat) (h : DInv d)
+    (hm : d.mem ≤ d.maps) (k : Nat) :
+    let d' := ((packetOps hi).take k).foldl exec d
+    d'.mem < hi ∨ hi ≤ d'.maps := by
+  have := (maps_never_lag d hi h hm k).2
+  omega
+
+/-- A completed packet leaves every component at (at least) `hi`. -/
+theorem packet_completes (d : Durable) (hi : Nat) :
+    let d' := (packetOps hi).foldl exec d
+    hi ≤ d'.rows ∧ hi ≤ d'.mem ∧ hi ≤ d'.persisted ∧ hi ≤ d'.maps := by
+  simp [packetOps, exec]; omega
 
 /-! ## 5. BUG: stale catch-up buffer flushed into the next run
 
@@ -657,5 +724,155 @@ theorem fixed_catchup_never_crosses_runs (own : Nat) (evs : List FEv) :
 still flushes the buffered pages. -/
 theorem fixed_same_run_failure_still_flushes :
     (frun true 1 [.page [11] true, .fail]).applied = [(1, 1)] := by decide
+
+/-! ## 6. BUG: stale continuations checked `isRunning()` after an await
+
+`bootstrapAndResume` (after `processOutboxTransactions`) and the stream-end
+branch of `processDeltaStream` (after `subscription.next()`) checked
+`isRunning()`. A `stop()` + `start()` during the await makes that true again,
+so the previous run's continuation opened a subscription / set the state in
+the next run. The fix checks `isRunActive(runToken)` for the token the
+continuation was started under. Regression test:
+`delta-pipeline-run-token.test.ts`. -/
+
+inductive REv
+  | stop
+  | start
+  /-- The continuation resumes after its await and runs its guarded effect. -/
+  | resume
+
+structure RSt where
+  token : Nat
+  running : Bool
+  /-- (run that started the continuation, run in which its effect landed) -/
+  acted : List (Nat × Nat)
+
+def guardOk (bound : Bool) (own : Nat) (s : RSt) : Bool :=
+  if bound then s.running && own == s.token else s.running
+
+def rstep (bound : Bool) (own : Nat) (s : RSt) : REv → RSt
+  | .stop => { s with running := false }
+  | .start => { s with token := s.token + 1, running := true }
+  | .resume =>
+    if guardOk bound own s then { s with acted := s.acted ++ [(own, s.token)] }
+    else s
+
+def rrun (bound : Bool) (own : Nat) (evs : List REv) : RSt :=
+  evs.foldl (rstep bound own) { token := own, running := true, acted := [] }
+
+theorem bug_stale_continuation_acts_in_next_run :
+    (rrun false 1 [.stop, .start, .resume]).acted = [(1, 2)] := by decide
+
+theorem rstep_same_run (own : Nat) (s : RSt) (e : REv)
+    (h : ∀ p ∈ s.acted, p.1 = p.2) :
+    ∀ p ∈ (rstep true own s e).acted, p.1 = p.2 := by
+  cases e with
+  | stop => exact h
+  | start => exact h
+  | resume =>
+    simp only [rstep, guardOk, ite_true]
+    split
+    · next hg =>
+      intro p hp
+      simp at hp
+      rcases hp with hp | rfl
+      · exact h p hp
+      · simp at hg; exact hg.2
+    · exact h
+
+/-- **Theorem (fixed).** Bound to the run token, a continuation's effect only
+ever lands in the run that started it, for every interleaving of stops,
+starts and resumes. -/
+theorem bound_continuation_never_crosses_runs (own : Nat) (evs : List REv) :
+    ∀ p ∈ (rrun true own evs).acted, p.1 = p.2 := by
+  unfold rrun
+  suffices ∀ s : RSt, (∀ p ∈ s.acted, p.1 = p.2) →
+      ∀ p ∈ (evs.foldl (rstep true own) s).acted, p.1 = p.2 by
+    exact this _ (by simp)
+  induction evs with
+  | nil => intro s h; exact h
+  | cons e es ih => intro s h; exact ih _ (rstep_same_run own s e h)
+
+/-- The fix keeps same-run behaviour: resuming inside the same run still acts. -/
+theorem bound_same_run_still_acts :
+    (rrun true 1 [.resume]).acted = [(1, 1)] := by decide
+
+/-! ## 7. BUG: an update for an absent row staged a stub
+
+An update (`U`) carries only the changed fields. The staging `patch` in
+`createStagingDeltaTarget` wrote `{ ...changes, id }` when no base row was
+stored (a partially loaded model that never fetched the row, or a row deleted
+earlier in the same packet), persisting and hydrating a row missing every
+other field. Deltas apply only to loaded instances, so the fix skips the
+patch when the base row is absent. Rows are modelled by the set of fields they
+carry; a row is complete when it carries every schema field. Regression test:
+`delta-pipeline-integrity.test.ts`. -/
+
+abbrev Store := Nat → Option (List Nat)
+
+inductive RowAct
+  | ins (id : Nat)                    -- `I`: the server sends the full row
+  | upd (id : Nat) (changes : List Nat)
+  | del (id : Nat)
+
+def setRow (st : Store) (id : Nat) (r : Option (List Nat)) : Store :=
+  fun j => if j = id then r else st j
+
+def applyRow (fixed : Bool) (F : List Nat) (st : Store) : RowAct → Store
+  | .ins id => setRow st id (some F)
+  | .del id => setRow st id none
+  | .upd id changes =>
+    match st id with
+    | some r => setRow st id (some (r ++ changes))
+    | none => if fixed then st else setRow st id (some changes)
+
+def Complete (F : List Nat) (st : Store) : Prop :=
+  ∀ id r, st id = some r → ∀ f ∈ F, f ∈ r
+
+theorem bug_update_on_absent_row_stages_stub :
+    let st := applyRow false [0, 1] (fun _ => none) (.upd 7 [1])
+    st 7 = some [1] ∧ ¬ (0 ∈ [1]) := by decide
+
+theorem applyRow_complete (F : List Nat) (st : Store) (a : RowAct)
+    (h : Complete F st) : Complete F (applyRow true F st a) := by
+  intro id r hr f hf
+  cases a with
+  | ins j =>
+    simp only [applyRow, setRow] at hr
+    split at hr
+    · cases hr; exact hf
+    · exact h id r hr f hf
+  | del j =>
+    simp only [applyRow, setRow] at hr
+    split at hr
+    · cases hr
+    · exact h id r hr f hf
+  | upd j changes =>
+    cases hst : st j with
+    | some r0 =>
+      simp only [applyRow, hst, setRow] at hr
+      split at hr
+      · next hj =>
+        cases hr
+        subst hj
+        exact List.mem_append_left _ (h _ r0 hst f hf)
+      · exact h id r hr f hf
+    | none =>
+      simp only [applyRow, hst, ite_true] at hr
+      exact h id r hr f hf
+
+/-- **Theorem (fixed).** Starting from a store of complete rows, every row
+stays complete under any sequence of inserts, updates and deletes. -/
+theorem fixed_rows_stay_complete (F : List Nat) (acts : List RowAct) :
+    ∀ st : Store, Complete F st → Complete F (acts.foldl (applyRow true F) st) := by
+  induction acts with
+  | nil => intro st h; exact h
+  | cons a as ih => intro st h; exact ih _ (applyRow_complete F st a h)
+
+/-- The fix still merges an update into a stored row (here one inserted
+earlier in the same packet). -/
+theorem fixed_update_after_insert_merges :
+    (([RowAct.ins 7, .upd 7 [1]].foldl (applyRow true [0, 1]) (fun _ => none)) 7)
+      = some [0, 1, 1] := by decide
 
 end StrataSync.DeltaPipeline
