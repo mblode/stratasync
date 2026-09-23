@@ -168,8 +168,12 @@ export class WebSocketManager {
     try {
       await connectPromise;
     } catch (error) {
-      this.setSubscribedReady(false);
-      this.setConnectionState("error");
+      // An attempt close() orphaned (its auth lookup failed late) no longer
+      // owns the manager's state; a newer connection may be live by now.
+      if (generation === this.generation) {
+        this.setSubscribedReady(false);
+        this.setConnectionState("error");
+      }
       throw error;
     } finally {
       if (this.connectPromise === connectPromise) {

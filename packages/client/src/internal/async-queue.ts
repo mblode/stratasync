@@ -31,8 +31,7 @@ export class AsyncQueue {
     return this.tail.then(noop, noop);
   }
 
-  /** Drops the backlog reference so the next `run` starts a fresh chain. */
-  reset(): void {
-    this.tail = Promise.resolve();
-  }
+  // Deliberately no `reset()`: dropping the tail would let the next task start
+  // while an earlier one is still running, breaking mutual exclusion. A new
+  // lifecycle keeps queueing behind the old tail instead.
 }
