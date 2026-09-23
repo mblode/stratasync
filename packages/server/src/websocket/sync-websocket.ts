@@ -10,6 +10,7 @@ import { noopLogger } from "../config.js";
 import {
   BOOTSTRAP_REQUIRED,
   BOOTSTRAP_REQUIRED_WS_MESSAGE,
+  isSyncCursorStale,
 } from "../core/errors.js";
 import { isRecord } from "../core/guards.js";
 import { SyncId } from "../core/sync-id.js";
@@ -372,11 +373,9 @@ export const registerSyncWebsocket = (
         if (session.isClosed) {
           return;
         }
-        if (
-          requestedAfterSyncId > 0n &&
-          earliestSyncId > 0n &&
-          requestedAfterSyncId < earliestSyncId
-        ) {
+        // Same boundary as the HTTP delta route: a cursor one below the
+        // earliest retained id has missed nothing.
+        if (isSyncCursorStale(requestedAfterSyncId, earliestSyncId)) {
           session.reset();
           sendSocketError(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED);
           return;
