@@ -126,3 +126,34 @@ test("undo of unarchiving a non-archived row leaves it unarchived", () => {
 
   assert.equal(undo?.action, "V");
 });
+
+test("an own echo after a conflicting foreign action confirms the tx", () => {
+  const tx = createUpdateTransaction(
+    "client-1",
+    "Task",
+    "task-1",
+    { title: "Mine" },
+    { title: "Seed" }
+  );
+
+  const result = rebaseTransactions(
+    [tx],
+    [
+      foreignUpdate("20", { title: "Theirs" }),
+      {
+        action: "U",
+        clientId: "client-1",
+        clientTxId: tx.clientTxId,
+        data: { title: "Mine" },
+        id: "21",
+        modelId: "task-1",
+        modelName: "Task",
+      },
+    ],
+    { clientId: "client-1", fieldLevelConflicts: true }
+  );
+
+  assert.deepEqual(result.confirmed, [tx]);
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.pending, []);
+});

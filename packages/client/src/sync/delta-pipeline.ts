@@ -739,20 +739,29 @@ export class DeltaPipeline {
       }
       this.ctx.setDeferredConflictTxs([]);
 
+      // An own echo may only be skipped while nothing else in this packet has
+      // written the row: an earlier foreign row predates our write, so once it
+      // is merged the echo row is the only thing that restores our value (the
+      // echoed tx is confirmed and no longer replayed below).
+      const writtenKeys = new Set<string>();
       for (const op of deferredOps) {
         const map = this.ctx.identityMaps.getMap(op.modelName);
+        const key = getModelKey(op.modelName, op.id);
         const isOwnOptimisticEcho =
           op.type === "merge" &&
           typeof op.clientTxId === "string" &&
           ownClientTxIds.has(op.clientTxId) &&
+          !writtenKeys.has(key) &&
           map.has(op.id);
         if (isOwnOptimisticEcho) {
           continue;
         }
         if (op.type === "merge" && op.data) {
           map.merge(op.id, op.data, { serialized: true });
+          writtenKeys.add(key);
         } else if (op.type === "delete") {
           map.delete(op.id);
+          writtenKeys.add(key);
         }
       }
       applyPendingTransactionsToIdentityMaps(
