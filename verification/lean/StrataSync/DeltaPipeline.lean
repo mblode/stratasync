@@ -2,6 +2,7 @@
   Client-side delta ingestion: a model of
 
     packages/core/src/sync/sync-id.ts          (compareSyncId)
+    packages/core/src/sync/delta-applier.ts    (mergeAndPut for A/V)
     packages/client/src/sync/cursor.ts         (SyncCursor.advance)
     packages/client/src/sync/delta-pipeline.ts (applyDeltaPacket, fetchAndApplyDeltaPages)
 
@@ -21,7 +22,8 @@
        next run. Counterexample + corrected model.
     6. BUG (fixed): stream-end restart and re-bootstrap resume checked
        `isRunning()` instead of their run token.
-    7. BUG (fixed): an update for an absent row staged a stub row.
+    7. BUG (fixed): an update/archive/unarchive for an absent row staged a
+       stub row.
 -/
 
 namespace StrataSync.DeltaPipeline
@@ -797,16 +799,20 @@ theorem bound_continuation_never_crosses_runs (own : Nat) (evs : List REv) :
 theorem bound_same_run_still_acts :
     (rrun true 1 [.resume]).acted = [(1, 1)] := by decide
 
-/-! ## 7. BUG: an update for an absent row staged a stub
+/-! ## 7. BUG: an update/archive/unarchive for an absent row staged a stub
 
-An update (`U`) carries only the changed fields. The staging `patch` in
+An update (`U`) carries only the changed fields, and an archive (`A`) or
+unarchive (`V`) only `archivedAt`. The staging `patch` in
 `createStagingDeltaTarget` wrote `{ ...changes, id }` when no base row was
 stored (a partially loaded model that never fetched the row, or a row deleted
-earlier in the same packet), persisting and hydrating a row missing every
-other field. Deltas apply only to loaded instances, so the fix skips the
-patch when the base row is absent. Rows are modelled by the set of fields they
-carry; a row is complete when it carries every schema field. Regression test:
-`delta-pipeline-integrity.test.ts`. -/
+earlier in the same packet), and `mergeAndPut` in
+`core/src/sync/delta-applier.ts` (used for `A`/`V`) wrote
+`{ ...null, ...data, archivedAt }`. Both persisted and hydrated a row missing
+every other field. Deltas apply only to loaded instances, so both now skip
+when the base row is absent (`mergeAndPut` reports the action as skipped).
+Rows are modelled by the set of fields they carry; a row is complete when it
+carries every schema field. Regression tests: `delta-pipeline-integrity.test.ts`
+(client) and `delta-applier-absent-row.test.ts` (core). -/
 
 abbrev Store := Nat → Option (List Nat)
 
@@ -814,6 +820,8 @@ inductive RowAct
   | ins (id : Nat)                    -- `I`: the server sends the full row
   | upd (id : Nat) (changes : List Nat)
   | del (id : Nat)
+  /-- `A`/`V` through `mergeAndPut`: merges `archivedAt` (and any data). -/
+  | arch (id : Nat) (changes : List Nat)
 
 def setRow (st : Store) (id : Nat) (r : Option (List Nat)) : Store :=
   fun j => if j = id then r else st j
@@ -825,12 +833,22 @@ def applyRow (fixed : Bool) (F : List Nat) (st : Store) : RowAct → Store
     match st id with
     | some r => setRow st id (some (r ++ changes))
     | none => if fixed then st else setRow st id (some changes)
+  | .arch id changes =>
+    match st id with
+    | some r => setRow st id (some (r ++ changes))
+    | none => if fixed then st else setRow st id (some changes)
 
 def Complete (F : List Nat) (st : Store) : Prop :=
   ∀ id r, st id = some r → ∀ f ∈ F, f ∈ r
 
 theorem bug_update_on_absent_row_stages_stub :
     let st := applyRow false [0, 1] (fun _ => none) (.upd 7 [1])
+    st 7 = some [1] ∧ ¬ (0 ∈ [1]) := by decide
+
+/-- Same for an archive: `{ ...null, ...data, archivedAt }` keeps only the
+archive field (here field 1). -/
+theorem bug_archive_on_absent_row_stages_stub :
+    let st := applyRow false [0, 1] (fun _ => none) (.arch 7 [1])
     st 7 = some [1] ∧ ¬ (0 ∈ [1]) := by decide
 
 theorem applyRow_complete (F : List Nat) (st : Store) (a : RowAct)
@@ -860,9 +878,23 @@ theorem applyRow_complete (F : List Nat) (st : Store) (a : RowAct)
     | none =>
       simp only [applyRow, hst, ite_true] at hr
       exact h id r hr f hf
+  | arch j changes =>
+    cases hst : st j with
+    | some r0 =>
+      simp only [applyRow, hst, setRow] at hr
+      split at hr
+      · next hj =>
+        cases hr
+        subst hj
+        exact List.mem_append_left _ (h _ r0 hst f hf)
+      · exact h id r hr f hf
+    | none =>
+      simp only [applyRow, hst, ite_true] at hr
+      exact h id r hr f hf
 
 /-- **Theorem (fixed).** Starting from a store of complete rows, every row
-stays complete under any sequence of inserts, updates and deletes. -/
+stays complete under any sequence of inserts, updates, deletes, archives and
+unarchives. -/
 theorem fixed_rows_stay_complete (F : List Nat) (acts : List RowAct) :
     ∀ st : Store, Complete F st → Complete F (acts.foldl (applyRow true F) st) := by
   induction acts with
@@ -874,5 +906,15 @@ earlier in the same packet). -/
 theorem fixed_update_after_insert_merges :
     (([RowAct.ins 7, .upd 7 [1]].foldl (applyRow true [0, 1]) (fun _ => none)) 7)
       = some [0, 1, 1] := by decide
+
+/-- ... and still archives a stored row. -/
+theorem fixed_archive_after_insert_merges :
+    (([RowAct.ins 7, .arch 7 [1]].foldl (applyRow true [0, 1]) (fun _ => none)) 7)
+      = some [0, 1, 1] := by decide
+
+/-- An archive of a row deleted earlier in the same packet stays deleted. -/
+theorem fixed_archive_after_delete_stays_deleted :
+    (([RowAct.ins 7, .del 7, .arch 7 [1]].foldl (applyRow true [0, 1])
+      (fun _ => none)) 7) = none := by decide
 
 end StrataSync.DeltaPipeline
