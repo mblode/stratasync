@@ -173,6 +173,16 @@ export class WebSocketManager {
       if (generation === this.generation) {
         this.setSubscribedReady(false);
         this.setConnectionState("error");
+        // No socket means no close event to drive the retry: schedule it
+        // here (with backoff and the retry budget), or a live subscription is
+        // left with no socket, no attempt and no timer.
+        if (
+          this.shouldReconnect &&
+          this.subscriptions.size > 0 &&
+          !this.reconnectTimer
+        ) {
+          this.scheduleReconnect();
+        }
       }
       throw error;
     } finally {
@@ -449,6 +459,7 @@ export class WebSocketManager {
     this.reconnectAttempts += 1;
 
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
       this.connect().catch(() => {
         // Connection errors are handled by retry logic
