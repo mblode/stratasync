@@ -395,6 +395,41 @@ describe(registerSyncWebsocket, () => {
     expect(deltaSubscriber.onDelta).not.toHaveBeenCalled();
   });
 
+  it("resumes a cursor one below the earliest retained syncId without a bootstrap", async () => {
+    // Same boundary as the HTTP delta route (isSyncCursorStale): nothing lies
+    // strictly between 9 and 10, so no action the client needs was pruned.
+    const harness = setup({
+      getEarliestSyncId: vi.fn().mockResolvedValue(10n),
+      getSyncActions: vi
+        .fn()
+        .mockResolvedValueOnce([createReplayAction(10n)])
+        .mockResolvedValueOnce([]),
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          afterSyncId: "9",
+          token: "tok",
+          type: "subscribe",
+        })
+      )
+    );
+
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(2);
+    });
+
+    expect(parseMessage(harness.socket.sent[0])).toMatchObject({
+      type: "delta",
+    });
+    expect(parseMessage(harness.socket.sent[1])).toMatchObject({
+      afterSyncId: "10",
+      type: "subscribed",
+    });
+  });
+
   it("merges auth and DAO groups before acknowledging the subscription", async () => {
     const resolveGroups = vi
       .fn()
