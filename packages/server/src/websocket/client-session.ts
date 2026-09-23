@@ -3,6 +3,7 @@ import type { WebSocket } from "ws";
 import {
   BOOTSTRAP_REQUIRED,
   BOOTSTRAP_REQUIRED_WS_MESSAGE,
+  isSyncCursorStale,
 } from "../core/errors.js";
 import { toSyncActionOutput } from "../core/sync-action.js";
 import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
@@ -15,6 +16,8 @@ import { buildDeltaFrame, buildErrorFrame } from "./messages.js";
 
 export const MAX_BUFFERED_ACTIONS = 10_000;
 
+const GAP_FILL_PAGE_SIZE = 1000;
+
 export type SessionPhase = "idle" | "replaying" | "live" | "closed";
 
 interface BufferedAction {
@@ -26,6 +29,12 @@ type ReauthorizeDelivery = (token: string) => Promise<SyncUserContext | null>;
 
 interface ClientSessionOptions {
   deliveryMutex: AsyncMutex;
+  /**
+   * Reads the committed ids a live delta skipped over. Without it a live
+   * delta that arrives ahead of a lower id (possible whenever more than one
+   * process publishes) advances the cursor past that id for good.
+   */
+  gapFillDao?: SyncDao;
   groupRefreshGuardDao?: SyncDao;
   reauthorizeDelivery?: ReauthorizeDelivery;
 }
@@ -56,10 +65,25 @@ export class ClientSession {
   principal: unknown = undefined;
   /** Cursor as a bigint; serialized to the wire only at frame egress. */
   afterSyncId = 0n;
+  /**
+   * Every committed id at or below this one that this session may see has
+   * been sent (or deliberately filtered). Always `>= afterSyncId`. Live deltas
+   * are only notifications: one above `scannedThrough + 1` first has the ids
+   * between read from `sync_actions`, so it can never carry the cursor past a
+   * committed id that is still in flight on another process's publish path.
+   *
+   * Sound because `SyncDao.createSyncAction` allocates ids under a
+   * transaction-scoped advisory lock (with the default sequence CACHE 1): once
+   * id `d` is committed, every lower id that will ever commit is already
+   * visible, and ids that were rolled back never will be. See
+   * `verification/lean/StrataSync/Server.lean` §9.
+   */
+  scannedThrough = 0n;
 
   private readonly socket: WebSocket;
   private readonly deltaSubscriber?: DeltaSubscriberLike;
   private readonly deliveryMutex: AsyncMutex;
+  private readonly gapFillDao?: SyncDao;
   private readonly groupRefreshGuardDao?: SyncDao;
   private readonly reauthorizeDelivery?: ReauthorizeDelivery;
   private unsubscribe: (() => void) | null = null;
@@ -75,6 +99,7 @@ export class ClientSession {
     this.socket = socket;
     this.deltaSubscriber = deltaSubscriber;
     this.deliveryMutex = options.deliveryMutex;
+    this.gapFillDao = options.gapFillDao;
     this.groupRefreshGuardDao = options.groupRefreshGuardDao;
     this.reauthorizeDelivery = options.reauthorizeDelivery;
   }
@@ -94,6 +119,7 @@ export class ClientSession {
     this.groups = [];
     this.principal = undefined;
     this.afterSyncId = 0n;
+    this.scannedThrough = 0n;
     this.bufferedActions = [];
     this.groupRefreshCursor = 0n;
     this.token = null;
@@ -114,6 +140,7 @@ export class ClientSession {
     this.groups = groups;
     this.principal = principal;
     this.afterSyncId = afterSyncId;
+    this.scannedThrough = afterSyncId;
     this.groupRefreshCursor = afterSyncId;
     this.token = token;
     this.phase = "replaying";
@@ -152,25 +179,130 @@ export class ClientSession {
       return;
     }
 
-    if (!hasGroupOverlap(this.groups, groups)) {
-      return;
-    }
-
+    // Safe to drop outside the mutex: the cursor only grows, and every id at
+    // or below it is already covered.
     if (SyncId.parse(action.syncId) <= this.afterSyncId) {
       return;
     }
 
     if (this.phase === "replaying") {
-      this.bufferLiveDelta(action, groups);
+      if (hasGroupOverlap(this.groups, groups)) {
+        this.bufferLiveDelta(action, groups);
+      }
       return;
     }
 
     try {
+      // Every delta, including ones for other groups, is ordered through the
+      // mutex so that a contiguous foreign id can advance `scannedThrough`
+      // and spare the next delivery a gap-fill read.
       await this.deliveryMutex.runExclusive(async () => {
-        await this.sendDeltaAction(action);
+        if (this.phase === "live") {
+          await this.deliverLiveDelta(action, groups);
+        }
       });
     } catch {
-      this.close();
+      this.failLiveDelivery();
+    }
+  }
+
+  /**
+   * Delivers one live (or buffered) delta. Must run under the delivery mutex.
+   * A delta for a group this session does not hold is not sent, but when it
+   * is the very next id it still proves nothing lies between, so the scan
+   * horizon moves past it.
+   */
+  private async deliverLiveDelta(
+    action: SyncActionOutput,
+    groups: string[]
+  ): Promise<void> {
+    const syncId = SyncId.parse(action.syncId);
+    if (syncId <= this.scannedThrough) {
+      return;
+    }
+
+    if (!hasGroupOverlap(this.groups, groups)) {
+      if (syncId === this.scannedThrough + 1n) {
+        this.scannedThrough = syncId;
+      }
+      return;
+    }
+
+    await this.sendDeltaAction(action);
+  }
+
+  /**
+   * Decides whether `syncId` is still to be handled and, if so, first sends
+   * every lower committed id this session has not seen (unless the caller
+   * already read up to it), then records `syncId` as scanned.
+   */
+  private async claimSyncId(
+    syncId: bigint,
+    scanned: boolean
+  ): Promise<boolean> {
+    // `afterSyncId <= scannedThrough` always, so this also drops anything at
+    // or below the cursor.
+    if (syncId <= this.scannedThrough) {
+      return false;
+    }
+    if (!scanned && syncId > this.scannedThrough + 1n) {
+      await this.fillGapBefore(syncId);
+      if (this.isClosed || syncId <= this.scannedThrough) {
+        return false;
+      }
+    }
+    this.scannedThrough = syncId;
+    return true;
+  }
+
+  /**
+   * Reads and sends every committed id in `(scannedThrough, syncId)` visible to
+   * this session, in id order, then records the window as scanned.
+   */
+  private async fillGapBefore(syncId: bigint): Promise<void> {
+    const syncDao = this.gapFillDao;
+    const throughSyncId = syncId - 1n;
+    if (syncDao) {
+      let cursor = this.scannedThrough;
+      while (!this.isClosed && cursor < throughSyncId) {
+        const actions = await syncDao.getSyncActionsThrough(
+          cursor,
+          throughSyncId,
+          this.groups,
+          GAP_FILL_PAGE_SIZE
+        );
+        for (const action of actions) {
+          await this.sendDeltaAction(toSyncActionOutput(action), {
+            scanned: true,
+          });
+          if (this.isClosed) {
+            return;
+          }
+        }
+        const lastAction = actions.at(-1);
+        if (!lastAction || actions.length < GAP_FILL_PAGE_SIZE) {
+          break;
+        }
+        cursor = lastAction.id;
+      }
+    }
+
+    if (!this.isClosed && throughSyncId > this.scannedThrough) {
+      this.scannedThrough = throughSyncId;
+    }
+  }
+
+  /**
+   * A live delivery (typically the gap-fill read) failed. Close the socket so
+   * the client resubscribes from the cursor it actually holds rather than
+   * silently stalling.
+   */
+  private failLiveDelivery(): void {
+    this.bufferedActions = [];
+    this.detach();
+    this.phase = "closed";
+    if (this.socket.readyState === this.socket.OPEN) {
+      this.socket.close(1011, "Live delivery failed");
     }
   }
 
@@ -196,15 +328,22 @@ export class ClientSession {
 
   /**
    * Sends a single action if it advances the cursor, then advances it. Used by
-   * both replay and live delivery.
+   * replay, gap fill, buffer flush, live delivery and group-refresh catch-up.
+   *
+   * `scanned` means the caller read `sync_actions` contiguously up to this id
+   * (replay and gap fill); anything else is a notification that may have
+   * overtaken lower ids, so those are read first.
    */
-  async sendDeltaAction(action: SyncActionOutput): Promise<void> {
+  async sendDeltaAction(
+    action: SyncActionOutput,
+    options: { scanned?: boolean } = {}
+  ): Promise<void> {
     if (this.phase === "closed") {
       return;
     }
 
     const syncId = SyncId.parse(action.syncId);
-    if (syncId <= this.afterSyncId) {
+    if (!(await this.claimSyncId(syncId, options.scanned === true))) {
       return;
     }
 
@@ -271,10 +410,7 @@ export class ClientSession {
 
     try {
       const earliestSyncId = await syncDao.getEarliestSyncId();
-      if (
-        this.groupRefreshCursor > 0n &&
-        earliestSyncId > this.groupRefreshCursor
-      ) {
+      if (isSyncCursorStale(this.groupRefreshCursor, earliestSyncId)) {
         this.requireBootstrap();
         return false;
       }
@@ -309,10 +445,7 @@ export class ClientSession {
     }
 
     const earliestSyncId = await syncDao.getEarliestSyncId();
-    if (
-      this.groupRefreshCursor > 0n &&
-      earliestSyncId > this.groupRefreshCursor
-    ) {
+    if (isSyncCursorStale(this.groupRefreshCursor, earliestSyncId)) {
       this.requireBootstrap();
       return;
     }
@@ -420,7 +553,9 @@ export class ClientSession {
 
   /**
    * Transitions replaying -> live: sorts the buffer ascending, dedupes
-   * first-wins by syncId, re-checks group overlap, and delivers each.
+   * first-wins by syncId, and delivers each exactly as a live delta (group
+   * overlap re-checked, gaps filled from `sync_actions`). Runs under the
+   * delivery mutex, held by the subscribe handler.
    */
   async flushBufferedActions(): Promise<void> {
     const seenSyncIds = new Set<string>();
@@ -440,11 +575,7 @@ export class ClientSession {
         }
         seenSyncIds.add(entry.action.syncId);
 
-        if (!hasGroupOverlap(this.groups, entry.groups)) {
-          continue;
-        }
-
-        await this.sendDeltaAction(entry.action);
+        await this.deliverLiveDelta(entry.action, entry.groups);
       }
     }
 

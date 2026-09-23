@@ -1,7 +1,7 @@
 /* oxlint-disable max-classes-per-file */
-import { and, asc, eq, gt, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import type { AnyPgTable } from "drizzle-orm/pg-core";
+import type { AnyPgColumn, AnyPgTable } from "drizzle-orm/pg-core";
 
 import type { CursorConfig } from "../config.js";
 import type { SyncDb } from "../db.js";
@@ -65,6 +65,19 @@ class SimpleCursorStrategy implements CursorStrategy {
   }
 }
 
+/**
+ * Keyset pagination over several columns, NULL-safe.
+ *
+ * Rows are ordered `ASC NULLS LAST` on every field, and the keyset condition
+ * spells out that same order instead of relying on SQL `>`/`=`, which yield
+ * UNKNOWN for a NULL on either side. With plain `>`/`=`, a row whose later
+ * field is NULL was excluded by the page after its boundary (`NULL > v` is not
+ * true), and a boundary row with a NULL field used to stop paging outright.
+ *
+ * Precondition (as for any keyset pagination): the field tuple identifies a
+ * row, treating NULLs as equal. Two rows with the same tuple can straddle a
+ * page boundary and the second is skipped. End the list with the primary key.
+ */
 class CompositeCursorStrategy implements CursorStrategy {
   private readonly fields: readonly string[];
 
@@ -73,7 +86,9 @@ class CompositeCursorStrategy implements CursorStrategy {
   }
 
   orderBy(table: AnyPgTable): SQL<unknown>[] {
-    return this.fields.map((field) => asc(getColumn(table, field)));
+    return this.fields.map(
+      (field) => sql`${getColumn(table, field)} asc nulls last`
+    );
   }
 
   whereCondition(table: AnyPgTable, cursor: unknown): SQL<unknown> | undefined {
@@ -83,7 +98,7 @@ class CompositeCursorStrategy implements CursorStrategy {
     }
 
     // OR-of-ANDs keyset pagination: for each field i, (prefix equal) AND
-    // (field i greater than cursor). Field 0 has no prefix.
+    // (field i after the cursor). Field 0 has no prefix.
     const orConditions: SQL<unknown>[] = [];
     for (let index = 0; index < this.fields.length; index += 1) {
       const branch = this.branch(table, cursorValues, index);
@@ -92,21 +107,33 @@ class CompositeCursorStrategy implements CursorStrategy {
       }
     }
 
-    return orConditions.length > 0 ? or(...orConditions) : undefined;
+    // Every field of the cursor is NULL: it is the last possible key, so no
+    // row lies after it. (Returning no condition would restart from the top.)
+    return orConditions.length > 0 ? or(...orConditions) : sql`false`;
   }
 
   nextCursor(lastRow: Record<string, unknown>): unknown {
     const nextCursor: Record<string, unknown> = {};
     for (const field of this.fields) {
-      const value = lastRow[field];
-      // Stop-on-null-cursor-field: a null/undefined keyset field can't anchor
-      // the next page deterministically, so paging must stop.
-      if (!isCursorValue(value)) {
-        return null;
-      }
-      nextCursor[field] = value;
+      nextCursor[field] = lastRow[field] ?? null;
     }
     return nextCursor;
+  }
+
+  /** `column` sorts after `value` under `ASC NULLS LAST`; undefined = never. */
+  private static after(
+    column: AnyPgColumn,
+    value: unknown
+  ): SQL<unknown> | undefined {
+    if (!isCursorValue(value)) {
+      return undefined;
+    }
+    return or(gt(column, value), isNull(column));
+  }
+
+  /** NULL-safe equality (`IS NOT DISTINCT FROM`). */
+  private static same(column: AnyPgColumn, value: unknown): SQL<unknown> {
+    return isCursorValue(value) ? eq(column, value) : isNull(column);
   }
 
   private branch(
@@ -119,40 +146,28 @@ class CompositeCursorStrategy implements CursorStrategy {
       return undefined;
     }
 
-    const fieldValue = cursorValues[field];
-    if (!isCursorValue(fieldValue)) {
+    const currentAfter = CompositeCursorStrategy.after(
+      getColumn(table, field),
+      cursorValues[field]
+    );
+    if (!currentAfter) {
       return undefined;
     }
 
-    const currentGreaterThan = gt(getColumn(table, field), fieldValue);
-    if (index === 0) {
-      return currentGreaterThan;
-    }
-
-    const prefix = this.prefix(table, cursorValues, index);
-    return prefix
-      ? (and(prefix, currentGreaterThan) ?? currentGreaterThan)
-      : currentGreaterThan;
-  }
-
-  private prefix(
-    table: AnyPgTable,
-    cursorValues: Record<string, unknown>,
-    index: number
-  ): SQL<unknown> | undefined {
     const prefixConditions: SQL<unknown>[] = [];
     for (let prefixIndex = 0; prefixIndex < index; prefixIndex += 1) {
       const prefixField = this.fields[prefixIndex];
-      if (!prefixField) {
-        continue;
+      if (prefixField) {
+        prefixConditions.push(
+          CompositeCursorStrategy.same(
+            getColumn(table, prefixField),
+            cursorValues[prefixField]
+          )
+        );
       }
-      const prefixValue = cursorValues[prefixField];
-      if (!isCursorValue(prefixValue)) {
-        continue;
-      }
-      prefixConditions.push(eq(getColumn(table, prefixField), prefixValue));
     }
-    return combineAnd(prefixConditions);
+    const prefix = combineAnd(prefixConditions);
+    return prefix ? (and(prefix, currentAfter) ?? currentAfter) : currentAfter;
   }
 }
 

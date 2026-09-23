@@ -79,6 +79,47 @@ describe.skipIf(!process.env.STRATASYNC_TEST_DATABASE_URL)(
       expect(await fixture.service.isCursorStale(0n)).toBeFalsy();
     });
 
+    it("reports a stale cursor after retention prunes every action", async () => {
+      await fixture.db.insert(fixture.actions).values(
+        [1, 2, 3].map(() => ({
+          action: "I",
+          data: {},
+          groupId: group(1),
+          model: "Task",
+          modelId: group(10),
+        }))
+      );
+      await fixture.client.unsafe(
+        `DELETE FROM "${fixture.schemaName}".sync_actions`
+      );
+
+      // Ids 2 and 3 are gone; a client that applied only 1 must bootstrap.
+      expect(await fixture.dao.getEarliestSyncId()).toBe(4n);
+      expect(await fixture.service.isCursorStale(1n)).toBeTruthy();
+      expect(await fixture.service.isCursorStale(2n)).toBeTruthy();
+      expect(await fixture.service.isCursorStale(3n)).toBeFalsy();
+    });
+
+    it("reads a closed id window for live gap fill", async () => {
+      await fixture.db.insert(fixture.actions).values(
+        [group(1), group(2), null, group(1), group(1)].map((groupId) => ({
+          action: "I",
+          data: {},
+          groupId,
+          model: "Task",
+          modelId: group(10),
+        }))
+      );
+
+      const rows = await fixture.dao.getSyncActionsThrough(
+        1n,
+        4n,
+        [group(1)],
+        10
+      );
+      expect(rows.map((row) => row.id)).toEqual([3n, 4n]);
+    });
+
     it("does not advance past an uncommitted lower action while another writer waits", async () => {
       const input = {
         action: "I",

@@ -3,12 +3,14 @@
 
     packages/server/src/utils/async-mutex.ts            (AsyncMutex)
     packages/server/src/websocket/client-session.ts     (sendDeltaAction, onLiveDelta,
-                                                         flushBufferedActions, G narrowing)
+                                                         flushBufferedActions, G narrowing,
+                                                         fillGapBefore)
     packages/server/src/websocket/sync-websocket.ts     (handleSubscribe ordering)
     packages/server/src/websocket/replay.ts             (replaySyncActions paging)
     packages/server/src/mutate/mutate-service.ts        (processTransaction: commit → publish,
                                                          clientTxId dedup)
-    packages/server/src/dao/sync-dao.ts                 (insert-order advisory lock)
+    packages/server/src/dao/sync-dao.ts                 (insert-order advisory lock,
+                                                         getEarliestSyncId, getSyncActionsThrough)
     packages/server/src/bootstrap/cursor.ts             (keyset pagination)
     packages/server/src/core/errors.ts                  (isSyncCursorStale)
 
@@ -37,6 +39,19 @@
        repeats a key, never skips a key that is present throughout.
     8. Sync-group scoping: a live session's groups only ever narrow, and a
        group-scoped delta is only framed for a group the session holds.
+    9. BUG (fixed): cross-process publish order. A publish from another process
+       can overtake a lower committed id; the session now treats a live delta
+       as a notification and reads the skipped ids from `sync_actions` first.
+       Exhaustive over schedules where allocated ids commit, roll back and
+       publish in any order the insert-order lock allows (and a counterexample
+       showing the lock is required).
+   10. BUG (fixed): an empty `sync_actions` (retention pruned everything)
+       reported every cursor fresh. The floor is now one above the sequence
+       high-water mark.
+   11. BUG (fixed): composite keyset pagination skipped a row with a NULL in a
+       later cursor field at a page boundary (and stopped on a NULL boundary
+       row). Generic keyset exactness for any strict total order, NULLS LAST
+       instance.
 
   Async interleavings are modelled explicitly: each `await` in the TypeScript
   is a boundary between atomic steps, and theorems quantify over every
@@ -287,8 +302,8 @@ The client's cursor is 2, so no later replay returns id 1 either: lost.
 Scope of the fix: it makes publish order equal commit order *within one
 process* (the in-process `DeltaBus`), since nothing awaits between the
 transaction resolving and `onAction`. Across processes fanned out through
-Redis pub/sub, two publishers can still interleave out of id order; that
-residual race is outside this model. -/
+Redis pub/sub, two publishers can still interleave out of id order; §9 makes
+the session tolerate that. -/
 
 /-- A mutation request's atomic steps. -/
 inductive MStep | commit (req : Nat) | publish (req : Nat)
@@ -987,5 +1002,653 @@ theorem no_leaked_group_delta (G0 : List Nat) : ∀ (evs : List GEv),
   induction evs with
   | nil => exact fun _ h => h
   | cons e es ih => exact fun s h => ih _ (gstep_inv G0 s h e)
+
+/-! ## 9. BUG (fixed): cross-process publish order
+
+§3 made publish order equal commit order inside one process. With Redis (or
+any multi-process fan-out) two processes still publish independently: A
+commits 1, B commits 2, B's publish reaches a third process first. The
+session there sent 2, set `afterSyncId := 2`, and then dropped 1 as
+`<= afterSyncId`; the client's reconnect cursor is past 1, so no replay
+returns it either — permanent loss.
+
+Fix (`ClientSession.sendDeltaAction` / `fillGapBefore` /
+`deliverLiveDelta`): a live delta is a notification. Before sending id `i`
+with `i > scannedThrough + 1`, read `sync_actions` for `(scannedThrough, i)`
+(filtered by the session's groups, `SyncDao.getSyncActionsThrough`), send
+those rows in id order, then `i`, and set `scannedThrough := i`. A delta for a
+group the session does not hold is not sent, but if it is exactly
+`scannedThrough + 1` it advances the horizon (no read needed next time).
+
+Why reading is enough — no horizon/delay is needed: `createSyncAction`
+allocates ids under `pg_advisory_xact_lock`, held until commit (and Postgres
+makes a commit visible before it releases the transaction's locks). So at most
+one allocated id is in flight, it is the highest allocated, and when id `i`
+is committed every lower id that will ever commit is already visible; ids
+consumed by rolled-back transactions never become visible and are correctly
+skipped. That precondition is essential — `bug_gap_fill_needs_commit_ordered_ids`
+shows the same session losing an id when two ids may be in flight at once
+(e.g. without the lock, or with a sequence `CACHE > 1`).
+
+Model. Ids are allocated `1, 2, …` (`alloc`); an allocated id may `commit`
+(becomes visible and its publish is queued in `pending`) or `rollback`, in any
+order the lock allows (`locked = false`: any order at all). `recv i` delivers
+any queued publish to the session — arbitrary cross-process reordering — and
+`drop i` loses one (Redis is best-effort). `vis` is the session's group
+filter. The gap read and the frame sends are one atomic step: under the lock
+the visible set in `(scanned, i)` cannot grow once `i` is committed, so a later
+read would return the same rows. -/
+
+structure XS where
+  next : Nat
+  inflight : List Nat
+  committed : List Nat
+  pending : List Nat
+  scanned : Nat
+  out : List Nat
+  deriving Repr
+
+inductive XEv | alloc | commit (i : Nat) | rollback (i : Nat) | recv (i : Nat) | drop (i : Nat)
+  deriving DecidableEq, Repr
+
+def xinit : XS := ⟨0, [], [], [], 0, []⟩
+
+def recvBuggy (vis : Nat → Bool) (s : XS) (i : Nat) : XS :=
+  if vis i && decide (s.scanned < i) then { s with scanned := i, out := s.out ++ [i] } else s
+
+def gapIds (vis : Nat → Bool) (s : XS) (i : Nat) : List Nat :=
+  (rng s.scanned (i - s.scanned - 1)).filter (fun c => decide (c ∈ s.committed) && vis c)
+
+def recvFixed (vis : Nat → Bool) (s : XS) (i : Nat) : XS :=
+  if i ≤ s.scanned then s
+  else if vis i then { s with scanned := i, out := s.out ++ gapIds vis s i ++ [i] }
+  else if i = s.scanned + 1 then { s with scanned := i }
+  else s
+
+def xstep (locked : Bool) (recv : (Nat → Bool) → XS → Nat → XS) (vis : Nat → Bool)
+    (s : XS) : XEv → XS
+  | .alloc =>
+    if locked && !s.inflight.isEmpty then s
+    else { s with next := s.next + 1, inflight := s.inflight ++ [s.next + 1] }
+  | .commit i =>
+    if i ∈ s.inflight then
+      { s with inflight := s.inflight.filter (· ≠ i), committed := s.committed ++ [i],
+               pending := s.pending ++ [i] }
+    else s
+  | .rollback i =>
+    if i ∈ s.inflight then { s with inflight := s.inflight.filter (· ≠ i) } else s
+  | .recv i =>
+    if i ∈ s.pending then recv vis { s with pending := s.pending.filter (· ≠ i) } i else s
+  | .drop i => { s with pending := s.pending.filter (· ≠ i) }
+
+def xrun (locked : Bool) (recv : (Nat → Bool) → XS → Nat → XS) (vis : Nat → Bool)
+    (evs : List XEv) : XS :=
+  evs.foldl (xstep locked recv vis) xinit
+
+/-- The old session (cursor-only filter): B's 2 overtakes A's 1, and 1 is lost. -/
+theorem bug_cross_process_publish_order_drops :
+    let s := xrun true recvBuggy (fun _ => true)
+      [.alloc, .commit 1, .alloc, .commit 2, .recv 2, .recv 1]
+    s.committed = [1, 2] ∧ s.out = [2] ∧ s.scanned = 2 := by decide
+
+/-- Gap fill alone is unsound when ids can commit out of order: 2 commits
+while 1 is still in flight, the read finds nothing below 2, and 1 then
+commits below the cursor. The advisory lock rules this schedule out. -/
+theorem bug_gap_fill_needs_commit_ordered_ids :
+    let s := xrun false recvFixed (fun _ => true)
+      [.alloc, .alloc, .commit 2, .recv 2, .commit 1, .recv 1]
+    s.committed = [2, 1] ∧ s.out = [2] ∧ s.scanned = 2 := by decide
+
+theorem cross_process_fixed_example :
+    let s := xrun true recvFixed (fun _ => true)
+      [.alloc, .commit 1, .alloc, .commit 2, .recv 2, .recv 1]
+    s.out = [1, 2] := by decide
+
+/-- Invariant of the fixed session under the insert-order lock. -/
+structure XInv (vis : Nat → Bool) (s : XS) : Prop where
+  committed_le : ∀ c ∈ s.committed, c ≤ s.next
+  inflight_gt : ∀ f ∈ s.inflight, f ≤ s.next ∧ s.scanned < f ∧ ∀ c ∈ s.committed, c < f
+  one_inflight : s.inflight.length ≤ 1
+  scanned_le : s.scanned ≤ s.next
+  pending_committed : ∀ p ∈ s.pending, p ∈ s.committed
+  no_loss : ∀ c ∈ s.committed, vis c = true → c ≤ s.scanned → c ∈ s.out
+  out_sorted : s.out.Pairwise (· < ·)
+  out_ok : ∀ x ∈ s.out, x ≤ s.scanned ∧ x ∈ s.committed ∧ vis x = true
+
+theorem singleton_of_length_le_one {l : List Nat} {i : Nat} (h : l.length ≤ 1) (hi : i ∈ l) :
+    l = [i] := by
+  match l, h, hi with
+  | [a], _, hi => simp at hi; simp [hi]
+  | _ :: _ :: _, h, _ => simp at h
+
+theorem recvFixed_inv (vis : Nat → Bool) (s : XS) (h : XInv vis s) (i : Nat)
+    (hi : i ∈ s.committed) : XInv vis (recvFixed vis s i) := by
+  have hin := h.committed_le i hi
+  have hinf : ∀ f ∈ s.inflight, i < f := fun f hf => (h.inflight_gt f hf).2.2 i hi
+  unfold recvFixed
+  by_cases hle : i ≤ s.scanned
+  · simp only [hle, ite_true]; exact h
+  simp only [hle, ite_false]
+  by_cases hv : vis i = true
+  · simp only [hv, ite_true]
+    have hgap : ∀ x ∈ gapIds vis s i, s.scanned < x ∧ x < i ∧ x ∈ s.committed ∧ vis x = true := by
+      intro x hx
+      simp only [gapIds, List.mem_filter, Bool.and_eq_true, decide_eq_true_eq] at hx
+      have := mem_rng.mp hx.1
+      exact ⟨by omega, by omega, hx.2.1, hx.2.2⟩
+    refine ⟨h.committed_le, ?_, h.one_inflight, by simpa using hin, h.pending_committed, ?_, ?_, ?_⟩
+    · intro f hf
+      exact ⟨(h.inflight_gt f hf).1, hinf f hf, (h.inflight_gt f hf).2.2⟩
+    · intro c hc hvc hci
+      simp only [List.mem_append, List.mem_singleton]
+      by_cases h1 : c ≤ s.scanned
+      · exact Or.inl (Or.inl (h.no_loss c hc hvc h1))
+      · by_cases h2 : c = i
+        · exact Or.inr h2
+        · left; right
+          simp only [gapIds, List.mem_filter, Bool.and_eq_true, decide_eq_true_eq]
+          exact ⟨mem_rng.mpr ⟨by omega, by simp at hci; omega⟩, hc, hvc⟩
+    · rw [List.pairwise_append, List.pairwise_append]
+      refine ⟨⟨h.out_sorted, (rng_pairwise _ _).filter _, ?_⟩, by simp, ?_⟩
+      · intro a ha b hb
+        have := (h.out_ok a ha).1; have := (hgap b hb).1; omega
+      · intro a ha b hb
+        simp at hb; subst hb
+        simp only [List.mem_append] at ha
+        rcases ha with ha | ha
+        · have := (h.out_ok a ha).1; omega
+        · exact (hgap a ha).2.1
+    · intro x hx
+      dsimp only at hx ⊢
+      simp only [List.mem_append, List.mem_singleton] at hx
+      rcases hx with (hx | hx) | hx
+      · have := h.out_ok x hx; exact ⟨by omega, this.2⟩
+      · have := hgap x hx; exact ⟨by omega, this.2.2⟩
+      · subst hx; exact ⟨Nat.le_refl _, hi, hv⟩
+  · simp only [hv, Bool.false_eq_true, ite_false]
+    by_cases hs : i = s.scanned + 1
+    · simp only [hs, ite_true]
+      refine ⟨h.committed_le, ?_, h.one_inflight, by simp; omega, h.pending_committed, ?_,
+        h.out_sorted, ?_⟩
+      · intro f hf
+        dsimp only at hf ⊢
+        exact ⟨(h.inflight_gt f hf).1, by have := hinf f hf; omega, (h.inflight_gt f hf).2.2⟩
+      · intro c hc hvc hci
+        dsimp only at hc hci ⊢
+        by_cases h1 : c ≤ s.scanned
+        · exact h.no_loss c hc hvc h1
+        · have : c = i := by omega
+          subst this; simp_all
+      · intro x hx
+        dsimp only at hx ⊢
+        have := h.out_ok x hx; exact ⟨by omega, this.2⟩
+    · simp only [hs, ite_false]; exact h
+
+theorem xstep_inv (vis : Nat → Bool) (s : XS) (h : XInv vis s) (e : XEv) :
+    XInv vis (xstep true recvFixed vis s e) := by
+  cases e with
+  | alloc =>
+    by_cases hnil : s.inflight = []
+    · have e : xstep true recvFixed vis s .alloc =
+          { s with next := s.next + 1, inflight := [s.next + 1] } := by
+        simp [xstep, hnil]
+      rw [e]
+      refine ⟨fun c hc => by have := h.committed_le c hc; dsimp only; omega, ?_, by simp,
+        by have := h.scanned_le; dsimp only; omega, h.pending_committed, h.no_loss, h.out_sorted,
+        h.out_ok⟩
+      intro f hf
+      dsimp only at hf ⊢
+      simp at hf; subst hf
+      refine ⟨Nat.le_refl _, by have := h.scanned_le; omega, ?_⟩
+      intro c hc; have := h.committed_le c hc; omega
+    · have e : xstep true recvFixed vis s .alloc = s := by
+        simp [xstep, hnil]
+      rw [e]; exact h
+  | commit i =>
+    simp only [xstep]
+    split
+    · rename_i hi
+      have hone := singleton_of_length_le_one h.one_inflight hi
+      have hfil : s.inflight.filter (· ≠ i) = [] := by rw [hone]; simp
+      have ⟨hin, hsc, _⟩ := h.inflight_gt i hi
+      refine ⟨?_, ?_, ?_, h.scanned_le, ?_, ?_, h.out_sorted, ?_⟩
+      · intro c hc; dsimp only at hc ⊢; simp at hc; rcases hc with hc | hc
+        · exact h.committed_le c hc
+        · omega
+      · rw [hfil]; simp
+      · rw [hfil]; simp
+      · intro p hp; simp at hp ⊢; rcases hp with hp | hp
+        · exact Or.inl (h.pending_committed p hp)
+        · exact Or.inr hp
+      · intro c hc hvc hcs; dsimp only at hc hcs ⊢; simp at hc; rcases hc with hc | hc
+        · exact h.no_loss c hc hvc hcs
+        · omega
+      · intro x hx; have := h.out_ok x hx
+        exact ⟨this.1, by simp [this.2.1], this.2.2⟩
+    · exact h
+  | rollback i =>
+    simp only [xstep]
+    split
+    · refine ⟨h.committed_le, ?_, ?_, h.scanned_le, h.pending_committed, h.no_loss,
+        h.out_sorted, h.out_ok⟩
+      · intro f hf; exact h.inflight_gt f ((List.mem_filter.mp hf).1)
+      · exact Nat.le_trans (List.length_filter_le _ _) h.one_inflight
+    · exact h
+  | recv i =>
+    simp only [xstep]
+    split
+    · rename_i hi
+      refine recvFixed_inv vis { s with pending := s.pending.filter (· ≠ i) } ?_ i
+        (h.pending_committed i hi)
+      exact ⟨h.committed_le, h.inflight_gt, h.one_inflight, h.scanned_le,
+        fun p hp => h.pending_committed p ((List.mem_filter.mp hp).1), h.no_loss, h.out_sorted,
+        h.out_ok⟩
+    · exact h
+  | drop i =>
+    exact ⟨h.committed_le, h.inflight_gt, h.one_inflight, h.scanned_le,
+      fun p hp => h.pending_committed p ((List.mem_filter.mp hp).1), h.no_loss, h.out_sorted,
+      h.out_ok⟩
+
+theorem xrun_inv (vis : Nat → Bool) (evs : List XEv) : XInv vis (xrun true recvFixed vis evs) := by
+  suffices ∀ s, XInv vis s → XInv vis (evs.foldl (xstep true recvFixed vis) s) from
+    this _ ⟨by simp [xinit], by simp [xinit], by simp [xinit], by simp [xinit], by simp [xinit],
+      by simp [xinit], by simp [xinit], by simp [xinit]⟩
+  induction evs with
+  | nil => exact fun _ h => h
+  | cons e es ih => exact fun s h => ih _ (xstep_inv vis s h e)
+
+/-- **Fixed**: under every schedule of allocations, commits, rollbacks, and
+reordered or lost publishes, the frames are strictly increasing, are all
+committed ids the session may see, and never skip one: every committed
+visible id at or below the client's cursor (the last frame) was sent. -/
+theorem cross_process_never_skips (vis : Nat → Bool) (evs : List XEv) :
+    let s := xrun true recvFixed vis evs
+    s.out.Pairwise (· < ·) ∧
+    (∀ x ∈ s.out, x ∈ s.committed ∧ vis x = true) ∧
+    ∀ last, s.out.getLast? = some last →
+      ∀ c ∈ s.committed, vis c = true → c ≤ last → c ∈ s.out := by
+  have h := xrun_inv vis evs
+  refine ⟨h.out_sorted, fun x hx => (h.out_ok x hx).2, ?_⟩
+  intro last hl c hc hv hcl
+  have := (h.out_ok last (List.mem_of_getLast? hl)).1
+  exact h.no_loss c hc hv (by omega)
+
+/-- Liveness per notification: once a visible id's own publish is received,
+it has been delivered. -/
+theorem cross_process_recv_delivers (vis : Nat → Bool) (evs : List XEv) (i : Nat)
+    (hp : i ∈ (xrun true recvFixed vis evs).pending) (hv : vis i = true) :
+    i ∈ (xstep true recvFixed vis (xrun true recvFixed vis evs) (.recv i)).out := by
+  have h := xrun_inv vis evs
+  have hc := h.pending_committed i hp
+  simp only [xstep, hp, ite_true, recvFixed]
+  split
+  · exact h.no_loss i hc hv (by assumption)
+  · simp
+
+/-! ## 10. BUG (fixed): stale cursor once retention empties `sync_actions`
+
+`getEarliestSyncId` returned 0 for an empty table and `isSyncCursorStale`
+treats 0 as "nothing retained, nothing missed". After retention deletes every
+row, a client with an old cursor was told it was current and silently missed
+the pruned actions. Fix: on an empty table the floor is one above the id
+sequence's high-water mark (`pg_sequence_last_value`); every id at or below it
+may have been committed and pruned. Retention prunes a prefix: the retained
+rows are the committed ids above some `p`. `hw` bounds every allocated id. -/
+
+def earliestBuggy (retained : List Nat) (_hw : Nat) : Nat := retained.head?.getD 0
+
+def earliestFixed (retained : List Nat) (hw : Nat) : Nat :=
+  match retained.head? with
+  | some e => e
+  | none => if hw = 0 then 0 else hw + 1
+
+theorem bug_stale_empty_table_misses_pruned :
+    let committed := [1, 2, 3]
+    let retained := committed.filter (fun c => decide (3 < c))
+    retained = [] ∧ isSyncCursorStale 1 (earliestBuggy retained 3) = false ∧
+      (2 ∈ committed ∧ 2 ∉ retained ∧ 1 < 2) := by decide
+
+/-- **Fixed**: whenever an id the client has not applied was pruned, the
+cursor is reported stale — with rows retained or not. -/
+theorem stale_fixed_sound (committed : List Nat) (hw p after : Nat)
+    (hhw : ∀ c ∈ committed, c ≤ hw) (ha : 0 < after)
+    (c : Nat) (hc : c ∈ committed) (hpruned : c ≤ p) (hafter : after < c) :
+    isSyncCursorStale after (earliestFixed (committed.filter (fun x => decide (p < x))) hw)
+      = true := by
+  have hchw := hhw c hc
+  unfold earliestFixed
+  split
+  · rename_i e he
+    have hmem : e ∈ committed.filter (fun x => decide (p < x)) := List.mem_of_head? he
+    have hpe : p < e := by simpa using (List.mem_filter.mp hmem).2
+    simp [isSyncCursorStale]; omega
+  · have : hw ≠ 0 := by omega
+    simp [isSyncCursorStale, this]; omega
+
+/-- A client level with the high-water mark is not sent to bootstrap. -/
+theorem stale_fixed_level_is_live (hw : Nat) :
+    isSyncCursorStale hw (earliestFixed [] hw) = false := by
+  by_cases h : hw = 0
+  · simp [earliestFixed, isSyncCursorStale, h]
+  · simp [earliestFixed, isSyncCursorStale, h]
+
+/-! ## 11. BUG (fixed): composite keyset pagination with NULLs
+
+`CompositeCursorStrategy` keyset condition was the OR-of-ANDs of SQL `>`/`=`.
+Its fields are arbitrary configured columns (not necessarily the NOT NULL
+primary key), e.g. `["listId", "sortOrder", "id"]` with a nullable
+`sortOrder`. Rows sort `ASC` = `NULLS LAST`, but `NULL > v` and `NULL = v` are
+UNKNOWN, so the row after a page boundary whose next field is NULL was
+excluded; and a boundary row with a NULL field stopped paging outright.
+
+Fix: order `ASC NULLS LAST` explicitly, compare with `col > v OR col IS NULL`
+(nothing sorts after a NULL cursor value) and `IS NOT DISTINCT FROM`, keep
+NULLs in the cursor, and match nothing after an all-NULL cursor.
+Precondition (for any keyset pagination): the field tuple is unique, NULLs
+equal — here: every snapshot is strictly sorted by the key order.
+
+First a generic keyset theorem for any strict total key order (§7 is the
+`Nat` instance), then the two-column NULLS LAST instance. -/
+
+section Keyset
+variable {α : Type}
+
+structure KPg (α : Type) where
+  cursor : Option α
+  emitted : List α
+  done : Bool
+
+def kAfter (lt : α → α → Bool) : Option α → α → Bool
+  | none, _ => true
+  | some c, x => lt c x
+
+def kPage (lt : α → α → Bool) (k : Nat) (c : Option α) (snap : List α) : List α :=
+  (snap.filter (kAfter lt c)).take k
+
+def kStep (lt : α → α → Bool) (k : Nat) (s : KPg α) (snap : List α) : KPg α :=
+  if s.done then s else
+    let p := kPage lt k s.cursor snap
+    { cursor := match p.getLast? with
+        | some z => some z
+        | none => s.cursor,
+      emitted := s.emitted ++ p,
+      done := decide (p.length < k) }
+
+/-- A strict total order on keys: what `ORDER BY` sorts by. -/
+structure StrictTotal (lt : α → α → Bool) : Prop where
+  irrefl : ∀ a, lt a a = false
+  trans : ∀ a b c, lt a b = true → lt b c = true → lt a c = true
+  total : ∀ a b, a ≠ b → lt a b = true ∨ lt b a = true
+
+theorem StrictTotal.asymm {lt : α → α → Bool} (o : StrictTotal lt) (a b : α)
+    (h : lt a b = true) : lt b a = false := by
+  cases hb : lt b a
+  · rfl
+  · have := o.trans a b a h hb; rw [o.irrefl] at this; exact absurd this (by decide)
+
+/-- Not after the cursor means at or before it. -/
+theorem StrictTotal.le_of_not_after {lt : α → α → Bool} (o : StrictTotal lt) (c e : α)
+    (h : lt c e = false) : e = c ∨ lt e c = true := by
+  by_cases hec : e = c
+  · exact Or.inl hec
+  · rcases o.total e c hec with h' | h'
+    · exact Or.inr h'
+    · rw [h] at h'; exact absurd h' (by decide)
+
+theorem pairwise_last {lt : α → α → Bool} {l : List α} {z : α}
+    (hs : l.Pairwise (fun a b => lt a b = true)) (hz : l.getLast? = some z) :
+    ∀ y ∈ l, y = z ∨ lt y z = true := by
+  obtain ⟨ys, rfl⟩ := List.getLast?_eq_some_iff.mp hz
+  rw [List.pairwise_append] at hs
+  intro y hy
+  simp only [List.mem_append, List.mem_singleton] at hy
+  rcases hy with hy | hy
+  · exact Or.inr (hs.2.2 y hy z (by simp))
+  · exact Or.inl hy
+
+theorem not_mem_take_after {lt : α → α → Bool} {l : List α}
+    (hs : l.Pairwise (fun a b => lt a b = true)) (k : Nat) (x : α)
+    (hx : x ∈ l) (hn : x ∉ l.take k) : ∀ y ∈ l.take k, lt y x = true := by
+  have hsplit := List.take_append_drop k l
+  rw [← hsplit] at hs hx
+  rw [List.pairwise_append] at hs
+  rw [List.mem_append] at hx
+  rcases hx with hx | hx
+  · exact absurd hx hn
+  · intro y hy; exact hs.2.2 y hy x hx
+
+def KInv (lt : α → α → Bool) (stable : List α) (s : KPg α) : Prop :=
+  s.emitted.Pairwise (fun a b => lt a b = true) ∧
+  (∀ e ∈ s.emitted, kAfter lt s.cursor e = false) ∧
+  (∀ x ∈ stable, kAfter lt s.cursor x = false → x ∈ s.emitted) ∧
+  (s.done = true → ∀ x ∈ stable, x ∈ s.emitted)
+
+theorem kStep_inv {lt : α → α → Bool} (o : StrictTotal lt) (k : Nat) (stable : List α)
+    (s : KPg α) (snap : List α)
+    (hs : snap.Pairwise (fun a b => lt a b = true)) (hst : ∀ x ∈ stable, x ∈ snap)
+    (h : KInv lt stable s) : KInv lt stable (kStep lt k s snap) := by
+  unfold kStep
+  split
+  · exact h
+  obtain ⟨h1, h2, h3, _⟩ := h
+  have hfs : (snap.filter (kAfter lt s.cursor)).Pairwise (fun a b => lt a b = true) :=
+    hs.filter _
+  have hps : (kPage lt k s.cursor snap).Pairwise (fun a b => lt a b = true) :=
+    hfs.sublist (List.take_sublist _ _)
+  have hpa : ∀ y ∈ kPage lt k s.cursor snap, kAfter lt s.cursor y = true := by
+    intro y hy
+    exact (List.mem_filter.mp ((List.take_sublist _ _).subset hy)).2
+  -- everything already emitted sorts before every page row
+  have hcross : ∀ e ∈ s.emitted, ∀ y ∈ kPage lt k s.cursor snap, lt e y = true := by
+    intro e he y hy
+    have hce := h2 e he
+    have hcy := hpa y hy
+    cases hc : s.cursor with
+    | none => rw [hc] at hce; simp [kAfter] at hce
+    | some c =>
+      rw [hc] at hce hcy; simp only [kAfter] at hce hcy
+      rcases o.le_of_not_after c e hce with rfl | hec
+      · exact hcy
+      · exact o.trans _ _ _ hec hcy
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · simp only
+    rw [List.pairwise_append]
+    exact ⟨h1, hps, hcross⟩
+  · intro e he
+    simp only [List.mem_append] at he
+    dsimp only
+    split
+    · rename_i z hz
+      have hzl := pairwise_last hps hz
+      have hzm : z ∈ kPage lt k s.cursor snap := List.mem_of_getLast? hz
+      simp only [kAfter]
+      rcases he with he | he
+      · exact o.asymm _ _ (hcross e he z hzm)
+      · rcases hzl e he with rfl | hez
+        · exact o.irrefl e
+        · exact o.asymm _ _ hez
+    · rename_i hz
+      rcases he with he | he
+      · exact h2 e he
+      · have : kPage lt k s.cursor snap = [] := List.getLast?_eq_none_iff.mp hz
+        rw [this] at he; simp at he
+  · intro x hx hna
+    simp only [List.mem_append]
+    cases hxa : kAfter lt s.cursor x with
+    | false => exact Or.inl (h3 x hx hxa)
+    | true =>
+      right
+      by_cases hin : x ∈ kPage lt k s.cursor snap
+      · exact hin
+      · exfalso
+        have hxf : x ∈ snap.filter (kAfter lt s.cursor) := List.mem_filter.mpr ⟨hst x hx, hxa⟩
+        have hbefore := not_mem_take_after hfs k x hxf hin
+        revert hna
+        dsimp only
+        split
+        · rename_i z hz
+          simp only [kAfter]
+          rw [hbefore z (List.mem_of_getLast? hz)]; simp
+        · rw [hxa]; simp
+  · intro hdone x hx
+    simp only [decide_eq_true_eq] at hdone
+    simp only [List.mem_append]
+    cases hxa : kAfter lt s.cursor x with
+    | false => exact Or.inl (h3 x hx hxa)
+    | true =>
+      right
+      have hlen : (snap.filter (kAfter lt s.cursor)).length < k := by
+        have := @List.length_take _ k (snap.filter (kAfter lt s.cursor))
+        unfold kPage at hdone; omega
+      unfold kPage
+      rw [List.take_of_length_le (by omega)]
+      exact List.mem_filter.mpr ⟨hst x hx, hxa⟩
+
+/-- **Keyset pagination is exact for any strict total key order**, under
+arbitrary inserts/deletes between pages: emitted keys strictly increase, and
+once paging stops every key present throughout was emitted. -/
+theorem keyset_exact {lt : α → α → Bool} (o : StrictTotal lt) (k : Nat) (stable : List α) :
+    ∀ (snaps : List (List α)), (∀ snap ∈ snaps, snap.Pairwise (fun a b => lt a b = true)) →
+    (∀ snap ∈ snaps, ∀ x ∈ stable, x ∈ snap) →
+    ∀ s, KInv lt stable s → KInv lt stable (snaps.foldl (kStep lt k) s)
+  | [], _, _, _, h => h
+  | snap :: rest, hs, hst, s, h => by
+    apply keyset_exact o k stable rest (fun x hx => hs x (by simp [hx]))
+      (fun x hx => hst x (by simp [hx]))
+    exact kStep_inv o k stable s snap (hs snap (by simp)) (hst snap (by simp)) h
+
+theorem keyset_run {lt : α → α → Bool} (o : StrictTotal lt) (k : Nat) (stable : List α)
+    (snaps : List (List α)) (hs : ∀ snap ∈ snaps, snap.Pairwise (fun a b => lt a b = true))
+    (hst : ∀ snap ∈ snaps, ∀ x ∈ stable, x ∈ snap) :
+    let r := snaps.foldl (kStep lt k) ⟨none, [], false⟩
+    r.emitted.Pairwise (fun a b => lt a b = true) ∧ (r.done = true → ∀ x ∈ stable, x ∈ r.emitted) := by
+  have := keyset_exact o k stable snaps hs hst ⟨none, [], false⟩
+    ⟨by simp, by simp, fun x _ h => by simp [kAfter] at h, by simp⟩
+  exact ⟨this.1, this.2.2.2⟩
+
+end Keyset
+
+/-! Composite keys `(listId, sortOrder)` where `sortOrder` is nullable. -/
+
+abbrev Key := Option Nat × Option Nat
+
+/-- `ASC NULLS LAST` on one column. -/
+def optLt : Option Nat → Option Nat → Bool
+  | some a, some b => decide (a < b)
+  | some _, none => true
+  | none, _ => false
+
+/-- The `ORDER BY a ASC NULLS LAST, b ASC NULLS LAST` order. -/
+def keyLt (a b : Key) : Bool := optLt a.1 b.1 || (a.1 == b.1 && optLt a.2 b.2)
+
+theorem optLt_irrefl (a : Option Nat) : optLt a a = false := by
+  cases a <;> simp [optLt]
+
+theorem optLt_trans (a b c : Option Nat) : optLt a b = true → optLt b c = true → optLt a c = true := by
+  cases a <;> cases b <;> cases c <;> simp [optLt] <;> omega
+
+theorem optLt_total (a b : Option Nat) (h : a ≠ b) : optLt a b = true ∨ optLt b a = true := by
+  cases a <;> cases b <;> simp_all [optLt] <;> omega
+
+theorem keyLt_strictTotal : StrictTotal keyLt where
+  irrefl a := by simp [keyLt, optLt_irrefl]
+  trans a b c hab hbc := by
+    simp only [keyLt, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq] at *
+    rcases hab with hab | ⟨e1, hab⟩ <;> rcases hbc with hbc | ⟨e2, hbc⟩
+    · exact Or.inl (optLt_trans _ _ _ hab hbc)
+    · rw [e2] at hab; exact Or.inl hab
+    · rw [e1]; exact Or.inl hbc
+    · exact Or.inr ⟨e1.trans e2, optLt_trans _ _ _ hab hbc⟩
+  total a b h := by
+    simp only [keyLt, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq]
+    by_cases h1 : a.1 = b.1
+    · have h2 : a.2 ≠ b.2 := fun h2 => h (Prod.ext h1 h2)
+      rcases optLt_total _ _ h2 with h3 | h3
+      · exact Or.inl (Or.inr ⟨h1, h3⟩)
+      · exact Or.inr (Or.inr ⟨h1.symm, h3⟩)
+    · rcases optLt_total _ _ h1 with h3 | h3
+      · exact Or.inl (Or.inl h3)
+      · exact Or.inr (Or.inl h3)
+
+/-- Fixed SQL, per field: `col > v OR col IS NULL` (nothing is after a NULL
+cursor value), and `IS NOT DISTINCT FROM` for the equal prefix. -/
+def sqlAfterNullSafe : Option Nat → Option Nat → Bool
+  | none, _ => false
+  | some v, some c => decide (v < c)
+  | some _, none => true
+
+def whereFixed (cur row : Key) : Bool :=
+  sqlAfterNullSafe cur.1 row.1 || (cur.1 == row.1 && sqlAfterNullSafe cur.2 row.2)
+
+/-- The fixed keyset condition is exactly "sorts after the cursor". -/
+theorem whereFixed_eq_keyLt (cur row : Key) : whereFixed cur row = keyLt cur row := by
+  obtain ⟨a, b⟩ := cur; obtain ⟨c, d⟩ := row
+  cases a <;> cases b <;> cases c <;> cases d <;> rfl
+
+/-- Old SQL: three-valued `>`/`=` (UNKNOWN on NULL filters the row out), a NULL
+cursor value drops its branch *and* its prefix term, no branch means no
+condition, and a boundary row with a NULL field stops paging. -/
+def sqlGt (v : Nat) : Option Nat → Bool
+  | some c => decide (v < c)
+  | none => false
+
+def whereBuggy (cur row : Key) : Bool :=
+  let b0 : List Bool := match cur.1 with
+    | some v => [sqlGt v row.1]
+    | none => []
+  let b1 : List Bool := match cur.2 with
+    | some v => [(match cur.1 with | some u => row.1 == some u | none => true) && sqlGt v row.2]
+    | none => []
+  let bs := b0 ++ b1
+  bs.isEmpty || bs.any id
+
+structure BPg where
+  cursor : Option Key
+  emitted : List Key
+  done : Bool
+  deriving Repr
+
+def bStep (k : Nat) (s : BPg) (snap : List Key) : BPg :=
+  if s.done then s else
+    let p := (snap.filter (fun r => match s.cursor with
+      | none => true
+      | some c => whereBuggy c r)).take k
+    let stopOnNull := match p.getLast? with
+      | some (some _, some _) => false
+      | some _ => true
+      | none => false
+    { cursor := p.getLast?.or s.cursor,
+      emitted := s.emitted ++ p,
+      done := decide (p.length < k) || stopOnNull }
+
+def tbl1 : List Key := [(some 1, some 1), (some 1, none), (some 2, some 1)]
+def tbl2 : List Key := [(some 1, none), (some 2, some 1)]
+
+/-- A NULL in a later field just past a page boundary is skipped. -/
+theorem bug_composite_null_skipped_at_boundary :
+    ([tbl1, tbl1, tbl1, tbl1].foldl (bStep 1) ⟨none, [], false⟩).emitted =
+      [(some 1, some 1), (some 2, some 1)] := by decide
+
+/-- A NULL in the boundary row stops paging and truncates the model. -/
+theorem bug_composite_null_boundary_stops :
+    let r := [tbl2, tbl2, tbl2].foldl (bStep 1) ⟨none, [], false⟩
+    r.done = true ∧ r.emitted = [(some 1, none)] := by decide
+
+theorem composite_fixed_examples :
+    ([tbl1, tbl1, tbl1, tbl1].foldl (kStep keyLt 1) ⟨none, [], false⟩).emitted = tbl1 ∧
+    ([tbl2, tbl2, tbl2].foldl (kStep keyLt 1) ⟨none, [], false⟩).emitted = tbl2 := by decide
+
+/-- **Fixed**: NULL-safe composite keyset pagination (sorted `ASC NULLS LAST`,
+keys unique) never repeats a key and, once it stops, has emitted every key
+present throughout. -/
+theorem composite_keyset_exact (k : Nat) (stable : List Key) (snaps : List (List Key))
+    (hs : ∀ snap ∈ snaps, snap.Pairwise (fun a b => keyLt a b = true))
+    (hst : ∀ snap ∈ snaps, ∀ x ∈ stable, x ∈ snap) :
+    let r := snaps.foldl (kStep whereFixed k) ⟨none, [], false⟩
+    r.emitted.Pairwise (fun a b => keyLt a b = true) ∧
+      (r.done = true → ∀ x ∈ stable, x ∈ r.emitted) := by
+  have e : whereFixed = keyLt := funext fun a => funext fun b => whereFixed_eq_keyLt a b
+  rw [e]
+  exact keyset_run keyLt_strictTotal k stable snaps hs hst
 
 end StrataSync.Server

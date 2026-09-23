@@ -17,8 +17,10 @@ export const BOOTSTRAP_REQUIRED_WS_MESSAGE =
 
 /**
  * Whether a client that has applied everything up to `afterSyncId` can still
- * be caught up from `sync_actions`, whose lowest retained id is
- * `earliestSyncId` (0 when the table is empty).
+ * be caught up from `sync_actions`, whose catch-up floor is `earliestSyncId`:
+ * the lowest retained id, or — once retention has emptied the table — one
+ * above the highest id ever allocated (`SyncDao.getEarliestSyncId`). It is 0
+ * only when no id was ever allocated, and then nothing can have been missed.
  *
  * The client is stale only when an action it has not seen may already have
  * been pruned: everything strictly between `afterSyncId` and `earliestSyncId`.

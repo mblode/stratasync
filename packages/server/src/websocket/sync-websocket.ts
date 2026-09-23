@@ -230,6 +230,7 @@ export const registerSyncWebsocket = (
       const messageMutex = new AsyncMutex();
       const session = new ClientSession(socket, deltaSubscriber, {
         deliveryMutex: messageMutex,
+        gapFillDao: syncDao,
         ...(groupRefreshCatchUpIntervalMs
           ? { groupRefreshGuardDao: syncDao }
           : {}),
