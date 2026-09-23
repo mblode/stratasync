@@ -24,7 +24,7 @@ describe(isSyncCursorStale, () => {
     expect(isSyncCursorStale(11n, 10n)).toBeFalsy();
   });
 
-  it("is not stale for a fresh cursor or an empty action table", () => {
+  it("is not stale for a fresh cursor or when no id was ever allocated", () => {
     expect(isSyncCursorStale(0n, 10n)).toBeFalsy();
     expect(isSyncCursorStale(-1n, 10n)).toBeFalsy();
     expect(isSyncCursorStale(5n, 0n)).toBeFalsy();

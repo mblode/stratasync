@@ -33,7 +33,11 @@ export const replaySyncActions = async (
     }
 
     for (const action of actions) {
-      await session.sendDeltaAction(toSyncActionOutput(action));
+      // Replay pages read `sync_actions` contiguously from the cursor, so
+      // there is no gap below any row to fill.
+      await session.sendDeltaAction(toSyncActionOutput(action), {
+        scanned: true,
+      });
       if (session.isClosed) {
         return;
       }

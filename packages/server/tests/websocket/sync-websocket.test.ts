@@ -127,6 +127,7 @@ const createLiveAction = (syncId: string) => ({
 const setup = (overrides?: {
   deltaSubscriber?: MockDeltaSubscriber;
   getSyncActions?: () => Promise<unknown[]>;
+  getSyncActionsThrough?: (...args: unknown[]) => Promise<unknown[]>;
   getUserGroups?: () => Promise<string[]>;
   getEarliestSyncId?: () => Promise<bigint>;
   getLastSyncIdForGroups?: () => Promise<bigint>;
@@ -172,6 +173,8 @@ const setup = (overrides?: {
     overrides?.getUserGroups ?? vi.fn().mockResolvedValue([]);
   const getSyncActions =
     overrides?.getSyncActions ?? vi.fn().mockResolvedValue([]);
+  const getSyncActionsThrough =
+    overrides?.getSyncActionsThrough ?? vi.fn().mockResolvedValue([]);
   const getEarliestSyncId =
     overrides?.getEarliestSyncId ?? vi.fn().mockResolvedValue(0n);
   const getLastSyncIdForGroups =
@@ -201,6 +204,7 @@ const setup = (overrides?: {
     getEarliestSyncId,
     getLastSyncIdForGroups,
     getSyncActions,
+    getSyncActionsThrough,
     getSyncGroupActions,
     getUserGroups,
   } as unknown as Parameters<typeof registerSyncWebsocket>[1]["syncDao"];
@@ -233,6 +237,7 @@ const setup = (overrides?: {
     auth,
     deltaSubscriber,
     getSyncActions,
+    getSyncActionsThrough,
     getSyncGroupActions,
     getUserGroups,
     logger,
@@ -1461,5 +1466,159 @@ describe(registerSyncWebsocket, () => {
       (message) => parseMessage(message).type === "delta"
     ).length;
     expect(deltaCount).toBe(1001);
+  });
+
+  describe("cross-process publish order", () => {
+    // Committed sync_actions rows, as the gap-fill read sees them.
+    const committedLog = (rows: { id: bigint; groupId?: string | null }[]) =>
+      vi.fn(
+        (afterId: unknown, throughId: unknown, groups: unknown) =>
+          Promise.resolve(
+            rows
+              .filter(
+                (row) =>
+                  row.id > (afterId as bigint) &&
+                  row.id <= (throughId as bigint) &&
+                  (!row.groupId || (groups as string[]).includes(row.groupId))
+              )
+              .map((row) => ({
+                ...createReplayAction(row.id),
+                groupId: row.groupId ?? null,
+              }))
+          ) as Promise<unknown[]>
+      );
+
+    const subscribeLive = async (
+      harness: ReturnType<typeof setup>
+    ): Promise<void> => {
+      harness.socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({ afterSyncId: "0", token: "tok", type: "subscribe" })
+        )
+      );
+      await waitForAssertion(() => {
+        expect(
+          harness.socket.sent.some(
+            (message) => parseMessage(message).type === "subscribed"
+          )
+        ).toBeTruthy();
+      });
+    };
+
+    const deliveredSyncIds = (harness: ReturnType<typeof setup>) =>
+      harness.socket.sent
+        .map((message) => parseMessage(message))
+        .filter((message) => message.type === "delta")
+        .map(
+          (message) => (message.packet as { lastSyncId: string }).lastSyncId
+        );
+
+    it("delivers a lower id whose publish from another process arrives after a higher one", async () => {
+      // Process A commits 1, process B commits 2; B's publish reaches this
+      // process first. The session must not advance past 1.
+      const getSyncActionsThrough = committedLog([{ id: 1n }, { id: 2n }]);
+      const harness = setup({ getSyncActionsThrough });
+      await subscribeLive(harness);
+
+      harness.deltaSubscriber.emit(createLiveAction("2"), []);
+      await waitForAssertion(() => {
+        expect(deliveredSyncIds(harness)).toEqual(["1", "2"]);
+      });
+      harness.deltaSubscriber.emit(createLiveAction("1"), []);
+      await flush();
+      await flush();
+
+      expect(deliveredSyncIds(harness)).toEqual(["1", "2"]);
+      expect(getSyncActionsThrough).toHaveBeenCalledWith(
+        0n,
+        1n,
+        expect.any(Array),
+        1000
+      );
+      expect(harness.socket.closeCalls).toHaveLength(0);
+    });
+
+    it("skips an id consumed by a rolled-back transaction", async () => {
+      const getSyncActionsThrough = committedLog([{ id: 2n }]);
+      const harness = setup({ getSyncActionsThrough });
+      await subscribeLive(harness);
+
+      harness.deltaSubscriber.emit(createLiveAction("2"), []);
+      harness.deltaSubscriber.emit(createLiveAction("3"), []);
+      await waitForAssertion(() => {
+        expect(deliveredSyncIds(harness)).toEqual(["2", "3"]);
+      });
+      // Only the first delta had a gap below it.
+      expect(getSyncActionsThrough).toHaveBeenCalledOnce();
+    });
+
+    it("advances past contiguous deltas for other groups without reading", async () => {
+      const getSyncActionsThrough = committedLog([]);
+      const harness = setup({
+        getSyncActionsThrough,
+        resolveGroups: vi.fn().mockResolvedValue(["workspace-1"]),
+      });
+      await subscribeLive(harness);
+
+      harness.deltaSubscriber.emit(
+        { ...createLiveAction("1"), groupId: "workspace-2" },
+        ["workspace-2"]
+      );
+      harness.deltaSubscriber.emit(
+        { ...createLiveAction("2"), groupId: "workspace-1" },
+        ["workspace-1"]
+      );
+      await waitForAssertion(() => {
+        expect(deliveredSyncIds(harness)).toEqual(["2"]);
+      });
+      expect(getSyncActionsThrough).not.toHaveBeenCalled();
+    });
+
+    it("fills a gap below a buffered delta when the subscription goes live", async () => {
+      const replay = createDeferred<unknown[]>();
+      const getSyncActionsThrough = committedLog([{ id: 1n }, { id: 2n }]);
+      const harness = setup({
+        getSyncActions: vi.fn().mockImplementation(() => replay.promise),
+        getSyncActionsThrough,
+      });
+      harness.socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({ afterSyncId: "0", token: "tok", type: "subscribe" })
+        )
+      );
+      await waitForAssertion(() => {
+        expect(harness.deltaSubscriber.callback).toBeTruthy();
+      });
+
+      // Replay's snapshot predates both commits; only 2's publish has arrived.
+      harness.deltaSubscriber.emit(createLiveAction("2"), []);
+      replay.resolve([]);
+
+      await waitForAssertion(() => {
+        expect(
+          harness.socket.sent.some(
+            (message) => parseMessage(message).type === "subscribed"
+          )
+        ).toBeTruthy();
+      });
+      expect(deliveredSyncIds(harness)).toEqual(["1", "2"]);
+    });
+
+    it("closes the socket when the gap-fill read fails", async () => {
+      const harness = setup({
+        getSyncActionsThrough: vi.fn().mockRejectedValue(new Error("db down")),
+      });
+      await subscribeLive(harness);
+
+      harness.deltaSubscriber.emit(createLiveAction("2"), []);
+      await waitForAssertion(() => {
+        expect(harness.socket.closeCalls).toEqual([
+          { code: 1011, reason: "Live delivery failed" },
+        ]);
+      });
+      expect(deliveredSyncIds(harness)).toEqual([]);
+    });
   });
 });
