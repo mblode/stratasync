@@ -114,6 +114,12 @@ export class BootstrapRunner {
       previousMeta.bootstrapComplete === true ||
       previousMeta.lastSyncAt !== undefined ||
       (await this.hasLocalData());
+    // Every await below can straddle a stop()/restart. A cancelled run must
+    // not clear storage, overwrite identity maps or move the cursor that the
+    // next run now owns.
+    if (this.shouldAbort(runToken)) {
+      return false;
+    }
     // A completed remote response is now replacing an existing snapshot and
     // may bridge over a missed revocation. Preserve ordinary offline fallback
     // until this point, then durably quarantine before changing any rows.
@@ -122,6 +128,9 @@ export class BootstrapRunner {
         groupChangePending: true,
         updatedAt: this.ctx.runtime.now(),
       });
+      if (this.shouldAbort(runToken)) {
+        return false;
+      }
       this.ctx.setGroupChangePending(true);
       this.ctx.identityMaps.batch(() => {
         this.ctx.identityMaps.clearAll();
@@ -129,7 +138,9 @@ export class BootstrapRunner {
     }
     const privacyReconcile = this.ctx.isGroupChangePending();
 
-    await this.commitBootstrapRows(snapshot.rows);
+    if (!(await this.commitBootstrapRows(snapshot.rows, runToken))) {
+      return false;
+    }
 
     const databaseVersion = this.applyBootstrapMetadata(snapshot.metadata);
 
@@ -188,7 +199,10 @@ export class BootstrapRunner {
     }
   }
 
-  private async commitBootstrapRows(rows: ModelRow[]): Promise<void> {
+  private async commitBootstrapRows(
+    rows: ModelRow[],
+    runToken: number
+  ): Promise<boolean> {
     const ops = rows.map((row) => ({
       data: row.data,
       modelName: row.modelName,
@@ -196,8 +210,14 @@ export class BootstrapRunner {
     }));
 
     await this.ctx.storage.clear({ preserveOutbox: true });
+    if (this.shouldAbort(runToken)) {
+      return false;
+    }
     if (ops.length > 0) {
       await this.ctx.storage.writeBatch(ops);
+    }
+    if (this.shouldAbort(runToken)) {
+      return false;
     }
 
     this.ctx.identityMaps.batch(() => {
@@ -213,6 +233,7 @@ export class BootstrapRunner {
         map.set(id, row.data, { serialized: true });
       }
     });
+    return true;
   }
 
   private applyBootstrapMetadata(
