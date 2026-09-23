@@ -179,6 +179,38 @@ const detectConflict = (
   };
 };
 
+const isUpdateLike = (tx: Transaction): boolean =>
+  tx.action === "U" || tx.action === "A" || tx.action === "V";
+
+/**
+ * Whether a conflict leaves the local transaction in the outbox with a patched
+ * `original` (client-wins / merge on an update-like transaction).
+ */
+const keepsLocalTransaction = (conflict: RebaseConflict): boolean =>
+  (conflict.resolution === "client-wins" || conflict.resolution === "merge") &&
+  isUpdateLike(conflict.localTransaction);
+
+/**
+ * Folds the server's values for the fields a transaction tracks into a copy of
+ * its `original`. Only tracked fields are folded: `original` is the rollback
+ * snapshot, and a stale untracked field in it would be written back over newer
+ * server state if the transaction is later rejected.
+ */
+const foldTrackedFields = (
+  tx: Transaction,
+  original: Record<string, unknown>,
+  data: Record<string, unknown>
+): boolean => {
+  let updated = false;
+  for (const field of getLocalConflictFields(tx)) {
+    if (field in data) {
+      original[field] = data[field];
+      updated = true;
+    }
+  }
+  return updated;
+};
+
 /**
  * Rebases pending transactions against server deltas
  *
@@ -210,6 +242,7 @@ export const rebaseTransactions = (
 
   // Track which transactions have been processed
   const processed = new Set<string>();
+  const keptAfterConflict = new Set<string>();
 
   // Process each server action
   for (const action of serverActions) {
@@ -238,13 +271,19 @@ export const rebaseTransactions = (
       if (conflict) {
         result.conflicts.push(conflict);
         processed.add(tx.clientTxId);
+        if (keepsLocalTransaction(conflict)) {
+          keptAfterConflict.add(tx.clientTxId);
+        }
       }
     }
   }
 
-  // Remaining unprocessed transactions stay pending
+  // Remaining unprocessed transactions stay pending. So do update-like
+  // transactions whose conflict resolved in their favour: they stay in the
+  // outbox, so later server actions in this batch must still be folded into
+  // their `original` (see rebaseOriginals).
   for (const tx of pending) {
-    if (!processed.has(tx.clientTxId)) {
+    if (!processed.has(tx.clientTxId) || keptAfterConflict.has(tx.clientTxId)) {
       result.pending.push(tx);
     }
   }
@@ -267,7 +306,11 @@ export interface RebaseOriginalPatch {
  * transaction's `original` snapshot during rebase.
  */
 const shouldRebaseAction = (action: SyncAction["action"]): boolean =>
-  action === "U" || action === "I" || action === "V" || action === "C";
+  action === "U" ||
+  action === "I" ||
+  action === "A" ||
+  action === "V" ||
+  action === "C";
 
 const buildActionsByKey = (
   actions: SyncAction[]
@@ -293,11 +336,8 @@ const getUpdatedOriginal = (
     if (!shouldRebaseAction(action.action)) {
       continue;
     }
-    for (const field of Object.keys(tx.payload)) {
-      if (field in action.data) {
-        original[field] = action.data[field];
-        updated = true;
-      }
+    if (foldTrackedFields(tx, original, action.data)) {
+      updated = true;
     }
   }
 
@@ -371,17 +411,10 @@ export const resolveConflictEffect = (
     return { kind: "drop-local" };
   }
 
-  if (
-    (resolution === "client-wins" || resolution === "merge") &&
-    (tx.action === "U" || tx.action === "A" || tx.action === "V")
-  ) {
-    return {
-      kind: "patch-original",
-      original: {
-        ...tx.original,
-        ...conflict.serverAction.data,
-      },
-    };
+  if (keepsLocalTransaction({ ...conflict, resolution })) {
+    const original = { ...tx.original };
+    foldTrackedFields(tx, original, conflict.serverAction.data);
+    return { kind: "patch-original", original };
   }
 
   return { kind: "none" };
