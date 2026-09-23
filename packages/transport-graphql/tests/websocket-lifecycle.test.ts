@@ -224,4 +224,75 @@ describe("WebSocketManager lifecycle", () => {
 
     await manager.close();
   });
+
+  it("retries a live subscription whose connect attempt failed", async () => {
+    let calls = 0;
+    const manager = new WebSocketManager(
+      "wss://example.com/ws",
+      {
+        getAccessToken: () => {
+          calls += 1;
+          if (calls === 1) {
+            return Promise.reject(new Error("auth down"));
+          }
+          return "tok";
+        },
+      },
+      retryConfig,
+      MockWebSocket as unknown as typeof WebSocket
+    );
+    managers.push(manager);
+
+    manager.subscribe({ afterSyncId: "0" });
+    await flush();
+    expect(manager.getConnectionState()).toBe("error");
+    expect(instances).toHaveLength(0);
+
+    // The failure must schedule a reconnect with backoff, not strand the
+    // subscription with no socket, attempt or timer.
+    // oxlint-disable-next-line avoid-new -- wait past the reconnect backoff
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    await flush();
+    expect(liveSockets()).toHaveLength(1);
+    liveSockets()[0]?.simulateOpen();
+    expect(manager.getConnectionState()).toBe("connected");
+
+    await manager.close();
+  });
+
+  it("does not retry a failed connect attempt after close()", async () => {
+    let failToken: ((error: Error) => void) | null = null;
+    let calls = 0;
+    const manager = new WebSocketManager(
+      "wss://example.com/ws",
+      {
+        getAccessToken: () => {
+          calls += 1;
+          // oxlint-disable-next-line avoid-new -- hold the auth lookup open
+          return new Promise<string>((_resolve, reject) => {
+            failToken = reject;
+          });
+        },
+      },
+      retryConfig,
+      MockWebSocket as unknown as typeof WebSocket
+    );
+    managers.push(manager);
+
+    manager.subscribe({ afterSyncId: "0" });
+    await flush();
+    await manager.close();
+    (failToken as ((error: Error) => void) | null)?.(new Error("auth down"));
+
+    // oxlint-disable-next-line avoid-new -- wait past the reconnect backoff
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    await flush();
+    expect(calls).toBe(1);
+    expect(instances).toHaveLength(0);
+    expect(manager.getConnectionState()).toBe("disconnected");
+  });
 });

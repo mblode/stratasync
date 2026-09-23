@@ -30,7 +30,9 @@
        corrected model: at most one live socket, `disconnected` implies no
        socket, and an active subscription always has a connection on the way.
        A third bug (an orphaned attempt's auth failure reports `error` over
-       the live connection) and the proof that such a failure is inert.
+       the live connection) and the proof that such a failure is inert; a
+       fourth (a failed current attempt never retries), now covered by
+       `ws_subscription_not_stranded`.
     5. The state lock across reset(): replacing `stateQueue` lets a cancelled
        run's task overlap the next run's (counterexample); keeping the queue
        gives mutual exclusion and FIFO across any number of resets.
@@ -800,11 +802,15 @@ structure WCfg where
   /-- connect()'s catch only reports `error` for an attempt of the current
   generation -/
   guardStaleFailure : Bool
+  /-- a failed attempt of the current generation schedules a reconnect -/
+  failRetries : Bool
 
-def wsOriginal : WCfg := ⟨false, false, false⟩
+def wsOriginal : WCfg := ⟨false, false, false, false⟩
 /-- The code after the first two fixes, before the stale-failure guard. -/
-def wsNoStaleGuard : WCfg := ⟨true, true, false⟩
-def wsFixed : WCfg := ⟨true, true, true⟩
+def wsNoStaleGuard : WCfg := ⟨true, true, false, false⟩
+/-- The code after the stale-failure guard, before failures retried. -/
+def wsNoFailRetry : WCfg := ⟨true, true, true, false⟩
+def wsFixed : WCfg := ⟨true, true, true, true⟩
 
 structure W where
   socket : Option Nat
@@ -825,6 +831,7 @@ inductive WEv
   | resolve            -- the in-flight connect's auth lookup resolves
   | resolveStale       -- an orphaned attempt's auth lookup resolves
   | failStale          -- an orphaned attempt's auth lookup throws
+  | fail               -- the in-flight (current) attempt's auth lookup throws
   | close              -- close()
   | openEv (k : Nat)   -- socket k fires "open"
   | closeEv (k : Nat)  -- socket k fires "close"
@@ -862,6 +869,13 @@ def wstep (c : WCfg) (w : W) : WEv → W
         { w' with attempt := false,
                   staleAttempts := w.staleAttempts + (if w.attempt then 1 else 0) }
       else w'
+  | .fail =>
+      if w.attempt then
+        -- `catch { setConnectionState("error"); if (shouldReconnect &&
+        -- subscriptions.size > 0 && !reconnectTimer) scheduleReconnect(); }`
+        { w with attempt := false, conn := .error,
+                 timer := w.timer || (c.failRetries && w.shouldReconnect && decide (w.subs > 0)) }
+      else w
   | .openEv k =>
       if k ∈ w.live && (!c.guardEvents || w.socket == some k) then { w with conn := .connected }
       else w
@@ -913,6 +927,16 @@ theorem bug_ws_stale_auth_failure_reports_error :
     let w := wrun wsNoStaleGuard W.init
       [.subscribe, .close, .subscribe, .resolve, .openEv 0, .failStale]
     w.conn = .error ∧ w.socket = some 0 ∧ w.live = [0] := by
+  decide
+
+/-- BUG 8 (websocket.ts connect() catch). The current attempt's auth lookup
+throws; connect() reports `error` but nothing schedules a retry: no socket
+exists, so no close event will. The subscription is left with no socket, no
+attempt and no timer. Test: "retries a live subscription whose connect attempt
+failed". -/
+theorem bug_ws_failed_connect_strands_subscription :
+    let w := wrun wsNoFailRetry W.init [.subscribe, .fail]
+    w.subs = 1 ∧ w.socket = none ∧ w.attempt = false ∧ w.timer = false := by
   decide
 
 inductive WReach (c : WCfg) : W → Prop
@@ -984,6 +1008,22 @@ theorem winv_step (w : W) (e : WEv) (h : WInv w) : WInv (wstep wsFixed w e) := b
   | failStale =>
       simp only [wstep, wsFixed, ite_true]
       split <;> exact ⟨h1, h2, h3, h4, h5⟩
+  | fail =>
+      simp only [wstep]
+      split
+      · rename_i ha
+        have hsock : w.socket = none := by
+          cases hs : w.socket with
+          | none => rfl
+          | some k => have := (h2 (by simp [hs])).1; rw [ha] at this; cases this
+        have hr := (h3 ha).1
+        refine ⟨?_, ?_, ?_, ?_, ?_⟩
+        · intro k hk; exact h1 k hk
+        · simp [hsock]
+        · simp
+        · simp
+        · intro hs; simp [wsFixed, hr, hs]
+      · exact ⟨h1, h2, h3, h4, h5⟩
   | close =>
       simp only [wstep, wsFixed, ite_true]
       refine ⟨?_, ?_, ?_, ?_, ?_⟩
@@ -1071,7 +1111,8 @@ theorem ws_disconnected_no_socket {w : W} (h : WReach wsFixed w)
   (winv_reach h).2.2.2.1 hc
 
 /-- An active subscription always has a socket, a connect attempt that will
-open one, or a reconnect timer: close() + subscribe() can no longer strand it.
+open one, or a reconnect timer: neither close() + subscribe() nor a failed
+connect attempt (`fail`, which now schedules a reconnect) can strand it.
 (The one exit is `giveUp`, which fails the subscription instead.) -/
 theorem ws_subscription_not_stranded {w : W} (h : WReach wsFixed w) (hs : w.subs > 0) :
     w.socket.isSome ∨ w.attempt = true ∨ w.timer = true :=
@@ -1102,8 +1143,10 @@ theorem ws_fixed_on_bug_traces :
     let c := wrun wsFixed W.init [.subscribe, .close, .subscribe, .resolveStale, .resolve]
     let d := wrun wsFixed W.init
       [.subscribe, .close, .subscribe, .resolve, .openEv 0, .failStale]
+    let e := wrun wsFixed W.init [.subscribe, .fail, .timerFire, .resolve]
+    let f := wrun wsFixed W.init [.subscribe, .close, .fail]
     a.conn = .connected ∧ b.live = [1] ∧ c.socket.isSome = true ∧
-      d.conn = .connected := by
+      d.conn = .connected ∧ e.socket.isSome = true ∧ f.timer = false := by
   decide
 
 
