@@ -93,6 +93,23 @@ export class OutboxManager {
   private lifecycleVersion = 0;
 
   /**
+   * clientTxIds an in-memory sender owns: waiting in `pendingBatch`, or
+   * dispatched and not yet settled. A drain of the persisted outbox must not
+   * resend these (or reset their "sent" state), or the server receives them
+   * twice and the second send regresses an acked transaction to "sent".
+   */
+  private readonly claimedTxIds = new Set<string>();
+
+  /**
+   * Transactions whose send failed at the transport, in queue order, that no
+   * later send has carried yet. Every send carries them first, so a later
+   * transaction (say `update X`) never reaches the server ahead of an earlier
+   * one that hit a transient failure (`create X`), which the server would
+   * otherwise reject.
+   */
+  private retryBacklog: Transaction[] = [];
+
+  /**
    * Tracks clientTxIds created by THIS runtime instance only.
    * Used for echo suppression so cross-tab transactions (which share
    * IndexedDB but not this in-memory set) are not incorrectly skipped.
@@ -235,6 +252,7 @@ export class OutboxManager {
     this.nextBatchIndex += 1;
     // Persist to storage first
     await this.storage.addToOutbox(tx);
+    this.claimedTxIds.add(tx.clientTxId);
     this.onTransactionStateChange?.(tx);
 
     if (this.batchMutations) {
@@ -309,17 +327,57 @@ export class OutboxManager {
   }
 
   private dispatchBatch(transactions: Transaction[]): Promise<void> {
+    this.claim(transactions);
+    return this.enqueueSend(async (version) => {
+      try {
+        await this.sendBatch(transactions, version);
+      } finally {
+        this.release(transactions, version);
+      }
+    });
+  }
+
+  /** Runs `job` after every send already queued, one job at a time. */
+  private enqueueSend(job: (version: number) => Promise<void>): Promise<void> {
     const version = this.lifecycleVersion;
     const previousQueue = this.sendQueue;
     const sendPromise = (async () => {
       await previousQueue;
-      await this.sendBatch(transactions, version);
+      await job(version);
     })();
     // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
     this.sendQueue = sendPromise.catch(() => {
       /* noop */
     });
     return sendPromise;
+  }
+
+  private claim(transactions: Transaction[]): void {
+    for (const tx of transactions) {
+      this.claimedTxIds.add(tx.clientTxId);
+    }
+  }
+
+  private release(transactions: Transaction[], version: number): void {
+    if (!this.isLifecycleCurrent(version)) {
+      return;
+    }
+    for (const tx of transactions) {
+      this.claimedTxIds.delete(tx.clientTxId);
+    }
+  }
+
+  /** Prepends the transport-failed transactions still owed to the server. */
+  private takeRetryBacklog(transactions: Transaction[]): Transaction[] {
+    if (this.retryBacklog.length === 0) {
+      return transactions;
+    }
+    const requested = new Set(transactions.map((tx) => tx.clientTxId));
+    const owed = this.retryBacklog.filter(
+      (tx) => !requested.has(tx.clientTxId)
+    );
+    this.retryBacklog = [];
+    return [...owed, ...transactions];
   }
 
   private isLifecycleCurrent(version: number): boolean {
@@ -334,13 +392,32 @@ export class OutboxManager {
    * Sends a batch of transactions
    */
   private async sendBatch(
-    transactions: Transaction[],
+    requested: Transaction[],
     version: number
   ): Promise<void> {
+    if (!this.isLifecycleCurrent(version)) {
+      return;
+    }
+    const transactions = this.takeRetryBacklog(requested);
     if (transactions.length === 0) {
       return;
     }
+    const carried = transactions.slice(
+      0,
+      transactions.length - requested.length
+    );
+    this.claim(carried);
+    try {
+      await this.sendClaimedBatch(transactions, version);
+    } finally {
+      this.release(carried, version);
+    }
+  }
 
+  private async sendClaimedBatch(
+    transactions: Transaction[],
+    version: number
+  ): Promise<void> {
     const markedSent = await this.markTransactionsSent(transactions, version);
     if (!markedSent) {
       return;
@@ -413,6 +490,7 @@ export class OutboxManager {
       }
       this.onTransactionStateChange?.(tx);
     }
+    this.retryBacklog.push(...transactions);
   }
 
   private async handleInvalidMutationBatch(
@@ -478,6 +556,9 @@ export class OutboxManager {
   async discardTransaction(clientTxId: string): Promise<void> {
     await this.storage.removeFromOutbox(clientTxId);
     this.localClientTxIds.delete(clientTxId);
+    this.retryBacklog = this.retryBacklog.filter(
+      (tx) => tx.clientTxId !== clientTxId
+    );
   }
 
   /**
@@ -577,13 +658,27 @@ export class OutboxManager {
 
   private async doProcessPending(): Promise<void> {
     await this.flushPendingBatchNow();
-    await this.waitForInflightSends();
+    // Replay as one job on the send queue, so no other send interleaves
+    // between reading the outbox and sending what it holds.
+    await this.enqueueSend((version) => this.replayPersisted(version));
+  }
 
+  private async replayPersisted(version: number): Promise<void> {
     const pending = await this.storage.getOutbox();
+    if (!this.isLifecycleCurrent(version)) {
+      return;
+    }
     this.seedBatchIndex(pending);
+    // Anything owed from a transport failure is persisted as queued and is
+    // replayed below in outbox order.
+    this.retryBacklog = [];
 
     // Reset unconfirmed transport states back to queued so they can retry.
-    for (const tx of pending) {
+    // Claimed transactions belong to a send queued behind this replay.
+    const unclaimed = pending.filter(
+      (tx) => !this.claimedTxIds.has(tx.clientTxId)
+    );
+    for (const tx of unclaimed) {
       if (tx.state === "sent") {
         tx.state = "queued";
         await this.storage.updateOutboxTransaction(tx.clientTxId, {
@@ -594,16 +689,17 @@ export class OutboxManager {
     }
 
     // Filter to only queued transactions
-    const queued = pending.filter((tx) => tx.state === "queued");
-
-    if (queued.length === 0) {
-      return;
-    }
+    const queued = unclaimed.filter((tx) => tx.state === "queued");
 
     // Send in batches
     for (let i = 0; i < queued.length; i += this.maxBatchSize) {
       const batch = queued.slice(i, i + this.maxBatchSize);
-      await this.dispatchBatch(batch);
+      this.claim(batch);
+      try {
+        await this.sendBatch(batch, version);
+      } finally {
+        this.release(batch, version);
+      }
     }
   }
 
@@ -777,6 +873,8 @@ export class OutboxManager {
     this.clearBatchTimer();
     this.pendingBatch = [];
     this.localClientTxIds.clear();
+    this.claimedTxIds.clear();
+    this.retryBacklog = [];
     // oxlint-disable-next-line prefer-await-to-then -- fire-and-forget pattern
     this.sendQueue = Promise.resolve();
   }
