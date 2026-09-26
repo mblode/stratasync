@@ -246,6 +246,8 @@ final class SyncOrchestrator {
                             prefetchedOutboxIds: outboxTxIdsAtBootstrapFetch ?? [],
                             alreadyReplaying: pendingForReplay ?? []
                         )
+                    } else {
+                        try await withholdPendingChangesToRowsMissingFromSnapshot()
                     }
                     // The authoritative snapshot and all pending rollback
                     // sanitation are durable. Only now may restart hydration
@@ -1284,6 +1286,36 @@ final class SyncOrchestrator {
         privacyWithheldTransactionIds.formUnion(newlyWithheld)
         try await persistMetadata()
         return replayable
+    }
+
+    /// Routine-replacement counterpart of
+    /// ``preparePendingTransactionsForPrivacySnapshot``. Nothing says access
+    /// was revoked, but the new snapshot is authoritative: a pending change to
+    /// a row it no longer contains may target a row we can no longer see, so
+    /// that change is withheld from replay and loses its rollback `original`.
+    /// A server rejection then cannot restore the row. Local inserts, and
+    /// later changes to rows those inserts create, stay replayable. Nothing
+    /// visible is cleared and nothing is latched; the caller persists the
+    /// withheld ids with the replacement's metadata.
+    private func withholdPendingChangesToRowsMissingFromSnapshot() async throws {
+        let pending = await storage.getOutbox().filter {
+            $0.state != .completed && $0.state != .failed
+        }
+        func key(_ tx: Transaction) -> String { "\(tx.modelName):\(tx.modelId)" }
+        let locallyInserted = Set(pending.filter { $0.action == .insert }.map(key))
+
+        for transaction in pending where transaction.action != .insert {
+            if modelStore.snapshot(modelName: transaction.modelName, id: transaction.modelId) != nil
+                || locallyInserted.contains(key(transaction)) {
+                continue
+            }
+            privacyWithheldTransactionIds.insert(transaction.clientTxId)
+            if transaction.original != nil {
+                try await storage.updateOutboxTransaction(clientTxId: transaction.clientTxId) {
+                    $0.original = nil
+                }
+            }
+        }
     }
 
     private func shouldReplayPendingTransaction(_ transaction: Transaction) -> Bool {

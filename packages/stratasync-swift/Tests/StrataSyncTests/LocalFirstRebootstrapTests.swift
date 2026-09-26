@@ -135,6 +135,81 @@ struct LocalFirstRebootstrapTests {
         await orchestrator.stop()
     }
 
+    /// A routine replacement that drops a row must not let a rejected pending
+    /// update restore it from `original`, while a local insert and its
+    /// follow-up update still replay. Nothing is latched or cleared.
+    @Test func routineRebootstrapWithholdsPendingUpdateToRowMissingFromSnapshot() async throws {
+        let storage = MockStorageAdapter()
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: ["ws-1"]))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-gone", data: row("task-gone"))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-kept", data: row("task-kept"))
+        let goneUpdate = createUpdateTransaction(
+            clientId: "client-a",
+            modelName: TestRecord.modelName,
+            modelId: "task-gone",
+            changes: ["title": "edited offline"],
+            original: ["title": "task-gone"]
+        )
+        let localInsert = createInsertTransaction(
+            clientId: "client-a",
+            modelName: TestRecord.modelName,
+            modelId: "task-local",
+            data: row("task-local")
+        )
+        let localUpdate = createUpdateTransaction(
+            clientId: "client-a",
+            modelName: TestRecord.modelName,
+            modelId: "task-local",
+            changes: ["title": "local edited"],
+            original: ["title": "task-local"]
+        )
+        try await storage.addToOutbox(goneUpdate)
+        try await storage.addToOutbox(localInsert)
+        try await storage.addToOutbox(localUpdate)
+
+        let transport = MockSyncTransport()
+        transport.fetchDeltasHandler = { after, _ in
+            if after == "10" { throw SyncTransportError.bootstrapRequired }
+            return DeltaPacket(lastSyncId: after, actions: [], hasMore: false)
+        }
+        transport.bootstrapEvents = snapshot(lastSyncId: "42", groups: ["ws-1"], ids: ["task-kept"])
+        transport.mutateHandler = { batch in
+            MutateResult(
+                success: false,
+                lastSyncId: "43",
+                results: batch.transactions.map {
+                    TransactionResult(
+                        clientTxId: $0.clientTxId,
+                        success: $0.clientTxId != goneUpdate.clientTxId,
+                        syncId: $0.clientTxId == goneUpdate.clientTxId ? nil : "43",
+                        error: $0.clientTxId == goneUpdate.clientTxId ? "not found" : nil
+                    )
+                }
+            )
+        }
+
+        let (engine, modelStore) = makeEngine(storage: storage, transport: transport, schemaHash: "")
+        let events = EventLog()
+        engine.onEvent = events.record
+        try await engine.start(groups: [])
+
+        #expect(transport.bootstrapCount == 1)
+        #expect(await waitUntil {
+            !(await storage.getOutbox().contains { $0.clientTxId == goneUpdate.clientTxId })
+        })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-gone") == nil)
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-kept") != nil)
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-local")?["title"] as? String
+            == "local edited")
+        let meta = await storage.getMeta()
+        #expect(meta.privacyWithheldTransactionIds.contains(goneUpdate.clientTxId))
+        #expect(!meta.privacyWithheldTransactionIds.contains(localInsert.clientTxId))
+        #expect(!meta.privacyWithheldTransactionIds.contains(localUpdate.clientTxId))
+        #expect(!meta.groupChangePending)
+        #expect(!events.labels.contains { $0.hasPrefix("quarantine") })
+        await engine.stop()
+    }
+
     // MARK: Group changes
 
     /// Access only added: rows stay visible, nothing durable is latched, and
