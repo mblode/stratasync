@@ -36,6 +36,11 @@ final class SyncOrchestrator {
     }
     private var firstSyncId: SyncId = zeroSyncId
     private var subscribedGroups: [String] = []
+    /// The server-authoritative groups the current snapshot was captured under
+    /// (see `StorageMeta.authoritativeGroups`). A group change is compared
+    /// against this, never against `subscribedGroups`, which a host's requested
+    /// groups can overwrite. `nil` = unknown.
+    private var authoritativeGroups: [String]?
     private var bootstrapComplete = false
     private var schemaHash: String?
     private var databaseVersion: Int?
@@ -61,7 +66,22 @@ final class SyncOrchestrator {
     /// Without this latch that recovery would resume from a cursor already past
     /// the group action, which is then never redelivered — losing the very
     /// membership change the in-band action exists to guarantee.
+    ///
+    /// This is the privacy quarantine: while it is set, cached rows are hidden
+    /// and the latch is durable, so a relaunch keeps them hidden too. Only a
+    /// group change that may have removed access sets it.
     private var groupChangeBootstrapPending = false
+    /// A group change that only added access still owes a re-bootstrap, so the
+    /// new groups' history (which sits behind our cursor) arrives, and still
+    /// holds the cursor before the group action until it lands. It does not
+    /// hide rows: every cached row is still authorized. In memory only — the
+    /// held cursor makes catch-up redeliver the group action after a relaunch,
+    /// which re-derives this.
+    private var groupChangeRebootstrapOwed = false
+    /// Any group-change re-bootstrap is outstanding, quarantined or not.
+    private var groupChangeReconcileOwed: Bool {
+        groupChangeBootstrapPending || groupChangeRebootstrapOwed
+    }
     private var privacyWithheldTransactionIds = Set<String>()
     private var groupChangeRetryTask: Task<Void, Never>?
     // Coalesces concurrent restart requests (foreground reconnect racing the
@@ -70,7 +90,8 @@ final class SyncOrchestrator {
     // one is in flight queues a single follow-up rather than being dropped, so
     // a subscription that dies mid-restart still gets revived.
     private var isRestarting = false
-    private var queuedRestart: (requested: Bool, forceBootstrap: Bool) = (false, false)
+    private var queuedRestart: (requested: Bool, forceBootstrap: Bool, reason: SyncBootstrapReason) =
+        (false, false, .forced)
     var resubscribeDelay: TimeInterval = 2.0
     var groupChangeRetryDelay: TimeInterval = 2.0
 
@@ -157,7 +178,7 @@ final class SyncOrchestrator {
             // Without this the apply gate below would drop every packet,
             // including the redelivered group action, and nothing would ever
             // schedule the bootstrap that clears it.
-            try await runSyncCycle(forceBootstrap: groupChangeBootstrapPending)
+            try await runSyncCycle(forceBootstrap: groupChangeReconcileOwed, reason: .groupChange)
         } catch {
             running = false
             setState(.error)
@@ -168,13 +189,20 @@ final class SyncOrchestrator {
 
     /// Bootstrap (or hydrate), subscribe, catch up missed deltas, then flush
     /// the outbox. Also used to recover from a server-mandated re-bootstrap.
-    private func runSyncCycle(forceBootstrap: Bool) async throws {
+    ///
+    /// `reason` labels a forced bootstrap for ``SyncClientEvent``; an
+    /// outstanding group change always reports `.groupChange`.
+    private func runSyncCycle(
+        forceBootstrap: Bool,
+        reason forcedReason: SyncBootstrapReason = .forced
+    ) async throws {
         setState(.bootstrapping)
         onEvent?(.syncStart)
 
-        var needsBootstrap = forceBootstrap
-        if !needsBootstrap {
-            needsBootstrap = await shouldPerformBootstrap()
+        let bootstrapReason: SyncBootstrapReason? = if forceBootstrap {
+            groupChangeReconcileOwed ? .groupChange : forcedReason
+        } else {
+            await bootstrapReasonIfNeeded()
         }
 
         // Network I/O stays off `stateQueue`. Holding the queue across the
@@ -186,43 +214,74 @@ final class SyncOrchestrator {
         // optimistic mutation persist and delta apply, so a delta cannot
         // land in a half-replaced store. A create that finishes during the
         // download is durable in the outbox and is replayed after replaceAll.
+        //
+        // A routine re-bootstrap (schema hash, stale cursor) leaves the cached
+        // rows visible and on disk until the replacement commits: nothing says
+        // access was revoked, and `replaceSnapshot` is one transaction, so a
+        // crash or failed fetch falls back to the snapshot the user was
+        // already looking at. Only a known revocation quarantines.
         var fetchedBootstrap: BootstrapSnapshot?
         var outboxTxIdsAtBootstrapFetch: Set<String>?
-        if needsBootstrap {
-            let pending = await storage.getOutbox()
-            outboxTxIdsAtBootstrapFetch = Set(pending.map(\.clientTxId))
-            fetchedBootstrap = try await fetchBootstrapSnapshot(groups: subscribedGroups)
+        var clearedQuarantine = false
+        let bootstrapStartedAt = runtime.now()
+        if let bootstrapReason {
+            onEvent?(.bootstrapStarted(reason: bootstrapReason))
         }
 
-        try await stateQueue.run { [self] in
-            var pendingForReplay: [Transaction]?
-            if let snapshot = fetchedBootstrap {
-                try await applyBootstrapSnapshot(snapshot, groups: subscribedGroups)
-                let privacyReconcile = groupChangeBootstrapPending
-                if privacyReconcile {
-                    pendingForReplay = try await preparePendingTransactionsForPrivacySnapshot()
-                    pendingForReplay = await restoreInsertsCreatedDuringBootstrapFetch(
-                        prefetchedOutboxIds: outboxTxIdsAtBootstrapFetch ?? [],
-                        alreadyReplaying: pendingForReplay ?? []
-                    )
-                }
-                // The authoritative snapshot and all pending rollback
-                // sanitation are durable. Only now may restart hydration leave
-                // quarantine and optimistic replay resume.
-                groupChangeBootstrapPending = false
-                try await persistMetadata()
-                groupChangeRetryTask?.cancel()
-                groupChangeRetryTask = nil
-            } else {
-                try await hydrateFromStorage()
-                bootstrapComplete = true
-                if firstSyncId == zeroSyncId, isSyncIdGreaterThan(lastSyncId, zeroSyncId) {
-                    firstSyncId = lastSyncId
-                }
-                try await persistMetadata()
+        do {
+            if bootstrapReason != nil {
+                let pending = await storage.getOutbox()
+                outboxTxIdsAtBootstrapFetch = Set(pending.map(\.clientTxId))
+                fetchedBootstrap = try await fetchBootstrapSnapshot(groups: subscribedGroups)
             }
 
-            await applyPendingToIdentityMaps(pendingForReplay)
+            try await stateQueue.run { [self] in
+                var pendingForReplay: [Transaction]?
+                if let snapshot = fetchedBootstrap {
+                    try await applyBootstrapSnapshot(snapshot, groups: subscribedGroups)
+                    let privacyReconcile = groupChangeBootstrapPending
+                    if privacyReconcile {
+                        pendingForReplay = try await preparePendingTransactionsForPrivacySnapshot()
+                        pendingForReplay = await restoreInsertsCreatedDuringBootstrapFetch(
+                            prefetchedOutboxIds: outboxTxIdsAtBootstrapFetch ?? [],
+                            alreadyReplaying: pendingForReplay ?? []
+                        )
+                    }
+                    // The authoritative snapshot and all pending rollback
+                    // sanitation are durable. Only now may restart hydration
+                    // leave quarantine and optimistic replay resume.
+                    groupChangeBootstrapPending = false
+                    groupChangeRebootstrapOwed = false
+                    try await persistMetadata()
+                    clearedQuarantine = privacyReconcile
+                    groupChangeRetryTask?.cancel()
+                    groupChangeRetryTask = nil
+                } else {
+                    try await hydrateFromStorage()
+                    bootstrapComplete = true
+                    if firstSyncId == zeroSyncId, isSyncIdGreaterThan(lastSyncId, zeroSyncId) {
+                        firstSyncId = lastSyncId
+                    }
+                    try await persistMetadata()
+                }
+
+                await applyPendingToIdentityMaps(pendingForReplay)
+            }
+        } catch {
+            if let bootstrapReason {
+                onEvent?(.bootstrapFailed(reason: bootstrapReason, error: error))
+            }
+            throw error
+        }
+        if let bootstrapReason, let fetchedBootstrap {
+            onEvent?(.bootstrapFinished(
+                reason: bootstrapReason,
+                durationMs: max(0, Int(runtime.now() - bootstrapStartedAt)),
+                recordCount: fetchedBootstrap.records.count
+            ))
+        }
+        if clearedQuarantine {
+            onEvent?(.quarantineCleared)
         }
         onEvent?(.localDataReady)
 
@@ -241,7 +300,7 @@ final class SyncOrchestrator {
                 deltaTask?.cancel()
                 deltaTask = nil
                 isCatchingUp = false
-                try await runSyncCycle(forceBootstrap: true)
+                try await runSyncCycle(forceBootstrap: true, reason: .cursorTooOld)
                 return
             }
             if isOfflineSyncError(error) {
@@ -294,6 +353,7 @@ final class SyncOrchestrator {
         hasConnected = false
         reconnectPending = false
         groupChangeBootstrapPending = false
+        groupChangeRebootstrapOwed = false
         groupChangeBootstrapRequested = false
         privacyWithheldTransactionIds.removeAll()
         groupChangeRetryTask?.cancel()
@@ -303,11 +363,12 @@ final class SyncOrchestrator {
         isCatchingUp = false
         bufferedPackets.removeAll()
         isRestarting = false
-        queuedRestart = (false, false)
+        queuedRestart = (false, false, .forced)
         lastSyncId = zeroSyncId
         clientId = ""
         firstSyncId = zeroSyncId
         subscribedGroups.removeAll()
+        authoritativeGroups = nil
         bootstrapComplete = false
         schemaHash = nil
         databaseVersion = nil
@@ -326,9 +387,11 @@ final class SyncOrchestrator {
             // authority. Keep it quarantined until the required replacement
             // bootstrap completes instead of flashing revoked rows on launch.
             modelStore.clearAll()
+            onEvent?(.localHydration(outcome: .quarantined, rowCount: 0))
         } else {
-            try await hydrateFromStorage()
+            let rowCount = try await hydrateFromStorage()
             await applyPendingToIdentityMaps()
+            onEvent?(.localHydration(outcome: .storage, rowCount: rowCount))
         }
         return (meta, await outboxManager.getPendingCount())
     }
@@ -398,17 +461,20 @@ final class SyncOrchestrator {
             throw SyncTransportError.invalidResponse
         }
 
-        // Keep normal offline behavior until a complete remote replacement is
-        // available. From this point onward an existing snapshot may have
-        // crossed a missed revocation, so quarantine durably before swapping.
-        let hasPersistedData = await modelStore.hasPersistedData(storage: storage)
-        let replacesExistingSnapshot = bootstrapComplete || lastSyncAt != nil || hasPersistedData
-        if replacesExistingSnapshot, !groupChangeBootstrapPending {
-            try await beginPrivacyReconciliation()
-        }
+        // No quarantine here. A replacement with no known revocation swaps
+        // atomically: `replaceSnapshot` commits rows and meta in one
+        // transaction and `replaceAll` swaps the in-memory store in one batch,
+        // so the UI goes straight from the old rows to the new ones and a
+        // crash before the commit leaves the old snapshot, which the user was
+        // already seeing. A known revocation latched quarantine before the
+        // fetch (`beginPrivacyReconciliation`), and that latch is carried
+        // through `replacementMeta` below until pending sanitation is durable.
 
         let replacementFirstSyncId = firstSyncId == zeroSyncId ? bootstrapSyncId : firstSyncId
         let replacementGroups = meta.subscribedSyncGroups.isEmpty ? groups : meta.subscribedSyncGroups
+        let replacementAuthoritativeGroups = meta.subscribedSyncGroups.isEmpty
+            ? nil
+            : uniqueGroups(meta.subscribedSyncGroups)
         let replacementLastSyncAt = currentTimestampMs()
         // Persist the client's schema hash (not the server's) so the next start
         // can detect a shipped model change. Fall back to the server hash when
@@ -424,7 +490,8 @@ final class SyncOrchestrator {
             privacyWithheldTransactionIds: Array(privacyWithheldTransactionIds).sorted(),
             schemaHash: persistedSchemaHash,
             databaseVersion: meta.databaseVersion,
-            lastSyncAt: replacementLastSyncAt
+            lastSyncAt: replacementLastSyncAt,
+            authoritativeGroups: replacementAuthoritativeGroups
         )
 
         try await storage.replaceSnapshot(records: snapshot.records, meta: replacementMeta)
@@ -433,6 +500,7 @@ final class SyncOrchestrator {
         lastSyncId = bootstrapSyncId
         firstSyncId = replacementFirstSyncId
         subscribedGroups = replacementGroups
+        authoritativeGroups = replacementAuthoritativeGroups
         bootstrapComplete = true
         schemaHash = persistedSchemaHash
         databaseVersion = meta.databaseVersion
@@ -510,7 +578,7 @@ final class SyncOrchestrator {
         // Hop to a fresh task: this runs inside the dying delta task, and the
         // restart replaces (cancels) that task, so it must not cancel itself.
         Task { [weak self] in
-            await self?.restartSubscription(forceBootstrap: needsBootstrap)
+            await self?.restartSubscription(forceBootstrap: needsBootstrap, reason: .cursorTooOld)
         }
     }
 
@@ -518,10 +586,18 @@ final class SyncOrchestrator {
         await restartSubscription(forceBootstrap: false)
     }
 
-    private func restartSubscription(forceBootstrap: Bool, skipDelay: Bool = false) async {
+    private func restartSubscription(
+        forceBootstrap: Bool,
+        reason: SyncBootstrapReason = .forced,
+        skipDelay: Bool = false
+    ) async {
         guard running else { return }
         if isRestarting {
-            queuedRestart = (true, queuedRestart.forceBootstrap || forceBootstrap)
+            queuedRestart = (
+                true,
+                queuedRestart.forceBootstrap || forceBootstrap,
+                forceBootstrap ? reason : queuedRestart.reason
+            )
             return
         }
         isRestarting = true
@@ -530,12 +606,12 @@ final class SyncOrchestrator {
         // An outstanding group change forces the bootstrap regardless of why we
         // are restarting, so a plain recovery restart cannot quietly resume
         // without reconciling membership.
-        if forceBootstrap || groupChangeBootstrapPending {
+        if forceBootstrap || groupChangeReconcileOwed {
             do {
                 // Clears the latch itself once the bootstrap succeeds. A failed
                 // attempt leaves it set, so membership stays unreconciled and
                 // the next restart forces another bootstrap.
-                try await runSyncCycle(forceBootstrap: true)
+                try await runSyncCycle(forceBootstrap: true, reason: reason)
             } catch {
                 setState(.error)
                 onEvent?(.syncError(error))
@@ -562,7 +638,7 @@ final class SyncOrchestrator {
             if isBootstrapRequiredError(error) {
                 deltaTask?.cancel()
                 deltaTask = nil
-                try? await runSyncCycle(forceBootstrap: true)
+                try? await runSyncCycle(forceBootstrap: true, reason: .cursorTooOld)
             } else if isOfflineSyncError(error) {
                 scheduleCatchUpRetry()
             } else {
@@ -591,9 +667,10 @@ final class SyncOrchestrator {
         isRestarting = false
         if queuedRestart.requested, running {
             let force = queuedRestart.forceBootstrap
-            queuedRestart = (false, false)
+            let reason = queuedRestart.reason
+            queuedRestart = (false, false, .forced)
             Task { [weak self] in
-                await self?.restartSubscription(forceBootstrap: force)
+                await self?.restartSubscription(forceBootstrap: force, reason: reason)
             }
         }
     }
@@ -623,7 +700,7 @@ final class SyncOrchestrator {
     }
 
     private func scheduleGroupChangeRetry() {
-        guard running, groupChangeBootstrapPending, groupChangeRetryTask == nil else { return }
+        guard running, groupChangeReconcileOwed, groupChangeRetryTask == nil else { return }
         groupChangeRetryTask = Task { [weak self] in
             guard let self else { return }
             try? await self.runtime.sleep(self.groupChangeRetryDelay)
@@ -681,30 +758,40 @@ final class SyncOrchestrator {
         // Checked before anything is applied: a re-bootstrap replaces local
         // state wholesale, so persisting this packet first would be wasted
         // work against a cursor we are about to discard.
+        //
+        // Only a change that may have removed access quarantines. When the
+        // new authoritative set covers every group the cached snapshot was
+        // captured under, every cached row is still authorized, so it stays
+        // visible (and editable) while the re-bootstrap fetches the new
+        // groups' history. Unknown old or new sets are treated as removals.
         if let groupChange = packet.actions.last(where: {
             $0.action == .group || $0.action == .syncGroup
         }) {
-            SyncLog.delta.debug("Sync group membership changed; re-bootstrapping")
-            if let authoritativeGroups = groupChange.data["subscribedSyncGroups"] as? [String] {
-                var seen = Set<String>()
-                subscribedGroups = authoritativeGroups.filter { seen.insert($0).inserted }
+            let reportedGroups = (groupChange.data["subscribedSyncGroups"] as? [String])
+                .map(uniqueGroups)
+            if let reportedGroups {
+                subscribedGroups = reportedGroups
             }
             if groupChangeBootstrapPending {
                 try await persistMetadata()
+            } else if let quarantineReason = quarantineReason(forReportedGroups: reportedGroups) {
+                SyncLog.delta.debug("Sync group access may have been removed; quarantining and re-bootstrapping")
+                try await beginPrivacyReconciliation(reason: quarantineReason)
             } else {
-                try await beginPrivacyReconciliation()
+                SyncLog.delta.debug("Sync group access only added; re-bootstrapping without quarantine")
+                groupChangeRebootstrapOwed = true
             }
             requestGroupChangeBootstrap()
             return
         }
 
         // Nothing may be applied while a group-change re-bootstrap is
-        // outstanding. Applying a later packet would advance `lastSyncId` past
-        // the group action, and a bootstrap that then fails leaves that action
-        // behind the cursor forever — silently dropping the membership change.
-        // Holding the cursor still costs a little redelivery and keeps the
-        // guarantee.
-        if groupChangeBootstrapPending {
+        // outstanding, quarantined or not. Applying a later packet would
+        // advance `lastSyncId` past the group action, and a bootstrap that then
+        // fails leaves that action behind the cursor forever — silently
+        // dropping the membership change. Holding the cursor still costs a
+        // little redelivery and keeps the guarantee; it never hides rows.
+        if groupChangeReconcileOwed {
             return
         }
 
@@ -1085,6 +1172,7 @@ final class SyncOrchestrator {
         subscribedGroups = meta.subscribedGroups
         bootstrapComplete = meta.bootstrapComplete
         groupChangeBootstrapPending = meta.groupChangePending
+        authoritativeGroups = meta.authoritativeGroups
         privacyWithheldTransactionIds = Set(meta.privacyWithheldTransactionIds)
         schemaHash = meta.schemaHash
         databaseVersion = meta.databaseVersion
@@ -1104,23 +1192,43 @@ final class SyncOrchestrator {
         try await persistMetadata()
     }
 
-    private func shouldPerformBootstrap() async -> Bool {
+    /// Why this start needs a full bootstrap, or `nil` to hydrate locally.
+    private func bootstrapReasonIfNeeded() async -> SyncBootstrapReason? {
         let hasPersistedData = await modelStore.hasPersistedData(storage: storage)
         let hasSyncCursor = isSyncIdGreaterThan(lastSyncId, zeroSyncId)
         if !bootstrapComplete || !hasPersistedData || !hasSyncCursor {
-            return true
+            return .initial
         }
         // A non-empty client schema hash that differs from (or is absent in)
         // the persisted meta forces a full re-bootstrap.
         if !clientSchemaHash.isEmpty {
             let storedHash = schemaHash ?? ""
-            return storedHash.isEmpty || storedHash != clientSchemaHash
+            if storedHash.isEmpty || storedHash != clientSchemaHash {
+                return .schemaHash
+            }
         }
-        return false
+        return nil
     }
 
-    private func hydrateFromStorage() async throws {
+    @discardableResult
+    private func hydrateFromStorage() async throws -> Int {
         try await modelStore.hydrateFromStorage(storage)
+    }
+
+    /// Whether a group change reporting `reportedGroups` may have revoked
+    /// access to cached rows, and why. `nil` means it provably only added.
+    private func quarantineReason(forReportedGroups reportedGroups: [String]?) -> SyncQuarantineReason? {
+        guard let reportedGroups,
+              let knownGroups = authoritativeGroups,
+              !knownGroups.isEmpty else {
+            return .groupUnknown
+        }
+        return Set(reportedGroups).isSuperset(of: knownGroups) ? nil : .groupRemoved
+    }
+
+    private func uniqueGroups(_ groups: [String]) -> [String] {
+        var seen = Set<String>()
+        return groups.filter { seen.insert($0).inserted }
     }
 
     private func persistMetadata() async throws {
@@ -1132,7 +1240,7 @@ final class SyncOrchestrator {
         ))
     }
 
-    private func beginPrivacyReconciliation() async throws {
+    private func beginPrivacyReconciliation(reason: SyncQuarantineReason) async throws {
         guard !groupChangeBootstrapPending else { return }
         var quarantineMeta = makeStorageMeta(
             lastSyncId: lastSyncId,
@@ -1147,6 +1255,7 @@ final class SyncOrchestrator {
         // latch prevents this obsolete snapshot from being hydrated after a
         // crash between any later reconciliation steps.
         modelStore.clearAll()
+        onEvent?(.quarantineEntered(reason: reason))
     }
 
     /// Keeps pending work durable after a privacy reconcile, but only replays
@@ -1198,7 +1307,8 @@ final class SyncOrchestrator {
             privacyWithheldTransactionIds: Array(privacyWithheldTransactionIds).sorted(),
             schemaHash: schemaHash,
             databaseVersion: databaseVersion,
-            lastSyncAt: lastSyncAt
+            lastSyncAt: lastSyncAt,
+            authoritativeGroups: authoritativeGroups
         )
     }
 

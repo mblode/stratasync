@@ -103,7 +103,10 @@ public final class SyncModelStore {
         return false
     }
 
-    public func hydrateFromStorage(_ storage: StorageAdapter) async throws {
+    /// Replaces the in-memory store with every persisted row and returns the
+    /// number of rows loaded.
+    @discardableResult
+    public func hydrateFromStorage(_ storage: StorageAdapter) async throws -> Int {
         var records: [StoredModelRecord] = []
         for modelName in supportedModelNames {
             for item in await storage.getAll(modelName: modelName) {
@@ -114,6 +117,7 @@ public final class SyncModelStore {
             }
         }
         try replaceAll(with: records)
+        return records.count
     }
 
     public func applyPendingOutbox(_ outbox: [Transaction]) {

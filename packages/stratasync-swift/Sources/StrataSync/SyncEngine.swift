@@ -33,6 +33,14 @@ public final class SyncEngine {
 
     public let modelStore: SyncModelStore
 
+    /// Receives every ``SyncClientEvent`` on the main actor, after the engine
+    /// has updated its own state for it. Use it for diagnostics and analytics
+    /// (bootstrap timing, quarantine, launch hydration). Keep it cheap: it runs
+    /// inline on the sync path. New cases may be added in minor releases, so
+    /// switch over them with a `default` branch.
+    @ObservationIgnored
+    public var onEvent: ((SyncClientEvent) -> Void)?
+
     private let historyManager = HistoryManager()
     private let runtime: SyncRuntime
     private let transport: SyncTransport
@@ -711,6 +719,7 @@ public final class SyncEngine {
         default:
             break
         }
+        onEvent?(event)
     }
 }
 
