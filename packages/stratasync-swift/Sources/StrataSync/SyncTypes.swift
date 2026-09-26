@@ -299,6 +299,11 @@ public struct StorageMeta: Sendable {
     public var schemaHash: String?
     public var databaseVersion: Int?
     public var lastSyncAt: TimeInterval?
+    /// The server-authoritative `subscribedSyncGroups` the persisted snapshot
+    /// was captured under, written only by a bootstrap that reported them.
+    /// Unlike `subscribedGroups`, a host's requested groups never overwrite it.
+    /// `nil` means unknown, which makes any group change quarantine.
+    public var authoritativeGroups: [String]?
 
     public init(
         lastSyncId: SyncId,
@@ -310,7 +315,8 @@ public struct StorageMeta: Sendable {
         privacyWithheldTransactionIds: [String] = [],
         schemaHash: String? = nil,
         databaseVersion: Int? = nil,
-        lastSyncAt: TimeInterval? = nil
+        lastSyncAt: TimeInterval? = nil,
+        authoritativeGroups: [String]? = nil
     ) {
         self.lastSyncId = lastSyncId
         self.firstSyncId = firstSyncId
@@ -322,6 +328,7 @@ public struct StorageMeta: Sendable {
         self.schemaHash = schemaHash
         self.databaseVersion = databaseVersion
         self.lastSyncAt = lastSyncAt
+        self.authoritativeGroups = authoritativeGroups
     }
 
     public static func empty(clientId: String) -> StorageMeta {
@@ -364,6 +371,52 @@ public enum SyncClientEvent: @unchecked Sendable {
     case connectionChange(ConnectionState)
     case outboxChange(pendingCount: Int)
     case modelChange(modelName: String, modelId: String, action: String)
+    /// A full snapshot download began.
+    case bootstrapStarted(reason: SyncBootstrapReason)
+    /// A snapshot was downloaded and committed locally. `durationMs` spans the
+    /// download and the local apply; `recordCount` is the snapshot's row count.
+    case bootstrapFinished(reason: SyncBootstrapReason, durationMs: Int, recordCount: Int)
+    /// A snapshot download or apply failed. The previous snapshot is intact.
+    case bootstrapFailed(reason: SyncBootstrapReason, error: any Error)
+    /// Cached rows were hidden because access may have been revoked. The
+    /// quarantine is durable until a replacement bootstrap commits.
+    case quarantineEntered(reason: SyncQuarantineReason)
+    /// A replacement bootstrap committed and cached rows are visible again.
+    case quarantineCleared
+    /// An account's local database was opened. `rowCount` is the number of
+    /// rows loaded into memory (zero when quarantined).
+    case localHydration(outcome: SyncHydrationOutcome, rowCount: Int)
+}
+
+/// Why a full snapshot bootstrap ran.
+public enum SyncBootstrapReason: String, Sendable {
+    /// No usable local snapshot or cursor.
+    case initial
+    /// The client's schema hash differs from the persisted one.
+    case schemaHash
+    /// The server rejected the local cursor as too old.
+    case cursorTooOld
+    /// Sync-group membership changed.
+    case groupChange
+    /// Any other forced re-bootstrap.
+    case forced
+}
+
+/// Why cached rows were quarantined.
+public enum SyncQuarantineReason: String, Sendable {
+    /// A group change removed at least one group the snapshot was captured under.
+    case groupRemoved
+    /// A group change arrived but the previous or new authoritative group set is
+    /// unknown, so a removal cannot be ruled out.
+    case groupUnknown
+}
+
+/// What an account hydration showed the user.
+public enum SyncHydrationOutcome: String, Sendable {
+    /// Cached rows were loaded from local storage.
+    case storage
+    /// Cached rows were withheld pending an access reconciliation bootstrap.
+    case quarantined
 }
 
 // MARK: - SyncModel Protocol
