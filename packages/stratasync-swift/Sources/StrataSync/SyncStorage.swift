@@ -314,6 +314,9 @@ public actor SQLiteStorage: AccountScopedStorageAdapter {
         let schemaHash = getMetaValue("schemaHash")
         let databaseVersion = getMetaValue("databaseVersion").flatMap(Int.init)
         let lastSyncAt = getMetaValue("lastSyncAt").flatMap(Double.init)
+        let authoritativeGroups = getMetaValue("authoritativeGroups").flatMap {
+            (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String]
+        }
 
         // Persist clientId if it was just generated
         if storedClientId == nil {
@@ -330,7 +333,8 @@ public actor SQLiteStorage: AccountScopedStorageAdapter {
             privacyWithheldTransactionIds: privacyWithheldTransactionIds,
             schemaHash: schemaHash,
             databaseVersion: databaseVersion,
-            lastSyncAt: lastSyncAt
+            lastSyncAt: lastSyncAt,
+            authoritativeGroups: authoritativeGroups
         )
     }
 
@@ -370,6 +374,13 @@ public actor SQLiteStorage: AccountScopedStorageAdapter {
             try setMetaValue("lastSyncAt", value: String(lastSyncAt))
         } else {
             try deleteMetaValue("lastSyncAt")
+        }
+        if let authoritativeGroups = meta.authoritativeGroups,
+           let groupsData = try? JSONSerialization.data(withJSONObject: authoritativeGroups),
+           let groupsString = String(data: groupsData, encoding: .utf8) {
+            try setMetaValue("authoritativeGroups", value: groupsString)
+        } else {
+            try deleteMetaValue("authoritativeGroups")
         }
     }
 

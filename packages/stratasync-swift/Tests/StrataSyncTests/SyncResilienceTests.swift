@@ -1312,6 +1312,9 @@ private func seededMeta(cursor: SyncId, clientId: String = "client-a") -> Storag
         var recoveryMeta = seededMeta(cursor: "10")
         recoveryMeta.bootstrapComplete = false
         recoveryMeta.lastSyncAt = 1
+        // A known revocation is outstanding. A routine re-bootstrap no longer
+        // quarantines, so only this latch makes the replacement a privacy one.
+        recoveryMeta.groupChangePending = true
         try await storage.setMeta(recoveryMeta)
         try await storage.put(
             modelName: TestRecord.modelName,
@@ -1702,9 +1705,14 @@ private func seededMeta(cursor: SyncId, clientId: String = "client-a") -> Storag
         // The pending outbox transaction must survive the re-bootstrap.
         let outboxAfter = await storage.getOutbox()
         #expect(outboxAfter.contains { $0.clientTxId == pendingTx.clientTxId })
-        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-pending") == nil)
+        // A stale cursor is not a known revocation: the local insert is
+        // replayed over the new snapshot. The delete targets a row the new
+        // snapshot no longer has, so it is withheld and loses its rollback
+        // `original` — a rejection must not bring that row back.
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-pending") != nil)
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-old") == nil)
         let metaAfter = await storage.getMeta()
-        #expect(metaAfter.privacyWithheldTransactionIds.contains(pendingTx.clientTxId))
+        #expect(!metaAfter.privacyWithheldTransactionIds.contains(pendingTx.clientTxId))
         #expect(metaAfter.privacyWithheldTransactionIds.contains(pendingDelete.clientTxId))
         #expect(!metaAfter.groupChangePending)
         #expect(outboxAfter.first { $0.clientTxId == pendingDelete.clientTxId }?.original == nil)
