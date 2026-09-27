@@ -492,12 +492,34 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
       await startPromise;
     }
 
-    return runWithStateLock(() => {
-      if (orchestrator.isGroupChangeReconcilePending()) {
-        throw new Error(MUTATION_PRIVACY_RECONCILE_ERROR);
+    let mutationOutbox: OutboxManager | undefined;
+    const attempt = async () => {
+      const activeOutbox = getStartedOutboxManager();
+      if (mutationOutbox && mutationOutbox !== activeOutbox) {
+        throw new Error(MUTATION_START_REQUIRED_ERROR);
       }
-      return operation(getStartedOutboxManager());
-    });
+      mutationOutbox = activeOutbox;
+      if (orchestrator.isGroupChangeReconcilePending()) {
+        const reconciliation = orchestrator.getGroupChangeReconciliation();
+        if (!reconciliation) {
+          throw new Error(MUTATION_PRIVACY_RECONCILE_ERROR);
+        }
+        return { kind: "reconcile", reconciliation } as const;
+      }
+      return {
+        kind: "mutation",
+        value: await operation(activeOutbox),
+      } as const;
+    };
+    while (true) {
+      const result = await runWithStateLock(attempt);
+      if (result.kind === "mutation") {
+        return result.value;
+      }
+      // Subscription closure happens before bootstrap takes the state lock.
+      // Wait outside it, then recheck authority and lifecycle under the lock.
+      await result.reconciliation;
+    }
   };
 
   const rehydrateOutboxWithSyncCursor = async (

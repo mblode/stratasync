@@ -181,7 +181,7 @@ export class DeltaPipeline {
   /** Pending resubscribe after a stream failure; cleared on reset. */
   private cancelReconnect: CancelScheduled | null = null;
   /** Guards against stacking group-change re-bootstraps. */
-  private groupChangeBootstrapInFlight = false;
+  private groupChangeBootstrapInFlight: Promise<void> | null = null;
   /** Retry of a failed group-change re-bootstrap; cleared on reset. */
   private cancelGroupChangeRetry: CancelScheduled | null = null;
 
@@ -198,7 +198,7 @@ export class DeltaPipeline {
   reset(): void {
     this.clearReconnectTimer();
     this.clearGroupChangeRetryTimer();
-    this.groupChangeBootstrapInFlight = false;
+    this.groupChangeBootstrapInFlight = null;
     this.pendingCoverageLoads = [];
   }
 
@@ -480,16 +480,17 @@ export class DeltaPipeline {
     if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
       return;
     }
-    this.groupChangeBootstrapInFlight = true;
-
-    this.runGroupChangeBootstrap(runToken)
+    const reconciliation = this.runGroupChangeBootstrap(runToken)
       .catch((error: unknown) => {
         if (this.ctx.isRunActive(runToken)) {
           this.ctx.recordError(error);
         }
       })
       .finally(() => {
-        this.groupChangeBootstrapInFlight = false;
+        if (this.groupChangeBootstrapInFlight !== reconciliation) {
+          return;
+        }
+        this.groupChangeBootstrapInFlight = null;
         // A failed attempt leaves the latch set; keep trying while this run
         // is alive, because every packet is being held until it lands.
         if (this.ctx.isRunActive(runToken) && this.isGroupChangeOwed()) {
@@ -500,6 +501,11 @@ export class DeltaPipeline {
           }, GROUP_CHANGE_RETRY_DELAY_MS);
         }
       });
+    this.groupChangeBootstrapInFlight = reconciliation;
+  }
+
+  getGroupChangeReconciliation(): Promise<void> | null {
+    return this.groupChangeBootstrapInFlight;
   }
 
   private async runGroupChangeBootstrap(runToken: number): Promise<void> {
