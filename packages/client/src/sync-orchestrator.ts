@@ -87,6 +87,8 @@ export class SyncOrchestrator {
    * so the delta pipeline can gate without a storage read per packet.
    */
   private groupChangePending = false;
+  /** See SyncContext.isAddedAccessRebootstrapOwed. */
+  private addedAccessRebootstrapOwed = false;
   private privacyWithheldClientTxIds = new Set<string>();
   private readonly emitEvent?: (event: SyncClientEvent) => void;
   private onTransactionConflict?: (tx: Transaction) => void;
@@ -122,6 +124,11 @@ export class SyncOrchestrator {
     this.deltaPipeline = new DeltaPipeline(this.context, {
       applyPendingOutboxTransactions: (authoritativeReplacement) =>
         this.applyPendingOutboxTransactions(authoritativeReplacement),
+      commitBootstrap: async (snapshot, runToken) => {
+        await this.bootstrapRunner.commitSnapshot(snapshot, runToken);
+      },
+      fetchBootstrap: (runToken) =>
+        this.bootstrapRunner.fetchSnapshot(runToken),
       // Without a lazy loader attached there is nothing to fetch, so fall back
       // to recording the coverage as before.
       loadCoverage: (modelName, indexedKey, keyValue) =>
@@ -151,6 +158,7 @@ export class SyncOrchestrator {
       getOutboxManager: () => this.outboxManager,
       getRunToken: () => this.runToken,
       identityMaps: this.identityMaps,
+      isAddedAccessRebootstrapOwed: () => this.addedAccessRebootstrapOwed,
       isGroupChangePending: () => this.groupChangePending,
       isRunActive: (runToken) => this.isRunActive(runToken),
       isRunning: () => this.running,
@@ -161,6 +169,9 @@ export class SyncOrchestrator {
       runWithStateLock: (operation) => this.runWithStateLock(operation),
       runtime: this.runtime,
       schemaHash: this.schemaHash,
+      setAddedAccessRebootstrapOwed: (owed) => {
+        this.addedAccessRebootstrapOwed = owed;
+      },
       setCatchingUp: (catchingUp) =>
         this.stateMachine.setCatchingUp(catchingUp),
       setDeferredConflictTxs: (txs) => {
@@ -571,6 +582,8 @@ export class SyncOrchestrator {
     // In-memory only: the persisted latch is what the next start reads, so a
     // stop() across an owed re-bootstrap still forces one on resume.
     this.groupChangePending = false;
+    // The held cursor redelivers the group action on resume.
+    this.addedAccessRebootstrapOwed = false;
     this.privacyWithheldClientTxIds.clear();
     this.stateMachine.clearError();
     this.stateMachine.setCatchingUp(false);

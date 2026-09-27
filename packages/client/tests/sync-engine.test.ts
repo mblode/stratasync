@@ -4695,6 +4695,69 @@ describe("reverse-done alignment", () => {
     }
   });
 
+  it("keeps the store visible and writable through a group change that only adds access", async () => {
+    const storage = new InMemoryStorage();
+    const { bootstrapStarted, release, transport } =
+      createBlockingReconcileTransport();
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      // The snapshot was taken under ["team-1"]; the server now reports that
+      // plus a newly shared group, so nothing was revoked.
+      transport.emitDelta({
+        actions: [
+          {
+            action: "G",
+            data: { subscribedSyncGroups: ["team-1", "team-2"] },
+            id: "60",
+            modelId: "sync-groups",
+            modelName: "SyncGroup",
+          },
+        ],
+        lastSyncId: "60",
+      });
+      await bootstrapStarted.promise;
+
+      expect(client.getCached("Task", "task-1")).not.toBeNull();
+      expect(await readGroupChangePending(storage)).toBeFalsy();
+      await expect(
+        client.create("Task", { id: "task-2", teamId: "team-1", title: "New" })
+      ).resolves.toBeDefined();
+
+      // The cursor still waits for the replacement snapshot.
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            data: { id: "task-1", title: "Applied too early" },
+            id: "61",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "61",
+      });
+      await sleep(SYNC_SETTLE_DELAY_MS);
+      expect(client.lastSyncId).toBe("10");
+
+      release.resolve();
+      await waitForSync(client, "70");
+      expect(client.getCached("Team", "team-1")).not.toBeNull();
+      expect(client.getCached("Task", "task-2")).toMatchObject({
+        title: "New",
+      });
+    } finally {
+      release.resolve();
+      await client.stop();
+    }
+  });
+
   it("holds the cursor while a group-change re-bootstrap is outstanding", async () => {
     const storage = new InMemoryStorage();
     const { bootstrapStarted, release, transport } =
