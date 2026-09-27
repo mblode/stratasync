@@ -7,7 +7,6 @@ Next.js integration helpers for App Router and Server Components.
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
 - `npm run test`: run tests (`vitest run`)
-- `npm run lint`: lint with Ultracite
 - `npm run check-types`: type check without emitting
 
 ## Gotchas

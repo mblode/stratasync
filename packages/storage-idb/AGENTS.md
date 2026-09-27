@@ -6,8 +6,7 @@ IndexedDB storage adapter for client-side persistence.
 
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
-- `npm run test`: run tests (`node --import tsx --test "tests/**/*.test.ts"`)
-- `npm run lint`: lint with Oxlint
+- `npm run test`: run tests (`vitest run`)
 - `npm run check-types`: type check without emitting
 
 ## Gotchas

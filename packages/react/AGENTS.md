@@ -7,7 +7,6 @@ React bindings and hooks for the sync system.
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
 - `npm run test`: run tests (`vitest`, uses jsdom + React Testing Library)
-- `npm run lint`: lint with Oxlint
 - `npm run check-types`: type check without emitting
 
 ## Gotchas
