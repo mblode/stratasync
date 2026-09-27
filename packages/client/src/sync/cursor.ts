@@ -18,6 +18,7 @@ import type { StorageAdapter } from "../types.js";
 export class SyncCursor {
   private _lastSyncId: SyncId = ZERO_SYNC_ID;
   private _firstSyncId: SyncId = ZERO_SYNC_ID;
+  private _snapshot = 0;
   private readonly storage: StorageAdapter;
   private readonly runtime: SyncRuntime;
 
@@ -32,6 +33,16 @@ export class SyncCursor {
 
   get firstSyncId(): SyncId {
     return this._firstSyncId;
+  }
+
+  /**
+   * Counts the snapshots this cursor has been set from. A delta page read
+   * against one snapshot must not be applied on top of the next: the next
+   * one already reflects everything the server had when it was taken,
+   * including any group change in that page.
+   */
+  get snapshot(): number {
+    return this._snapshot;
   }
 
   /** Loads cursor positions from persisted metadata. */
@@ -67,6 +78,7 @@ export class SyncCursor {
   setFromBootstrap(syncId: SyncId): void {
     this._lastSyncId = syncId;
     this._firstSyncId = syncId;
+    this._snapshot += 1;
   }
 
   /**
