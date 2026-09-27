@@ -1313,67 +1313,89 @@ const waitForSubscribeCount = async (
 };
 
 describe("reverse-done alignment", () => {
-  it("queues a fresh-session create behind the subscription close of a group reconciliation", async () => {
-    const storage = new InMemoryStorage();
-    const transport = new TestTransport({
-      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
-      fullRows: [
-        { data: { id: "team-1", name: "New workspace" }, modelName: "Team" },
-      ],
-    });
-    const closing = createDeferred<undefined>();
-    const releaseClose = createDeferred<undefined>();
-    const subscribe = transport.subscribe.bind(transport);
-    transport.subscribe = (options) => {
-      const subscription = subscribe(options);
-      const iterator = subscription[Symbol.asyncIterator]();
-      return {
-        ...subscription,
-        [Symbol.asyncIterator]: () => ({
-          next: () => iterator.next(),
-          return: async () => {
-            closing.resolve();
-            await releaseClose.promise;
-            return (
-              (await iterator.return?.()) ?? { done: true, value: undefined }
-            );
-          },
-        }),
+  it.each(["success", "failure", "restart"])(
+    "queues a fresh-session create behind group reconciliation: %s",
+    async (completion) => {
+      const storage = new InMemoryStorage();
+      const transport = new TestTransport({
+        fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+        fullRows: [
+          { data: { id: "team-1", name: "New workspace" }, modelName: "Team" },
+        ],
+      });
+      const bootstrap = transport.bootstrap.bind(transport);
+      let bootstraps = 0;
+      transport.bootstrap = async function* bootstrapReplacement(options) {
+        bootstraps += 1;
+        if (bootstraps > 1 && completion === "failure") {
+          throw new Error("Snapshot unavailable");
+        }
+        return yield* bootstrap(options);
       };
-    };
-    const client = createSyncClient({
-      reactivity: noopReactivityAdapter,
-      schema,
-      storage,
-      transport,
-    });
-    try {
-      await client.start();
-      transport.emitDelta(groupActionPacket("11"));
-      await closing.promise;
-      const creation = client.create("Task", {
-        id: "first-task",
-        teamId: "team-1",
-        title: "First task",
+      const closing = createDeferred<undefined>();
+      const releaseClose = createDeferred<undefined>();
+      const subscribe = transport.subscribe.bind(transport);
+      transport.subscribe = (options) => {
+        const subscription = subscribe(options);
+        const iterator = subscription[Symbol.asyncIterator]();
+        return {
+          ...subscription,
+          [Symbol.asyncIterator]: () => ({
+            next: () => iterator.next(),
+            return: async () => {
+              closing.resolve();
+              await releaseClose.promise;
+              return (
+                (await iterator.return?.()) ?? { done: true, value: undefined }
+              );
+            },
+          }),
+        };
+      };
+      const client = createSyncClient({
+        reactivity: noopReactivityAdapter,
+        schema,
+        storage,
+        transport,
       });
-      const outcome = creation.then(
-        (value) => ({ value }),
-        // oxlint-disable-next-line prefer-await-to-callbacks -- capture rejection before releasing the close barrier
-        (error: unknown) => ({ error })
-      );
-      // Flush the mutation's lock attempt while subscription closure is still pending.
-      await delay(0);
-      expect(client.getCached("Task", "first-task")).toBeNull();
-      releaseClose.resolve();
-      expect(await outcome).toMatchObject({ value: { id: "first-task" } });
-      expect(client.getCached("Task", "first-task")).toMatchObject({
-        title: "First task",
-      });
-    } finally {
-      releaseClose.resolve();
-      await client.stop();
+      try {
+        await client.start();
+        transport.emitDelta(groupActionPacket("11"));
+        await closing.promise;
+        const creation = client.create("Task", {
+          id: "first-task",
+          teamId: "team-1",
+          title: "First task",
+        });
+        const outcome = creation.then(
+          (value) => ({ value }),
+          // oxlint-disable-next-line prefer-await-to-callbacks -- capture rejection before releasing the close barrier
+          (error: unknown) => ({ error })
+        );
+        // Flush the mutation's lock attempt while subscription closure is still pending.
+        await delay(0);
+        expect(client.getCached("Task", "first-task")).toBeNull();
+        if (completion === "restart") {
+          await client.stop();
+          await client.start();
+        }
+        releaseClose.resolve();
+        if (completion === "success") {
+          expect(await outcome).toMatchObject({ value: { id: "first-task" } });
+          expect(client.getCached("Task", "first-task")).toMatchObject({
+            title: "First task",
+          });
+        } else {
+          expect(await outcome).toMatchObject({ error: expect.any(Error) });
+          expect(client.getCached("Task", "first-task")).toBeNull();
+          expect(await storage.getOutbox()).toHaveLength(0);
+        }
+      } finally {
+        releaseClose.resolve();
+        await client.stop();
+      }
     }
-  });
+  );
 
   const nativeSaveRows: ModelRow[] = [
     {
