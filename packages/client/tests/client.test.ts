@@ -668,6 +668,44 @@ describe("createSyncClient lifecycle", () => {
     expect(client.canRedo()).toBeFalsy();
   });
 
+  it("tells queries about outbox rows it replays after reporting ready", async () => {
+    const storage = new MemoryStorage(
+      new ModelRegistry(schema).getSchemaHash(),
+      [{ data: { id: "task-synced", title: "Synced" }, modelName: "Task" }]
+    );
+    // Created offline before the reload: only the outbox holds it.
+    await storage.addToOutbox(createQueuedTransaction("task-offline"));
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport: new NoopTransport(),
+    });
+    // Reads the way a list query does: once on "syncing", then again on
+    // every modelChange for its model.
+    let listed: string[] = [];
+    const read = (): void => {
+      listed = [...client.getIdentityMap("Task").keys()].toSorted();
+    };
+    client.onStateChange((state) => {
+      if (state === "syncing") {
+        read();
+      }
+    });
+    client.onEvent((event) => {
+      if (event.type === "modelChange" && event.modelName === "Task") {
+        read();
+      }
+    });
+
+    try {
+      await client.start();
+      expect(listed).toEqual(["task-offline", "task-synced"]);
+    } finally {
+      await client.stop();
+    }
+  });
+
   it("waits for an in-flight start before reading pending count", async () => {
     const storage = new DelayedOpenStorage(
       new ModelRegistry(schema).getSchemaHash(),
