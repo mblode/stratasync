@@ -2,7 +2,8 @@
   "$schema": "https://blode.md/docs.json",
   "name": "Strata Sync",
   "seo": {
-    "siteUrl": "https://blode.co/stratasync/docs"
+    "siteUrl": "https://blode.co/stratasync/docs",
+    "siteName": "Matthew Blode"
   },
   "description": "Build local-first TypeScript, React, and Next.js apps with instant reads, offline writes, and real-time collaboration.",
   "navbar": {
