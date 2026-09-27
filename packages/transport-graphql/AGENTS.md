@@ -7,7 +7,6 @@ GraphQL transport adapter for sync communication and mutations.
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
 - `npm run test`: run tests (`vitest`)
-- `npm run lint`: lint with Oxlint
 - `npm run check-types`: type check without emitting
 
 ## Gotchas

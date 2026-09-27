@@ -7,7 +7,6 @@ Offline-first sync orchestration: identity maps, outbox batching, delta reconcil
 - `npm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
 - `npm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
 - `npm run test`: run tests (`vitest run`)
-- `npm run lint`: lint with Oxlint
 - `npm run check-types`: type check without emitting
 
 ## Architecture
@@ -17,7 +16,7 @@ src/
   index.ts              public API barrel export
   client.ts             SyncClient factory: wires the pieces, model loading, events
   mutations.ts          MutationCoordinator: mutation lifecycle (optimistic apply,
-                        outbox enqueue, history entry) — extracted from client.ts
+                        outbox enqueue, history entry); extracted from client.ts
   loader.ts             lazy model loading and hydration entry points
   materializer.ts       builds model instances into the identity maps
   sync-orchestrator.ts  state machine: bootstrap, subscribe, delta application, rebase
