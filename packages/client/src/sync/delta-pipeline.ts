@@ -18,7 +18,7 @@ import {
   resolveConflictEffect,
 } from "@stratasync/core";
 
-import type { BatchOperation } from "../types.js";
+import type { BatchOperation, ModelChangeAction } from "../types.js";
 import { getModelKey } from "../utils.js";
 import type { SyncContext } from "./context.js";
 import {
@@ -51,6 +51,32 @@ interface DeltaStaging {
 interface BootstrapRequiredError extends Error {
   code: "BOOTSTRAP_REQUIRED";
 }
+
+/** The `modelChange` event a sync or outbox action produces, if any. */
+export const resolveModelChangeAction = (
+  action: SyncAction["action"]
+): ModelChangeAction | null => {
+  switch (action) {
+    case "I": {
+      return "insert";
+    }
+    case "U": {
+      return "update";
+    }
+    case "D": {
+      return "delete";
+    }
+    case "A": {
+      return "archive";
+    }
+    case "V": {
+      return "unarchive";
+    }
+    default: {
+      return null;
+    }
+  }
+};
 
 const isBootstrapRequiredError = (
   error: unknown
@@ -1013,31 +1039,6 @@ export class DeltaPipeline {
     return confirmedTxIds;
   }
 
-  private static resolveModelChangeAction(
-    action: SyncAction["action"]
-  ): "insert" | "update" | "delete" | "archive" | "unarchive" | null {
-    switch (action) {
-      case "I": {
-        return "insert";
-      }
-      case "U": {
-        return "update";
-      }
-      case "D": {
-        return "delete";
-      }
-      case "A": {
-        return "archive";
-      }
-      case "V": {
-        return "unarchive";
-      }
-      default: {
-        return null;
-      }
-    }
-  }
-
   private emitModelChangeEvents(
     actions: SyncAction[],
     ownClientTxIds: Set<string>
@@ -1054,7 +1055,7 @@ export class DeltaPipeline {
     }
 
     for (const action of lastByKey.values()) {
-      const eventAction = DeltaPipeline.resolveModelChangeAction(action.action);
+      const eventAction = resolveModelChangeAction(action.action);
       if (!eventAction) {
         continue;
       }
