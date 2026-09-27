@@ -10,6 +10,12 @@ import type { SyncContext } from "./context.js";
  * auto/local/full mode strategy. The orchestrator owns the run token and passes
  * it down; the runner only reads it via the context (no token of its own).
  */
+/** A downloaded snapshot that has not been committed yet. */
+export interface FetchedSnapshot {
+  metadata: BootstrapMetadata;
+  rows: ModelRow[];
+}
+
 export class BootstrapRunner {
   private readonly ctx: SyncContext;
 
@@ -91,10 +97,16 @@ export class BootstrapRunner {
    * Performs initial bootstrap.
    */
   async bootstrap(runToken: number): Promise<boolean> {
-    this.ctx.setState("bootstrapping");
-    const previousMeta = await this.ctx.storage.getMeta();
+    const snapshot = await this.fetchSnapshot(runToken);
+    return snapshot ? await this.commitSnapshot(snapshot, runToken) : false;
+  }
 
-    // Stream bootstrap data
+  /**
+   * Downloads a full snapshot without touching local state, so a caller can
+   * run it outside the state lock. Null when the run was cancelled.
+   */
+  async fetchSnapshot(runToken: number): Promise<FetchedSnapshot | null> {
+    this.ctx.setState("bootstrapping");
     const iterator = this.ctx.transport.bootstrap({
       onlyModels: this.ctx.registry.getBootstrapModelNames(),
       schemaHash: this.ctx.schemaHash,
@@ -103,13 +115,18 @@ export class BootstrapRunner {
     });
 
     const snapshot = await this.readBootstrapStream(iterator, runToken);
-    if (!snapshot) {
-      return false;
+    if (!snapshot || this.shouldAbort(runToken)) {
+      return null;
     }
-    if (this.shouldAbort(runToken)) {
-      return false;
-    }
+    return snapshot;
+  }
 
+  /** Replaces local state with a fetched snapshot. Call under the state lock. */
+  async commitSnapshot(
+    snapshot: FetchedSnapshot,
+    runToken: number
+  ): Promise<boolean> {
+    const previousMeta = await this.ctx.storage.getMeta();
     const replacesExistingSnapshot =
       previousMeta.bootstrapComplete === true ||
       previousMeta.lastSyncAt !== undefined ||
@@ -123,7 +140,13 @@ export class BootstrapRunner {
     // A completed remote response is now replacing an existing snapshot and
     // may bridge over a missed revocation. Preserve ordinary offline fallback
     // until this point, then durably quarantine before changing any rows.
-    if (replacesExistingSnapshot && !this.ctx.isGroupChangePending()) {
+    // A re-bootstrap for a group change that only added access knows the
+    // server revoked nothing, so it replaces the rows without quarantine.
+    if (
+      replacesExistingSnapshot &&
+      !this.ctx.isGroupChangePending() &&
+      !this.ctx.isAddedAccessRebootstrapOwed()
+    ) {
       await this.ctx.storage.setMeta({
         groupChangePending: true,
         updatedAt: this.ctx.runtime.now(),
@@ -177,10 +200,7 @@ export class BootstrapRunner {
   private async readBootstrapStream(
     iterator: AsyncGenerator<ModelRow, BootstrapMetadata, unknown>,
     runToken: number
-  ): Promise<{
-    metadata: BootstrapMetadata;
-    rows: ModelRow[];
-  } | null> {
+  ): Promise<FetchedSnapshot | null> {
     const rows: ModelRow[] = [];
     while (true) {
       const { value, done } = await iterator.next();

@@ -50,6 +50,8 @@ const createHarness = (fetchDeltas: TransportAdapter["fetchDeltas"]) => {
 
   const pipeline = new DeltaPipeline(ctx, {
     applyPendingOutboxTransactions: () => Promise.resolve(),
+    commitBootstrap: () => Promise.resolve(),
+    fetchBootstrap: () => Promise.resolve(null),
     processOutboxTransactions: () => Promise.resolve(),
     runBootstrap: () => Promise.resolve(),
   });
