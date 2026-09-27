@@ -181,7 +181,8 @@ export class DeltaPipeline {
   /** Pending resubscribe after a stream failure; cleared on reset. */
   private cancelReconnect: CancelScheduled | null = null;
   /** Guards against stacking group-change re-bootstraps. */
-  private groupChangeBootstrapInFlight: Promise<void> | null = null;
+  private groupChangeBootstrapInFlight: PromiseWithResolvers<undefined> | null =
+    null;
   /** Retry of a failed group-change re-bootstrap; cleared on reset. */
   private cancelGroupChangeRetry: CancelScheduled | null = null;
 
@@ -198,6 +199,7 @@ export class DeltaPipeline {
   reset(): void {
     this.clearReconnectTimer();
     this.clearGroupChangeRetryTimer();
+    this.groupChangeBootstrapInFlight?.resolve();
     this.groupChangeBootstrapInFlight = null;
     this.pendingCoverageLoads = [];
   }
@@ -480,13 +482,16 @@ export class DeltaPipeline {
     if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
       return;
     }
-    const reconciliation = this.runGroupChangeBootstrap(runToken)
+    const reconciliation = Promise.withResolvers<undefined>();
+    this.groupChangeBootstrapInFlight = reconciliation;
+    this.runGroupChangeBootstrap(runToken)
       .catch((error: unknown) => {
         if (this.ctx.isRunActive(runToken)) {
           this.ctx.recordError(error);
         }
       })
       .finally(() => {
+        reconciliation.resolve();
         if (this.groupChangeBootstrapInFlight !== reconciliation) {
           return;
         }
@@ -501,11 +506,10 @@ export class DeltaPipeline {
           }, GROUP_CHANGE_RETRY_DELAY_MS);
         }
       });
-    this.groupChangeBootstrapInFlight = reconciliation;
   }
 
   getGroupChangeReconciliation(): Promise<void> | null {
-    return this.groupChangeBootstrapInFlight;
+    return this.groupChangeBootstrapInFlight?.promise ?? null;
   }
 
   private async runGroupChangeBootstrap(runToken: number): Promise<void> {

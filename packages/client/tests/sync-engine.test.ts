@@ -1378,6 +1378,9 @@ describe("reverse-done alignment", () => {
         if (completion === "restart") {
           await client.stop();
           await client.start();
+          expect(await outcome).toMatchObject({
+            error: new Error("Sync client must be started before mutations"),
+          });
         }
         releaseClose.resolve();
         if (completion === "success") {
@@ -1386,7 +1389,13 @@ describe("reverse-done alignment", () => {
             title: "First task",
           });
         } else {
-          expect(await outcome).toMatchObject({ error: expect.any(Error) });
+          expect(await outcome).toMatchObject({
+            error: new Error(
+              completion === "failure"
+                ? "Sync client is reconciling access; retry the mutation when sync completes"
+                : "Sync client must be started before mutations"
+            ),
+          });
           expect(client.getCached("Task", "first-task")).toBeNull();
           expect(await storage.getOutbox()).toHaveLength(0);
         }
