@@ -4573,6 +4573,191 @@ describe("reverse-done alignment", () => {
     lastSyncId: "60",
   };
 
+  /**
+   * Lets a test flip the transport's connection (the orchestrator catches up
+   * over HTTP on every reconnect) and decide when that catch-up page lands.
+   */
+  const withParkedReconnectCatchUp = (transport: TestTransport) => {
+    const listeners = new Set<(state: ConnectionState) => void>();
+    transport.onConnectionStateChange = (listener) => {
+      listeners.add(listener);
+      listener("connected");
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    const page = createDeferred<DeltaPacket>();
+    transport.fetchDeltas = (after) => {
+      transport.fetchDeltaCalls.push({ after });
+      return page.promise;
+    };
+    return {
+      page,
+      reconnect: () => {
+        for (const listener of listeners) {
+          listener("disconnected");
+          listener("connected");
+        }
+      },
+    };
+  };
+
+  it("drops a catch-up page read before a group-change re-bootstrap instead of re-quarantining the replacement", async () => {
+    const storage = new InMemoryStorage();
+    const { fullCalls, release, transport } =
+      createBlockingReconcileTransport();
+    const { page, reconnect } = withParkedReconnectCatchUp(transport);
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      reconnect();
+      await waitUntil(
+        () => transport.fetchDeltaCalls.length === 1,
+        "Timed out waiting for the reconnect catch-up fetch"
+      );
+      expect(transport.fetchDeltaCalls[0]?.after).toBe("10");
+
+      // The live stream carries the group change first; the replacement
+      // snapshot (cursor 70) reflects it.
+      transport.emitDelta(groupChangePacket);
+      release.resolve();
+      await waitForSync(client, "70");
+      expect(fullCalls()).toBe(2);
+
+      // The catch-up page answering cursor 10 lands afterwards with the same
+      // group change. Applying it would clear the maps and bootstrap again.
+      page.resolve({ ...groupChangePacket, hasMore: false });
+      await sleep(SYNC_SETTLE_DELAY_MS);
+
+      expect(fullCalls()).toBe(2);
+      expect(await readGroupChangePending(storage)).toBeFalsy();
+      expect(client.getCached("Team", "team-1")).not.toBeNull();
+      expect(client.lastSyncId).toBe("70");
+    } finally {
+      release.resolve();
+      page.resolve({ actions: [], lastSyncId: "10" });
+      await client.stop();
+    }
+  });
+
+  it("leaves reporting ready to a re-bootstrap that started during a reconnect catch-up", async () => {
+    const storage = new InMemoryStorage();
+    const { bootstrapStarted, release, transport } =
+      createBlockingReconcileTransport();
+    const { page, reconnect } = withParkedReconnectCatchUp(transport);
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+    const states: string[] = [];
+
+    try {
+      await client.start();
+      client.onStateChange((state) => {
+        states.push(state);
+      });
+      reconnect();
+      await waitUntil(
+        () => transport.fetchDeltaCalls.length === 1,
+        "Timed out waiting for the reconnect catch-up fetch"
+      );
+
+      // The catch-up page lands as the stream delivers a group change, so
+      // the re-bootstrap starts while the reconnect is still finishing up.
+      page.resolve({ actions: [], hasMore: false, lastSyncId: "10" });
+      transport.emitDelta(groupChangePacket);
+      await bootstrapStarted.promise;
+      await sleep(SYNC_SETTLE_DELAY_MS);
+
+      // Nothing may report ready, or reopen the stream from the replaced
+      // cursor, until the replacement snapshot is in the identity maps: a UI
+      // only re-reads when the state changes to "syncing".
+      expect(states.at(-1)).toBe("bootstrapping");
+      expect(transport.subscribeCalls.map((call) => call.afterSyncId)).toEqual([
+        "10",
+      ]);
+
+      release.resolve();
+      await waitForSync(client, "70");
+      expect(states.slice(-2)).toEqual(["bootstrapping", "syncing"]);
+      expect(transport.subscribeCalls.at(-1)?.afterSyncId).toBe("70");
+    } finally {
+      release.resolve();
+      await client.stop();
+    }
+  });
+
+  it("keeps the store visible and writable through a group change that only adds access", async () => {
+    const storage = new InMemoryStorage();
+    const { bootstrapStarted, release, transport } =
+      createBlockingReconcileTransport();
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+
+    try {
+      await client.start();
+      // The snapshot was taken under ["team-1"]; the server now reports that
+      // plus a newly shared group, so nothing was revoked.
+      transport.emitDelta({
+        actions: [
+          {
+            action: "G",
+            data: { subscribedSyncGroups: ["team-1", "team-2"] },
+            id: "60",
+            modelId: "sync-groups",
+            modelName: "SyncGroup",
+          },
+        ],
+        lastSyncId: "60",
+      });
+      await bootstrapStarted.promise;
+
+      expect(client.getCached("Task", "task-1")).not.toBeNull();
+      expect(await readGroupChangePending(storage)).toBeFalsy();
+      await expect(
+        client.create("Task", { id: "task-2", teamId: "team-1", title: "New" })
+      ).resolves.toBeDefined();
+
+      // The cursor still waits for the replacement snapshot.
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            data: { id: "task-1", title: "Applied too early" },
+            id: "61",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "61",
+      });
+      await sleep(SYNC_SETTLE_DELAY_MS);
+      expect(client.lastSyncId).toBe("10");
+
+      release.resolve();
+      await waitForSync(client, "70");
+      expect(client.getCached("Team", "team-1")).not.toBeNull();
+      expect(client.getCached("Task", "task-2")).toMatchObject({
+        title: "New",
+      });
+    } finally {
+      release.resolve();
+      await client.stop();
+    }
+  });
+
   it("holds the cursor while a group-change re-bootstrap is outstanding", async () => {
     const storage = new InMemoryStorage();
     const { bootstrapStarted, release, transport } =

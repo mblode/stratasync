@@ -91,6 +91,7 @@ const createHarness = (options: {
         // Nothing cached in this harness.
       },
     },
+    isAddedAccessRebootstrapOwed: () => false,
     isGroupChangePending: () => groupChangePending,
     isRunActive: (token: number) => token === runToken,
     isRunning: () => true,
@@ -102,6 +103,9 @@ const createHarness = (options: {
       options.runWithStateLock ??
       (<T>(operation: () => Promise<T>) => operation()),
     runtime: options.runtime ?? systemRuntime,
+    setAddedAccessRebootstrapOwed: () => {
+      // This harness only drives quarantined group changes.
+    },
     setDeltaSubscription: (next: AsyncIterator<DeltaPacket> | null) => {
       subscription = next;
     },
@@ -137,6 +141,8 @@ const createHarness = (options: {
 
   const pipeline = new DeltaPipeline(ctx, {
     applyPendingOutboxTransactions: () => Promise.resolve(),
+    commitBootstrap: () => Promise.resolve(),
+    fetchBootstrap: () => Promise.resolve(null),
     processOutboxTransactions:
       options.processOutboxTransactions ?? (() => Promise.resolve()),
     runBootstrap: (token: number) => {

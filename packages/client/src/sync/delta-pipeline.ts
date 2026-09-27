@@ -18,8 +18,9 @@ import {
   resolveConflictEffect,
 } from "@stratasync/core";
 
-import type { BatchOperation } from "../types.js";
+import type { BatchOperation, ModelChangeAction } from "../types.js";
 import { getModelKey } from "../utils.js";
+import type { FetchedSnapshot } from "./bootstrap-runner.js";
 import type { SyncContext } from "./context.js";
 import {
   applyPendingTransactionsToIdentityMaps,
@@ -51,6 +52,32 @@ interface DeltaStaging {
 interface BootstrapRequiredError extends Error {
   code: "BOOTSTRAP_REQUIRED";
 }
+
+/** The `modelChange` event a sync or outbox action produces, if any. */
+export const resolveModelChangeAction = (
+  action: SyncAction["action"]
+): ModelChangeAction | null => {
+  switch (action) {
+    case "I": {
+      return "insert";
+    }
+    case "U": {
+      return "update";
+    }
+    case "D": {
+      return "delete";
+    }
+    case "A": {
+      return "archive";
+    }
+    case "V": {
+      return "unarchive";
+    }
+    default: {
+      return null;
+    }
+  }
+};
 
 const isBootstrapRequiredError = (
   error: unknown
@@ -111,6 +138,10 @@ const getAuthoritativeGroups = (
 export interface DeltaPipelineDeps {
   /** Runs a full bootstrap for the given run token. */
   runBootstrap(runToken: number): Promise<void>;
+  /** Downloads a snapshot without touching local state. */
+  fetchBootstrap(runToken: number): Promise<FetchedSnapshot | null>;
+  /** Commits a downloaded snapshot; call under the state lock. */
+  commitBootstrap(snapshot: FetchedSnapshot, runToken: number): Promise<void>;
   /** Re-applies pending outbox transactions to identity maps. */
   applyPendingOutboxTransactions(
     authoritativeReplacement?: boolean
@@ -260,6 +291,7 @@ export class DeltaPipeline {
       return;
     }
     const runToken = this.ctx.getRunToken();
+    const { snapshot } = this.ctx.cursor;
 
     try {
       while (this.ctx.isRunActive(runToken)) {
@@ -291,7 +323,7 @@ export class DeltaPipeline {
         if (this.ctx.getDeltaSubscription() !== subscription) {
           break;
         }
-        await this.enqueueDeltaPacket(value);
+        await this.enqueueDeltaPacket(value, snapshot);
       }
     } catch (error) {
       if (this.ctx.isRunActive(runToken)) {
@@ -335,16 +367,31 @@ export class DeltaPipeline {
    * recovery and by group-change reconciliation.
    */
   private async bootstrapAndResume(runToken: number): Promise<void> {
+    // A re-bootstrap that only adds access quarantines nothing, so writes may
+    // go on while it downloads: fetch outside the state lock and commit under
+    // it, as the Swift SDK does. A write made meanwhile is in the outbox and
+    // is replayed after the commit. Holding the lock across the download
+    // would stall every write until the snapshot arrived.
+    const prefetched =
+      this.ctx.isAddedAccessRebootstrapOwed() &&
+      !this.ctx.isGroupChangePending()
+        ? await this.deps.fetchBootstrap(runToken)
+        : null;
     await this.ctx.runWithStateLock(async () => {
       // The lock may only be granted after a stop()+start(): never run this
       // run's recovery under the next run's token.
       if (!this.ctx.isRunActive(runToken)) {
         return;
       }
-      await this.deps.runBootstrap(runToken);
+      // A group change that may revoke access can arrive during the
+      // download; it needs a snapshot taken after it, under the lock.
+      await (prefetched && !this.ctx.isGroupChangePending()
+        ? this.deps.commitBootstrap(prefetched, runToken)
+        : this.deps.runBootstrap(runToken));
       if (!this.ctx.isRunActive(runToken)) {
         return;
       }
+      this.ctx.setAddedAccessRebootstrapOwed(false);
       const privacyReconcile = this.ctx.isGroupChangePending();
       await this.deps.applyPendingOutboxTransactions(privacyReconcile);
       if (privacyReconcile) {
@@ -388,8 +435,33 @@ export class DeltaPipeline {
     authoritativeGroups?: string[]
   ): Promise<void> {
     const wasPending = this.ctx.isGroupChangePending();
+    // A change that adds a group and keeps every group the current snapshot
+    // was taken under revoked nothing, so every cached row is still
+    // authorized. It only needs the new groups' history: leave the store
+    // visible and writable, and re-bootstrap without quarantine. An unknown
+    // old or new set counts as a removal. So does an unchanged set: a server
+    // sends one when rows moved between groups (a task into a private
+    // project), and those rows may be gone from this user's view. The Swift
+    // SDK treats an unchanged set as additive; this is the stricter reading.
+    const knownGroups = this.ctx.getGroups();
+    const onlyAddsAccess =
+      authoritativeGroups !== undefined &&
+      knownGroups.length > 0 &&
+      knownGroups.every((group) => authoritativeGroups.includes(group)) &&
+      authoritativeGroups.some((group) => !knownGroups.includes(group));
     if (authoritativeGroups) {
       this.ctx.setGroups(authoritativeGroups);
+    }
+    if (!wasPending && onlyAddsAccess) {
+      await this.ctx.storage.setMeta({
+        subscribedSyncGroups: authoritativeGroups,
+        updatedAt: this.ctx.runtime.now(),
+      });
+      // In memory only: the cursor stays below the group action until the
+      // bootstrap lands, so a restart before then receives it again.
+      this.ctx.setAddedAccessRebootstrapOwed(true);
+      this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
+      return;
     }
     const pendingMeta = wasPending ? {} : { groupChangePending: true };
     await this.ctx.storage.setMeta({
@@ -412,6 +484,13 @@ export class DeltaPipeline {
     this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
   }
 
+  /** A group-change re-bootstrap is owed, quarantined or not. */
+  private isGroupChangeOwed(): boolean {
+    return (
+      this.ctx.isGroupChangePending() || this.ctx.isAddedAccessRebootstrapOwed()
+    );
+  }
+
   private scheduleGroupChangeBootstrap(runToken: number): void {
     if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
       return;
@@ -428,7 +507,7 @@ export class DeltaPipeline {
         this.groupChangeBootstrapInFlight = false;
         // A failed attempt leaves the latch set; keep trying while this run
         // is alive, because every packet is being held until it lands.
-        if (this.ctx.isRunActive(runToken) && this.ctx.isGroupChangePending()) {
+        if (this.ctx.isRunActive(runToken) && this.isGroupChangeOwed()) {
           this.clearGroupChangeRetryTimer();
           this.cancelGroupChangeRetry = this.ctx.runtime.schedule(() => {
             this.cancelGroupChangeRetry = null;
@@ -504,6 +583,7 @@ export class DeltaPipeline {
     let releaseBarrier: (() => void) | null = null;
     let buffered: SyncAction[] = [];
     let bufferedLastSyncId: SyncId | null = null;
+    const { snapshot } = this.ctx.cursor;
 
     const flush = async (): Promise<void> => {
       if (bufferedLastSyncId === null) {
@@ -526,7 +606,7 @@ export class DeltaPipeline {
       };
       buffered = [];
       bufferedLastSyncId = null;
-      await this.enqueueDeltaPacket(merged);
+      await this.enqueueDeltaPacket(merged, snapshot);
     };
 
     try {
@@ -622,14 +702,30 @@ export class DeltaPipeline {
     return null;
   }
 
-  private enqueueDeltaPacket(packet: DeltaPacket): Promise<void> {
+  /**
+   * `snapshot` is the cursor snapshot the packet was read against. A packet
+   * waits here for the state lock, which a re-bootstrap holds while it
+   * replaces the snapshot, and is dropped if that happened. The replacement
+   * already reflects everything in it, a group change included, and the
+   * stream reopens from the replacement's cursor for anything newer. Applying
+   * it would re-run that group change against the fresh snapshot: clear the
+   * identity maps again and bootstrap again.
+   */
+  private enqueueDeltaPacket(
+    packet: DeltaPacket,
+    snapshot: number
+  ): Promise<void> {
     // packetQueue serializes packets against each other; the nested state-lock
     // run keeps packet application serialized against mutations too.
     return this.ctx.packetQueue().run(async () => {
       if (!this.ctx.isRunning()) {
         return;
       }
-      await this.ctx.runWithStateLock(() => this.applyDeltaPacket(packet));
+      await this.ctx.runWithStateLock(async () => {
+        if (this.ctx.cursor.snapshot === snapshot) {
+          await this.applyDeltaPacket(packet);
+        }
+      });
       // Outside the state lock: coverage fetches take it themselves, and it
       // is not reentrant.
       await this.drainPendingCoverageLoads();
@@ -664,7 +760,7 @@ export class DeltaPipeline {
     // the action and it would never be redelivered: the membership change
     // would be lost, which is exactly what the durable action exists to
     // prevent. The cost is a little redelivery once the bootstrap lands.
-    if (this.ctx.isGroupChangePending()) {
+    if (this.isGroupChangeOwed()) {
       this.scheduleGroupChangeBootstrap(this.ctx.getRunToken());
       return;
     }
@@ -1002,31 +1098,6 @@ export class DeltaPipeline {
     return confirmedTxIds;
   }
 
-  private static resolveModelChangeAction(
-    action: SyncAction["action"]
-  ): "insert" | "update" | "delete" | "archive" | "unarchive" | null {
-    switch (action) {
-      case "I": {
-        return "insert";
-      }
-      case "U": {
-        return "update";
-      }
-      case "D": {
-        return "delete";
-      }
-      case "A": {
-        return "archive";
-      }
-      case "V": {
-        return "unarchive";
-      }
-      default: {
-        return null;
-      }
-    }
-  }
-
   private emitModelChangeEvents(
     actions: SyncAction[],
     ownClientTxIds: Set<string>
@@ -1043,7 +1114,7 @@ export class DeltaPipeline {
     }
 
     for (const action of lastByKey.values()) {
-      const eventAction = DeltaPipeline.resolveModelChangeAction(action.action);
+      const eventAction = resolveModelChangeAction(action.action);
       if (!eventAction) {
         continue;
       }
