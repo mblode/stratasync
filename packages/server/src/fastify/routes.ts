@@ -257,6 +257,7 @@ export const registerSyncRoutes = (
 
       const input: MutateInput = { batchId, transactions };
 
+      const publishes: Promise<void>[] = [];
       const result = await mutateService.mutate(syncUser, input, (action) => {
         // The DAO's insert-order advisory lock allocates IDs in commit order,
         // but publishes (from this and other processes) can still reach a
@@ -268,13 +269,19 @@ export const registerSyncRoutes = (
             action.groupId,
             syncUser.groups
           );
-          deltaPublisher.publish(action, groups).catch((error) => {
-            const formattedError =
-              error instanceof Error ? error : new Error(String(error));
-            logger.error({ err: formattedError }, "Failed to publish delta");
-          });
+          publishes.push(
+            deltaPublisher.publish(action, groups).catch((error) => {
+              const formattedError =
+                error instanceof Error ? error : new Error(String(error));
+              logger.error({ err: formattedError }, "Failed to publish delta");
+            })
+          );
         }
       });
+
+      // Each publish starts at its commit, so waiting here costs no ordering;
+      // it lets a client that sees this response rely on the deltas being out.
+      await Promise.all(publishes);
 
       return reply.send({
         lastSyncId: result.lastSyncId,
