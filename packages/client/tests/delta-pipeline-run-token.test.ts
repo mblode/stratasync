@@ -1,4 +1,4 @@
-import type { DeltaPacket } from "@stratasync/core";
+import type { DeltaPacket, SyncRuntime } from "@stratasync/core";
 import { systemRuntime } from "@stratasync/core";
 
 import { AsyncQueue } from "../src/internal/async-queue.js";
@@ -26,6 +26,33 @@ const pendingIterator = (
 });
 
 /**
+ * Holds the transport to one open delta stream, as `WebSocketManager` does: a
+ * second `subscribe()` throws until the first iterator has returned or ended.
+ */
+const singleStream = (iterator: AsyncIterator<DeltaPacket>) => {
+  let open = true;
+  const close = <T extends IteratorResult<DeltaPacket>>(result: T): T => {
+    if (result.done) {
+      open = false;
+    }
+    return result;
+  };
+  return {
+    isOpen: () => open,
+    iterator: {
+      next: async () => close(await iterator.next()),
+      return: () => {
+        open = false;
+        return (
+          iterator.return?.() ??
+          Promise.resolve({ done: true, value: undefined })
+        );
+      },
+    } as AsyncIterator<DeltaPacket>,
+  };
+};
+
+/**
  * Context with a controllable run token. `restart()` simulates stop() +
  * start(): the lifecycle is running again under a new token, which is exactly
  * when an `isRunning()` check stops distinguishing the runs.
@@ -35,11 +62,14 @@ const createHarness = (options: {
   runBootstrap?: () => Promise<void>;
   processOutboxTransactions?: () => Promise<void>;
   runWithStateLock?: <T>(operation: () => Promise<T>) => Promise<T>;
+  runtime?: SyncRuntime;
 }) => {
   let runToken = 1;
   let subscription: AsyncIterator<DeltaPacket> | null = null;
   let groupChangePending = false;
   const subscribeCalls: number[] = [];
+  const streams: ReturnType<typeof singleStream>[] = [];
+  const errors: unknown[] = [];
   const bootstrapTokens: number[] = [];
   const states: { state: string; token: number }[] = [];
   const packetQueue = new AsyncQueue();
@@ -66,13 +96,13 @@ const createHarness = (options: {
     isRunActive: (token: number) => token === runToken,
     isRunning: () => true,
     packetQueue: () => packetQueue,
-    recordError: () => {
-      // Not observed.
+    recordError: (error: unknown) => {
+      errors.push(error);
     },
     runWithStateLock:
       options.runWithStateLock ??
       (<T>(operation: () => Promise<T>) => operation()),
-    runtime: systemRuntime,
+    runtime: options.runtime ?? systemRuntime,
     setAddedAccessRebootstrapOwed: () => {
       // This harness only drives quarantined group changes.
     },
@@ -91,13 +121,20 @@ const createHarness = (options: {
     storage,
     transport: {
       subscribe: () => {
-        subscribeCalls.push(runToken);
-        const iterator =
-          options.subscribe?.() ??
-          pendingIterator(
-            () => deferred<IteratorResult<DeltaPacket>>().promise
+        if (streams.some((stream) => stream.isOpen())) {
+          throw new Error(
+            "WebSocketManager supports only one active delta subscription"
           );
-        return { [Symbol.asyncIterator]: () => iterator };
+        }
+        subscribeCalls.push(runToken);
+        const stream = singleStream(
+          options.subscribe?.() ??
+            pendingIterator(
+              () => deferred<IteratorResult<DeltaPacket>>().promise
+            )
+        );
+        streams.push(stream);
+        return { [Symbol.asyncIterator]: () => stream.iterator };
       },
     } as unknown as TransportAdapter,
   } as unknown as SyncContext;
@@ -117,6 +154,8 @@ const createHarness = (options: {
   return {
     bootstrapTokens,
     ctx,
+    errors,
+    openStreams: () => streams.filter((stream) => stream.isOpen()).length,
     pipeline,
     restart() {
       runToken += 1;
@@ -241,5 +280,78 @@ describe("DeltaPipeline continuations are bound to their run", () => {
     });
     expect(harness.bootstrapTokens).toEqual([1]);
     expect(harness.subscribeCalls).toEqual([1]);
+  });
+});
+
+describe("DeltaPipeline holds at most one open delta stream", () => {
+  it("closes the current stream before it opens another", async () => {
+    const harness = createHarness({});
+
+    harness.pipeline.startDeltaSubscription("10");
+    harness.pipeline.startDeltaSubscription("10");
+    // The closed stream's loop sees `done`; it must not reopen a third.
+    await settle();
+
+    expect(harness.subscribeCalls).toEqual([1, 1]);
+    expect(harness.openStreams()).toBe(1);
+  });
+
+  it("closes the live stream when catch-up needs a re-bootstrap", async () => {
+    const harness = createHarness({});
+    harness.pipeline.startDeltaSubscription("10");
+
+    // A warm start's HTTP catch-up finds the cursor too old while the live
+    // stream it opened alongside is still healthy.
+    await harness.pipeline.handleBootstrapRequired(
+      bootstrapRequired(),
+      harness.ctx.getDeltaSubscription()
+    );
+
+    await vi.waitFor(() => {
+      expect(harness.states).toEqual([{ state: "syncing", token: 1 }]);
+    });
+    expect(harness.errors).toEqual([]);
+    expect(harness.subscribeCalls).toEqual([1, 1]);
+    expect(harness.openStreams()).toBe(1);
+  });
+
+  it("closes a stream whose packet failed before it resubscribes", async () => {
+    const scheduled: (() => void)[] = [];
+    let subscribes = 0;
+    const harness = createHarness({
+      runWithStateLock: () => Promise.reject(new Error("storage write failed")),
+      runtime: {
+        ...systemRuntime,
+        schedule: (task) => {
+          scheduled.push(task);
+          return () => {
+            // Never cancelled in this test.
+          };
+        },
+      },
+      subscribe: () => {
+        subscribes += 1;
+        let delivered = subscribes > 1;
+        return pendingIterator(() => {
+          if (delivered) {
+            return deferred<IteratorResult<DeltaPacket>>().promise;
+          }
+          delivered = true;
+          return Promise.resolve({
+            done: false,
+            value: { actions: [], lastSyncId: "11" },
+          });
+        });
+      },
+    });
+
+    harness.pipeline.startDeltaSubscription("10");
+    await vi.waitFor(() => {
+      expect(scheduled).toHaveLength(1);
+    });
+    scheduled[0]?.();
+
+    expect(harness.subscribeCalls).toEqual([1, 1]);
+    expect(harness.openStreams()).toBe(1);
   });
 });
