@@ -230,11 +230,36 @@ export class DeltaPipeline {
   }
 
   /**
-   * Starts the delta subscription.
+   * Drops the handle to `subscription` (the current one by default) and closes
+   * it. Every handle leaves through here: a transport may hold only one open
+   * delta stream (`WebSocketManager` does), so a handle dropped without
+   * `return()` leaves a stream the next subscribe collides with. `return()`
+   * is called before the first await, so the transport has released the
+   * stream by the time a caller that does not await subscribes again.
+   */
+  private async releaseDeltaSubscription(
+    subscription: AsyncIterator<DeltaPacket> | null = this.ctx.getDeltaSubscription()
+  ): Promise<void> {
+    if (!subscription) {
+      return;
+    }
+    if (this.ctx.getDeltaSubscription() === subscription) {
+      this.ctx.setDeltaSubscription(null);
+    }
+    try {
+      await subscription.return?.();
+    } catch {
+      // Best-effort close of the existing iterator.
+    }
+  }
+
+  /**
+   * Starts the delta subscription, closing any current one first.
    */
   startDeltaSubscription(
     afterSyncId: SyncId = this.ctx.cursor.lastSyncId
   ): void {
+    this.releaseDeltaSubscription();
     const subscription = this.ctx.transport.subscribe({
       afterSyncId,
       groups: this.ctx.getGroups(),
@@ -253,15 +278,7 @@ export class DeltaPipeline {
   }
 
   async restartDeltaSubscription(afterSyncId: SyncId): Promise<void> {
-    const current = this.ctx.getDeltaSubscription();
-    this.ctx.setDeltaSubscription(null);
-    if (current) {
-      try {
-        await current.return?.();
-      } catch {
-        // Best-effort close of the existing iterator.
-      }
-    }
+    await this.releaseDeltaSubscription();
     this.startDeltaSubscription(afterSyncId);
   }
 
@@ -317,9 +334,8 @@ export class DeltaPipeline {
         this.scheduleResubscribe(runToken);
       }
     } finally {
-      if (this.ctx.getDeltaSubscription() === subscription) {
-        this.ctx.setDeltaSubscription(null);
-      }
+      // An error from packet application leaves the transport's stream open.
+      await this.releaseDeltaSubscription(subscription);
     }
   }
 
@@ -334,9 +350,8 @@ export class DeltaPipeline {
       return false;
     }
 
-    if (subscription && this.ctx.getDeltaSubscription() === subscription) {
-      this.ctx.setDeltaSubscription(null);
-    }
+    // The error may come from HTTP catch-up while this stream is still live.
+    await this.releaseDeltaSubscription(subscription);
 
     try {
       await this.requestGroupChangeBootstrap();
@@ -506,15 +521,7 @@ export class DeltaPipeline {
     // Close the live stream first. The old iterator would otherwise keep
     // consuming (and holding) packets against a cursor the bootstrap is about
     // to replace, and the resume below opens a fresh one from the new cursor.
-    const current = this.ctx.getDeltaSubscription();
-    this.ctx.setDeltaSubscription(null);
-    if (current) {
-      try {
-        await current.return?.();
-      } catch {
-        // Best-effort close; the bootstrap proceeds regardless.
-      }
-    }
+    await this.releaseDeltaSubscription();
     if (!this.ctx.isRunActive(runToken)) {
       return;
     }
