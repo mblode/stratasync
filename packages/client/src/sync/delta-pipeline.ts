@@ -181,8 +181,10 @@ export class DeltaPipeline {
   /** Pending resubscribe after a stream failure; cleared on reset. */
   private cancelReconnect: CancelScheduled | null = null;
   /** Guards against stacking group-change re-bootstraps. */
-  private groupChangeBootstrapInFlight: PromiseWithResolvers<undefined> | null =
-    null;
+  private groupChangeBootstrapInFlight: {
+    promise: Promise<void>;
+    resolve: () => void;
+  } | null = null;
   /** Retry of a failed group-change re-bootstrap; cleared on reset. */
   private cancelGroupChangeRetry: CancelScheduled | null = null;
 
@@ -482,7 +484,13 @@ export class DeltaPipeline {
     if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
       return;
     }
-    const reconciliation = Promise.withResolvers<undefined>();
+    // oxlint-disable-next-line consistent-function-scoping -- assigned synchronously by the Promise executor
+    let resolveReconciliation: () => void = () => {};
+    // oxlint-disable-next-line avoid-new -- settlement also comes from lifecycle reset
+    const promise = new Promise<void>((resolve) => {
+      resolveReconciliation = resolve;
+    });
+    const reconciliation = { promise, resolve: resolveReconciliation };
     this.groupChangeBootstrapInFlight = reconciliation;
     this.runGroupChangeBootstrap(runToken)
       .catch((error: unknown) => {
