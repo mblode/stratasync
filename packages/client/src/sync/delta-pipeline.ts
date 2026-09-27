@@ -485,7 +485,9 @@ export class DeltaPipeline {
       return;
     }
     // oxlint-disable-next-line consistent-function-scoping -- assigned synchronously by the Promise executor
-    let resolveReconciliation: () => void = () => {};
+    let resolveReconciliation: () => void = () => {
+      /* Replaced synchronously before the waiter is exposed. */
+    };
     // oxlint-disable-next-line avoid-new -- settlement also comes from lifecycle reset
     const promise = new Promise<void>((resolve) => {
       resolveReconciliation = resolve;
