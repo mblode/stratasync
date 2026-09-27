@@ -1,5 +1,7 @@
 # @stratasync/server
 
+## 2.5.4
+
 ## 2.5.3
 
 ### Patch Changes
