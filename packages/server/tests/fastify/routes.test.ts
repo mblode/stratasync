@@ -1,6 +1,9 @@
+import { setTimeout } from "node:timers/promises";
+
 import fastify from "fastify";
 
 import type { BootstrapService } from "../../src/bootstrap/bootstrap-service.js";
+import type { DeltaPublisherLike } from "../../src/delta/delta-publisher.js";
 import type { DeltaService } from "../../src/delta/delta-service.js";
 import { registerSyncRoutes } from "../../src/fastify/routes.js";
 import {
@@ -9,6 +12,7 @@ import {
   MutateBodySchema,
 } from "../../src/fastify/validation.js";
 import type { MutateService } from "../../src/mutate/mutate-service.js";
+import type { SyncActionOutput } from "../../src/types.js";
 
 const logger = {
   debug: vi.fn(),
@@ -71,8 +75,30 @@ const makeMutateService = (): MutateService =>
     },
   }) as unknown as MutateService;
 
+const makeSyncAction = (syncId: string): SyncActionOutput => ({
+  action: "I",
+  clientId: "client-1",
+  clientTxId: `tx-${syncId}`,
+  createdAt: new Date(0),
+  data: {},
+  groupId: "workspace-1",
+  modelId: `task-${syncId}`,
+  modelName: "Task",
+  syncId,
+});
+
+const createDeferred = () => {
+  let resolve!: () => void;
+  // oxlint-disable-next-line avoid-new, param-names -- deferred promise pattern
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 const createApp = (overrides?: {
   bootstrapService?: BootstrapService;
+  deltaPublisher?: DeltaPublisherLike;
   deltaService?: DeltaService;
   mutateService?: MutateService;
 }) => {
@@ -82,6 +108,7 @@ const createApp = (overrides?: {
   registerSyncRoutes(app, {
     authMiddleware,
     bootstrapService: overrides?.bootstrapService ?? makeBootstrapService(),
+    deltaPublisher: overrides?.deltaPublisher,
     deltaService: overrides?.deltaService ?? makeDeltaService(),
     logger,
     mutateService: overrides?.mutateService ?? makeMutateService(),
@@ -377,6 +404,76 @@ describe(registerSyncRoutes, () => {
         success: true,
       });
       expect(authMiddleware).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("answers a mutate only after every delta publish settles", async () => {
+    const mutateService = {
+      mutate(
+        _context: unknown,
+        _input: unknown,
+        onAction: (committed: SyncActionOutput) => void
+      ) {
+        onAction(makeSyncAction("41"));
+        onAction(makeSyncAction("42"));
+        return Promise.resolve({
+          lastSyncId: "42",
+          results: [],
+          success: true,
+        });
+      },
+    } as unknown as MutateService;
+    const published: string[] = [];
+    const pending: (() => void)[] = [];
+    const deltaPublisher = {
+      publish: ({ syncId }: SyncActionOutput) => {
+        published.push(syncId);
+        const { promise, resolve } = createDeferred();
+        pending.push(resolve);
+        return promise;
+      },
+      publishMany: vi.fn(),
+    } as unknown as DeltaPublisherLike;
+    const { app } = createApp({ deltaPublisher, mutateService });
+    try {
+      await app.ready();
+
+      let answered = false;
+      const response = app
+        .inject({
+          headers: { authorization: "Bearer token" },
+          method: "POST",
+          payload: {
+            batchId: "batch-1",
+            transactions: [
+              {
+                action: "INSERT",
+                clientId: "client-1",
+                clientTxId: "tx-41",
+                modelId: "task-41",
+                modelName: "Task",
+                payload: {},
+              },
+            ],
+          },
+          url: "/sync/mutate",
+        })
+        .then((reply) => {
+          answered = true;
+          return reply;
+        });
+
+      await vi.waitFor(() => expect(published).toEqual(["41", "42"]));
+      await setTimeout(20);
+      expect(answered).toBeFalsy();
+
+      for (const resolve of pending) {
+        resolve();
+      }
+      const reply = await response;
+      expect(reply.statusCode).toBe(200);
     } finally {
       await app.close();
     }
