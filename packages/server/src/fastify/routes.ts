@@ -39,6 +39,28 @@ import {
 
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 5000;
+// A healthy Redis PUBLISH acks in milliseconds. Past this, Redis is down or
+// stalled (node-redis queues commands while disconnected by default), and a
+// committed write must not hang on it: clients still read the delta from
+// `sync_actions` on their next catch-up.
+const PUBLISH_WAIT_MS = 2000;
+
+/** Resolves `true` once `work` settles, or `false` after `ms`. */
+const settlesWithin = async (
+  work: Promise<unknown>,
+  ms: number
+): Promise<boolean> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // oxlint-disable-next-line avoid-new -- a cancellable timer race
+  const timedOut = new Promise<false>((resolve) => {
+    timer = setTimeout(resolve, ms, false);
+  });
+  try {
+    return await Promise.race([work.then(() => true), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const splitList = (value: string | undefined): string[] | undefined =>
   value?.split(",").filter(Boolean);
@@ -257,6 +279,7 @@ export const registerSyncRoutes = (
 
       const input: MutateInput = { batchId, transactions };
 
+      const publishes: Promise<void>[] = [];
       const result = await mutateService.mutate(syncUser, input, (action) => {
         // The DAO's insert-order advisory lock allocates IDs in commit order,
         // but publishes (from this and other processes) can still reach a
@@ -268,13 +291,27 @@ export const registerSyncRoutes = (
             action.groupId,
             syncUser.groups
           );
-          deltaPublisher.publish(action, groups).catch((error) => {
-            const formattedError =
-              error instanceof Error ? error : new Error(String(error));
-            logger.error({ err: formattedError }, "Failed to publish delta");
-          });
+          publishes.push(
+            deltaPublisher.publish(action, groups).catch((error) => {
+              const formattedError =
+                error instanceof Error ? error : new Error(String(error));
+              logger.error({ err: formattedError }, "Failed to publish delta");
+            })
+          );
         }
       });
+
+      // Each publish starts at its commit, so waiting here costs no ordering;
+      // it lets a client that sees this response rely on the deltas being out.
+      if (
+        publishes.length > 0 &&
+        !(await settlesWithin(Promise.all(publishes), PUBLISH_WAIT_MS))
+      ) {
+        logger.warn(
+          { batchId, pendingPublishes: publishes.length },
+          "Answering mutate before its delta publishes settled"
+        );
+      }
 
       return reply.send({
         lastSyncId: result.lastSyncId,
