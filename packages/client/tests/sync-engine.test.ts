@@ -1313,6 +1313,68 @@ const waitForSubscribeCount = async (
 };
 
 describe("reverse-done alignment", () => {
+  it("queues a fresh-session create behind the subscription close of a group reconciliation", async () => {
+    const storage = new InMemoryStorage();
+    const transport = new TestTransport({
+      fullMetadata: { lastSyncId: "10", subscribedSyncGroups: ["team-1"] },
+      fullRows: [
+        { data: { id: "team-1", name: "New workspace" }, modelName: "Team" },
+      ],
+    });
+    const closing = createDeferred<undefined>();
+    const releaseClose = createDeferred<undefined>();
+    const subscribe = transport.subscribe.bind(transport);
+    transport.subscribe = (options) => {
+      const subscription = subscribe(options);
+      const iterator = subscription[Symbol.asyncIterator]();
+      return {
+        ...subscription,
+        [Symbol.asyncIterator]: () => ({
+          next: () => iterator.next(),
+          return: async () => {
+            closing.resolve();
+            await releaseClose.promise;
+            return (
+              (await iterator.return?.()) ?? { done: true, value: undefined }
+            );
+          },
+        }),
+      };
+    };
+    const client = createSyncClient({
+      reactivity: noopReactivityAdapter,
+      schema,
+      storage,
+      transport,
+    });
+    try {
+      await client.start();
+      transport.emitDelta(groupActionPacket("11"));
+      await closing.promise;
+      const creation = client.create("Task", {
+        id: "first-task",
+        teamId: "team-1",
+        title: "First task",
+      });
+      const outcome = creation.then(
+        (value) => ({ value }),
+        // oxlint-disable-next-line prefer-await-to-callbacks -- capture rejection before releasing the close barrier
+        (error: unknown) => ({ error })
+      );
+      // Flush the mutation's lock attempt while subscription closure is still pending.
+      await delay(0);
+      expect(client.getCached("Task", "first-task")).toBeNull();
+      releaseClose.resolve();
+      expect(await outcome).toMatchObject({ value: { id: "first-task" } });
+      expect(client.getCached("Task", "first-task")).toMatchObject({
+        title: "First task",
+      });
+    } finally {
+      releaseClose.resolve();
+      await client.stop();
+    }
+  });
+
   const nativeSaveRows: ModelRow[] = [
     {
       data: { id: "task-1", teamId: "team-1", title: "Old" },
