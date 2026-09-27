@@ -667,12 +667,23 @@ export class SyncOrchestrator {
     (async () => {
       try {
         await this.syncNowForRun(runToken);
-        if (this.isRunActive(runToken) && !this.deltaSubscription) {
+        // A re-bootstrap that began while this catch-up ran owns the resume:
+        // it reopens the stream from the replacement's cursor and reports
+        // "syncing" once the replacement is in the identity maps. Doing
+        // either here first reopens the stream from the replaced cursor and
+        // reports ready on a quarantined store, and since a UI re-reads on
+        // that transition, it keeps the empty read after the commit.
+        if (
+          !this.isRunActive(runToken) ||
+          this.groupChangePending ||
+          this.stateMachine.state === "bootstrapping"
+        ) {
+          return;
+        }
+        if (!this.deltaSubscription) {
           this.deltaPipeline.startDeltaSubscription(this.cursor.lastSyncId);
         }
-        if (this.isRunActive(runToken)) {
-          this.setState("syncing");
-        }
+        this.setState("syncing");
       } catch (error) {
         if (this.isRunActive(runToken)) {
           this.handleSyncError(

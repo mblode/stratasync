@@ -243,6 +243,7 @@ export class DeltaPipeline {
       return;
     }
     const runToken = this.ctx.getRunToken();
+    const { snapshot } = this.ctx.cursor;
 
     try {
       while (this.ctx.isRunActive(runToken)) {
@@ -274,7 +275,7 @@ export class DeltaPipeline {
         if (this.ctx.getDeltaSubscription() !== subscription) {
           break;
         }
-        await this.enqueueDeltaPacket(value);
+        await this.enqueueDeltaPacket(value, snapshot);
       }
     } catch (error) {
       if (this.ctx.isRunActive(runToken)) {
@@ -497,6 +498,7 @@ export class DeltaPipeline {
     let releaseBarrier: (() => void) | null = null;
     let buffered: SyncAction[] = [];
     let bufferedLastSyncId: SyncId | null = null;
+    const { snapshot } = this.ctx.cursor;
 
     const flush = async (): Promise<void> => {
       if (bufferedLastSyncId === null) {
@@ -519,7 +521,7 @@ export class DeltaPipeline {
       };
       buffered = [];
       bufferedLastSyncId = null;
-      await this.enqueueDeltaPacket(merged);
+      await this.enqueueDeltaPacket(merged, snapshot);
     };
 
     try {
@@ -615,14 +617,30 @@ export class DeltaPipeline {
     return null;
   }
 
-  private enqueueDeltaPacket(packet: DeltaPacket): Promise<void> {
+  /**
+   * `snapshot` is the cursor snapshot the packet was read against. A packet
+   * waits here for the state lock, which a re-bootstrap holds while it
+   * replaces the snapshot, and is dropped if that happened. The replacement
+   * already reflects everything in it, a group change included, and the
+   * stream reopens from the replacement's cursor for anything newer. Applying
+   * it would re-run that group change against the fresh snapshot: clear the
+   * identity maps again and bootstrap again.
+   */
+  private enqueueDeltaPacket(
+    packet: DeltaPacket,
+    snapshot: number
+  ): Promise<void> {
     // packetQueue serializes packets against each other; the nested state-lock
     // run keeps packet application serialized against mutations too.
     return this.ctx.packetQueue().run(async () => {
       if (!this.ctx.isRunning()) {
         return;
       }
-      await this.ctx.runWithStateLock(() => this.applyDeltaPacket(packet));
+      await this.ctx.runWithStateLock(async () => {
+        if (this.ctx.cursor.snapshot === snapshot) {
+          await this.applyDeltaPacket(packet);
+        }
+      });
       // Outside the state lock: coverage fetches take it themselves, and it
       // is not reentrant.
       await this.drainPendingCoverageLoads();
