@@ -31,6 +31,7 @@ import { MutationCoordinator } from "./mutations.js";
 import { OutboxManager } from "./outbox-manager.js";
 import { executeQuery } from "./query.js";
 import { SyncOrchestrator } from "./sync-orchestrator.js";
+import { resolveModelChangeAction } from "./sync/delta-pipeline.js";
 import {
   applyPendingTransactionsToIdentityMaps,
   excludePrivacyWithheldTransactions,
@@ -512,16 +513,25 @@ export const createSyncClient = (options: SyncClientOptions): SyncClient => {
         if (meta.groupChangePending) {
           return;
         }
+        const replayable = excludePrivacyWithheldTransactions(
+          pending,
+          meta.privacyWithheldClientTxIds,
+          identityMaps
+        );
         identityMaps.batch(() => {
-          applyPendingTransactionsToIdentityMaps(
-            identityMaps,
-            excludePrivacyWithheldTransactions(
-              pending,
-              meta.privacyWithheldClientTxIds,
-              identityMaps
-            )
-          );
+          applyPendingTransactionsToIdentityMaps(identityMaps, replayable);
         });
+        // start() has already reported "syncing", and a query reads the
+        // identity maps when that happens. A replayed edit changes a model
+        // it already returned, but a replayed create or delete changes which
+        // rows match, so the query must hear about it or a row created
+        // offline stays missing after an offline reload.
+        for (const tx of replayable) {
+          const action = resolveModelChangeAction(tx.action);
+          if (action) {
+            emitModelChange(tx.modelName, tx.modelId, action);
+          }
+        }
       }
     });
   };
