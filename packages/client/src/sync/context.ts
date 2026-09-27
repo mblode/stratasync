@@ -54,6 +54,12 @@ export interface SyncContext {
   /** Whether a group-change re-bootstrap is owed. See StorageMeta. */
   isGroupChangePending(): boolean;
   setGroupChangePending(pending: boolean): void;
+  /**
+   * A re-bootstrap is owed for a group change that only added access. Holds
+   * the cursor like the latch above, but quarantines nothing. In memory only.
+   */
+  isAddedAccessRebootstrapOwed(): boolean;
+  setAddedAccessRebootstrapOwed(owed: boolean): void;
 
   /** The orchestrator's observed connection state (from the state machine). */
   getConnectionState(): ConnectionState;
