@@ -1,5 +1,16 @@
 # @stratasync/client
 
+## 2.5.4
+
+### Patch Changes
+
+- f47f603: Keep the store visible and writable through a group change that only adds access. When a "G"/"S" reports every group the current snapshot was taken under plus at least one new one, the client re-bootstraps without clearing the identity maps or refusing mutations, downloads the snapshot outside the state lock, and commits it under the lock with pending changes replayed. The cursor is still held until the replacement lands. A change that removes a group, reports an unchanged set, or has an unknown set is treated as before.
+- 42d7094: Emit `modelChange` for each pending outbox transaction that `start()` replays into the identity maps. The replay runs after the client reports "syncing", so a query that read on that transition missed rows created offline until something else changed, and a task created offline vanished on an offline reload.
+- c9ef2a1: Close the current delta subscription before opening another. A stream whose packet failed to apply, or a live stream when HTTP catch-up asked for a re-bootstrap, was dropped without being closed, so the next subscribe hit `WebSocketManager supports only one active delta subscription`.
+- 93d1653: Keep a group-change re-bootstrap's replacement snapshot visible when a reconnect catch-up overlaps it. A delta page read against the replaced snapshot is now dropped instead of re-running its group change (which cleared the identity maps and bootstrapped again), and the reconnect no longer reports "syncing" or reopens the stream from the old cursor while the re-bootstrap is in flight, so a UI that re-reads on that transition sees the new snapshot.
+- @stratasync/core@2.5.4
+  - @stratasync/y-doc@2.5.4
+
 ## 2.5.3
 
 ### Patch Changes
