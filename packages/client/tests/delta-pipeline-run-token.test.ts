@@ -278,11 +278,13 @@ describe("DeltaPipeline continuations are bound to their run", () => {
 });
 
 describe("DeltaPipeline holds at most one open delta stream", () => {
-  it("closes the current stream before it opens another", () => {
+  it("closes the current stream before it opens another", async () => {
     const harness = createHarness({});
 
     harness.pipeline.startDeltaSubscription("10");
     harness.pipeline.startDeltaSubscription("10");
+    // The closed stream's loop sees `done`; it must not reopen a third.
+    await settle();
 
     expect(harness.subscribeCalls).toEqual([1, 1]);
     expect(harness.openStreams()).toBe(1);
