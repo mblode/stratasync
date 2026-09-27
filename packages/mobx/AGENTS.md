@@ -7,7 +7,6 @@ MobX reactivity adapter and model utilities for the sync system.
 - `npm run build`: compile TypeScript (`tsc`)
 - `npm run dev`: watch mode (`tsc --watch`)
 - `npm run test`: run tests (`vitest`)
-- `npm run lint`: lint with Oxlint
 - `npm run check-types`: type check without emitting
 
 ## Modules
