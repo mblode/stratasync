@@ -117,6 +117,63 @@ const createApp = (overrides?: {
   return { app, authMiddleware };
 };
 
+const createPublishingApp = () => {
+  const mutateService = {
+    mutate(
+      _context: unknown,
+      _input: unknown,
+      onAction: (committed: SyncActionOutput) => void
+    ) {
+      onAction(makeSyncAction("41"));
+      onAction(makeSyncAction("42"));
+      return Promise.resolve({ lastSyncId: "42", results: [], success: true });
+    },
+  } as unknown as MutateService;
+  const published: string[] = [];
+  const pending: (() => void)[] = [];
+  const first = createDeferred();
+  const deltaPublisher = {
+    publish: ({ syncId }: SyncActionOutput) => {
+      published.push(syncId);
+      first.resolve();
+      const { promise, resolve } = createDeferred();
+      pending.push(resolve);
+      return promise;
+    },
+    publishMany: vi.fn(),
+  } as unknown as DeltaPublisherLike;
+  const { app } = createApp({ deltaPublisher, mutateService });
+  return { app, firstPublish: first.promise, pending, published };
+};
+
+const injectMutate = (app: ReturnType<typeof fastify>) => {
+  let answered = false;
+  const response = app
+    .inject({
+      headers: { authorization: "Bearer token" },
+      method: "POST",
+      payload: {
+        batchId: "batch-1",
+        transactions: [
+          {
+            action: "INSERT",
+            clientId: "client-1",
+            clientTxId: "tx-41",
+            modelId: "task-41",
+            modelName: "Task",
+            payload: {},
+          },
+        ],
+      },
+      url: "/sync/mutate",
+    })
+    .then((reply) => {
+      answered = true;
+      return reply;
+    });
+  return { answered: () => answered, response };
+};
+
 describe(BatchLoadBodySchema, () => {
   it("rejects more than 100 batch requests", () => {
     const result = BatchLoadBodySchema.safeParse({
@@ -410,71 +467,45 @@ describe(registerSyncRoutes, () => {
   });
 
   it("answers a mutate only after every delta publish settles", async () => {
-    const mutateService = {
-      mutate(
-        _context: unknown,
-        _input: unknown,
-        onAction: (committed: SyncActionOutput) => void
-      ) {
-        onAction(makeSyncAction("41"));
-        onAction(makeSyncAction("42"));
-        return Promise.resolve({
-          lastSyncId: "42",
-          results: [],
-          success: true,
-        });
-      },
-    } as unknown as MutateService;
-    const published: string[] = [];
-    const pending: (() => void)[] = [];
-    const deltaPublisher = {
-      publish: ({ syncId }: SyncActionOutput) => {
-        published.push(syncId);
-        const { promise, resolve } = createDeferred();
-        pending.push(resolve);
-        return promise;
-      },
-      publishMany: vi.fn(),
-    } as unknown as DeltaPublisherLike;
-    const { app } = createApp({ deltaPublisher, mutateService });
+    const { app, pending, published } = createPublishingApp();
     try {
       await app.ready();
-
-      let answered = false;
-      const response = app
-        .inject({
-          headers: { authorization: "Bearer token" },
-          method: "POST",
-          payload: {
-            batchId: "batch-1",
-            transactions: [
-              {
-                action: "INSERT",
-                clientId: "client-1",
-                clientTxId: "tx-41",
-                modelId: "task-41",
-                modelName: "Task",
-                payload: {},
-              },
-            ],
-          },
-          url: "/sync/mutate",
-        })
-        .then((reply) => {
-          answered = true;
-          return reply;
-        });
+      const mutate = injectMutate(app);
 
       await vi.waitFor(() => expect(published).toEqual(["41", "42"]));
       await setTimeout(20);
-      expect(answered).toBeFalsy();
+      expect(mutate.answered()).toBeFalsy();
 
       for (const resolve of pending) {
         resolve();
       }
-      const reply = await response;
+      const reply = await mutate.response;
       expect(reply.statusCode).toBe(200);
     } finally {
+      await app.close();
+    }
+  });
+
+  it("answers a mutate whose delta publish stalls after two seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { app, firstPublish } = createPublishingApp();
+    try {
+      await app.ready();
+      const mutate = injectMutate(app);
+
+      await firstPublish;
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(mutate.answered()).toBeFalsy();
+
+      await vi.advanceTimersByTimeAsync(1);
+      const reply = await mutate.response;
+      expect(reply.statusCode).toBe(200);
+      expect(logger.warn).toHaveBeenCalledWith(
+        { batchId: "batch-1", pendingPublishes: 2 },
+        "Answering mutate before its delta publishes settled"
+      );
+    } finally {
+      vi.useRealTimers();
       await app.close();
     }
   });
