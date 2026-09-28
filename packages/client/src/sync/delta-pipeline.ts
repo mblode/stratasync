@@ -181,7 +181,10 @@ export class DeltaPipeline {
   /** Pending resubscribe after a stream failure; cleared on reset. */
   private cancelReconnect: CancelScheduled | null = null;
   /** Guards against stacking group-change re-bootstraps. */
-  private groupChangeBootstrapInFlight = false;
+  private groupChangeBootstrapInFlight: {
+    promise: Promise<void>;
+    resolve: () => void;
+  } | null = null;
   /** Retry of a failed group-change re-bootstrap; cleared on reset. */
   private cancelGroupChangeRetry: CancelScheduled | null = null;
 
@@ -198,7 +201,8 @@ export class DeltaPipeline {
   reset(): void {
     this.clearReconnectTimer();
     this.clearGroupChangeRetryTimer();
-    this.groupChangeBootstrapInFlight = false;
+    this.groupChangeBootstrapInFlight?.resolve();
+    this.groupChangeBootstrapInFlight = null;
     this.pendingCoverageLoads = [];
   }
 
@@ -495,8 +499,16 @@ export class DeltaPipeline {
     if (this.groupChangeBootstrapInFlight || !this.ctx.isRunActive(runToken)) {
       return;
     }
-    this.groupChangeBootstrapInFlight = true;
-
+    // oxlint-disable-next-line consistent-function-scoping -- assigned synchronously by the Promise executor
+    let resolveReconciliation: () => void = () => {
+      /* Replaced synchronously before the waiter is exposed. */
+    };
+    // oxlint-disable-next-line avoid-new -- settlement also comes from lifecycle reset
+    const promise = new Promise<void>((resolve) => {
+      resolveReconciliation = resolve;
+    });
+    const reconciliation = { promise, resolve: resolveReconciliation };
+    this.groupChangeBootstrapInFlight = reconciliation;
     this.runGroupChangeBootstrap(runToken)
       .catch((error: unknown) => {
         if (this.ctx.isRunActive(runToken)) {
@@ -504,7 +516,11 @@ export class DeltaPipeline {
         }
       })
       .finally(() => {
-        this.groupChangeBootstrapInFlight = false;
+        reconciliation.resolve();
+        if (this.groupChangeBootstrapInFlight !== reconciliation) {
+          return;
+        }
+        this.groupChangeBootstrapInFlight = null;
         // A failed attempt leaves the latch set; keep trying while this run
         // is alive, because every packet is being held until it lands.
         if (this.ctx.isRunActive(runToken) && this.isGroupChangeOwed()) {
@@ -515,6 +531,10 @@ export class DeltaPipeline {
           }, GROUP_CHANGE_RETRY_DELAY_MS);
         }
       });
+  }
+
+  getGroupChangeReconciliation(): Promise<void> | null {
+    return this.groupChangeBootstrapInFlight?.promise ?? null;
   }
 
   private async runGroupChangeBootstrap(runToken: number): Promise<void> {

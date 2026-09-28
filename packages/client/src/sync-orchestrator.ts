@@ -271,6 +271,10 @@ export class SyncOrchestrator {
     return this.groupChangePending;
   }
 
+  getGroupChangeReconciliation(): Promise<void> | null {
+    return this.deltaPipeline.getGroupChangeReconciliation();
+  }
+
   shouldSuppressPrivacyRollback(tx: Transaction): boolean {
     return (
       this.groupChangePending ||
