@@ -1,5 +1,13 @@
 # @stratasync/client
 
+## 2.5.5
+
+### Patch Changes
+
+- a2d9d90: Queue mutations during an active access reconciliation until its replacement snapshot commits. Keep failed reconciliations closed to writes and prevent queued mutations from crossing a client restart.
+- @stratasync/core@2.5.5
+  - @stratasync/y-doc@2.5.5
+
 ## 2.5.4
 
 ### Patch Changes
