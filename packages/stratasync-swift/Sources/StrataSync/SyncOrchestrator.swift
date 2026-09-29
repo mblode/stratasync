@@ -1174,7 +1174,7 @@ final class SyncOrchestrator {
         subscribedGroups = meta.subscribedGroups
         bootstrapComplete = meta.bootstrapComplete
         groupChangeBootstrapPending = meta.groupChangePending
-        authoritativeGroups = meta.authoritativeGroups
+        authoritativeGroups = meta.authoritativeGroups ?? legacyAuthoritativeGroups(meta)
         privacyWithheldTransactionIds = Set(meta.privacyWithheldTransactionIds)
         schemaHash = meta.schemaHash
         databaseVersion = meta.databaseVersion
@@ -1182,7 +1182,23 @@ final class SyncOrchestrator {
         onClientIdLoaded?(clientId)
     }
 
+    /// A snapshot bootstrapped before `authoritativeGroups` was recorded has
+    /// only `subscribedGroups`. Without host-requested groups that is exactly
+    /// the set the server last reported (bootstrap and group actions write
+    /// it), so it stands in for the old authoritative set. Treating it as
+    /// unknown instead quarantined every upgraded install on its first group
+    /// action, blanking all cached rows until a full re-download finished.
+    private func legacyAuthoritativeGroups(_ meta: StorageMeta) -> [String]? {
+        guard meta.bootstrapComplete, !meta.subscribedGroups.isEmpty else { return nil }
+        return meta.subscribedGroups
+    }
+
     private func configureGroups(requestedGroups: [String], meta: StorageMeta) async throws {
+        if !requestedGroups.isEmpty, meta.authoritativeGroups == nil {
+            // A host that pins groups may have written them over
+            // `subscribedGroups`, so the legacy stand-in is not trustworthy.
+            authoritativeGroups = nil
+        }
         let storedGroups = meta.subscribedGroups
         subscribedGroups = requestedGroups.isEmpty ? storedGroups : requestedGroups
 

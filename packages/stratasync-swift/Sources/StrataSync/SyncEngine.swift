@@ -709,6 +709,10 @@ public final class SyncEngine {
         switch event {
         case .localDataReady:
             isLocalDataReady = true
+        case .quarantineEntered:
+            // Rows were just withheld; hosts gate their empty state on this,
+            // so a quarantine mid-session reads as loading, not "no tasks".
+            isLocalDataReady = false
         case .syncError(let error):
             lastError = error
         case .outboxChange(let count):
