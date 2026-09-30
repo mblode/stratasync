@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - packages/*
+  - examples/*
+
+# Internal `@stratasync/*` deps are pinned to "*" and must resolve to the
+# workspace copy, not the registry.
+linkWorkspacePackages: true
+
+# pnpm ignores dependency install scripts by default; these ran under npm.
+allowBuilds:
+  core-js: true
+  esbuild: true
+  lefthook: true
+  workerd: true

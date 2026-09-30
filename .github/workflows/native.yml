@@ -11,19 +11,21 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
       - uses: actions/setup-node@v6
         with:
           node-version: 24
       - name: Swift suite and canonical corpus integrity
-        run: npm run test:swift
+        run: pnpm run test:swift
       - name: Swift driver verdict contract
         run: node scripts/check-driver-verdict.mjs -- python3 scripts/swift-conformance-driver.py run
       - name: Isolated Git-package consumer
-        run: npm run test:swift:consumer
+        run: pnpm run test:swift:consumer
   kotlin:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -32,7 +34,7 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Corpus, JVM engine, recovery and conformance
-        run: npm run test:kotlin
+        run: pnpm run test:kotlin
       - name: Kotlin driver verdict contract
         working-directory: packages/stratasync-kotlin
         run: node ../../scripts/check-driver-verdict.mjs -- ./gradlew -q conformanceDriver -Pcommand=run

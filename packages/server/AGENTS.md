@@ -4,10 +4,10 @@ Generic server-side sync SDK for the stratasync protocol. Provides bootstrap str
 
 ## Commands
 
-- `npm run build`: compile TypeScript (`tsc`)
-- `npm run dev`: watch mode (`tsc --watch`)
-- `npm run test`: run tests (Vitest)
-- `npm run check-types`: type check without emitting
+- `pnpm run build`: compile TypeScript (`tsc`)
+- `pnpm run dev`: watch mode (`tsc --watch`)
+- `pnpm run test`: run tests (Vitest)
+- `pnpm run check-types`: type check without emitting
 
 ## Gotchas
 

@@ -4,10 +4,10 @@ Offline-first sync orchestration: identity maps, outbox batching, delta reconcil
 
 ## Commands
 
-- `npm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
-- `npm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
-- `npm run test`: run tests (`vitest run`)
-- `npm run check-types`: type check without emitting
+- `pnpm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
+- `pnpm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
+- `pnpm run test`: run tests (`vitest run`)
+- `pnpm run check-types`: type check without emitting
 
 ## Architecture
 
@@ -65,7 +65,7 @@ tests/
 ## Gotchas
 
 - Uses `tsconfig.build.json` for builds (not `tsconfig.json`). The build config excludes test files.
-- Depends on `@stratasync/core` and `@stratasync/y-doc`, both of which must be built first (`npm run build` from root handles this via Turbo).
+- Depends on `@stratasync/core` and `@stratasync/y-doc`, both of which must be built first (`pnpm run build` from root handles this via Turbo).
 - Tests use **Vitest**, not Node's built-in test runner. Test mocks use `InMemoryStorage` and `TestTransport` (defined inline in test files), not shared fixtures.
 - IMPORTANT: **Identity map batching is critical.** All delta application wraps identity map ops in `batch()` so MobX observers see server state + pending optimistic state atomically. Breaking this causes UI flashing during conflict resolution.
 - **Never create model instances outside the identity map.** Use `client.create()` or let the orchestrator hydrate from deltas. The identity map deduplicates instances and wires MobX reactivity.
