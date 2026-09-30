@@ -325,31 +325,18 @@ struct LocalFirstRebootstrapTests {
         #expect(relaunchEvents.labels == ["localHydration(quarantined,0)"])
     }
 
-    enum UnknownGroupSet: String, CaseIterable {
-        /// The snapshot predates recording authoritative groups.
-        case previousSetUnknown
-        /// The group action carries no `subscribedSyncGroups`.
-        case payloadMissingGroups
-    }
-
-    /// Without both sets a removal cannot be ruled out, so it quarantines.
-    @Test(arguments: UnknownGroupSet.allCases)
-    func unknownGroupSetStillQuarantines(_ unknown: UnknownGroupSet) async throws {
+    /// The group action carries no `subscribedSyncGroups`, so a removal
+    /// cannot be ruled out and it quarantines.
+    @Test func groupChangeWithoutReportedGroupsStillQuarantines() async throws {
         let storage = MockStorageAdapter()
-        try await storage.setMeta(seededMeta(
-            cursor: "10",
-            authoritativeGroups: unknown == .previousSetUnknown ? nil : ["ws-1"]
-        ))
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: ["ws-1"]))
         try await storage.put(modelName: TestRecord.modelName, id: "task-1", data: row("task-1"))
 
         let transport = MockSyncTransport()
         transport.subscribeStreamProvider = { call in
             AsyncThrowingStream { continuation in
                 guard call == 1 else { return }
-                continuation.yield(groupChangePacket(
-                    syncId: "11",
-                    groups: unknown == .payloadMissingGroups ? nil : ["ws-1", "ws-2"]
-                ))
+                continuation.yield(groupChangePacket(syncId: "11", groups: nil))
             }
         }
         transport.bootstrapStreamProvider = {
@@ -360,6 +347,113 @@ struct LocalFirstRebootstrapTests {
         let events = EventLog()
         orchestrator.onEvent = events.record
         try await orchestrator.start(groups: [])
+
+        #expect(await waitUntil { await storage.getMeta().groupChangePending })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-1") == nil)
+        #expect(events.labels.contains("quarantineEntered(groupUnknown)"))
+        await orchestrator.stop()
+    }
+
+    enum LegacyGroupChange: String, CaseIterable {
+        case unchanged
+        case added
+    }
+
+    /// A snapshot bootstrapped before `authoritativeGroups` was recorded is
+    /// judged against the server-reported `subscribedGroups` it was stored
+    /// with. A group change that keeps or adds groups must not blank the
+    /// cached rows while the replacement downloads.
+    @Test(arguments: LegacyGroupChange.allCases)
+    func legacySnapshotKeepsRowsVisibleThroughNonRemovingGroupChange(
+        _ change: LegacyGroupChange
+    ) async throws {
+        let storage = MockStorageAdapter()
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: nil))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-old", data: row("task-old"))
+
+        let reported = change == .unchanged ? ["ws-1"] : ["ws-1", "ws-2"]
+        let gate = Gate()
+        let transport = MockSyncTransport()
+        transport.subscribeStreamProvider = { call in
+            AsyncThrowingStream { continuation in
+                guard call == 1 else { return }
+                continuation.yield(groupChangePacket(syncId: "11", groups: reported))
+            }
+        }
+        transport.bootstrapStreamProvider = gatedSnapshot(
+            gate: gate,
+            events: snapshot(lastSyncId: "20", groups: reported, ids: ["task-old", "task-new"])
+        )
+
+        let (orchestrator, modelStore) = makeOrchestrator(storage: storage, transport: transport)
+        let events = EventLog()
+        orchestrator.onEvent = events.record
+        try await orchestrator.start(groups: [])
+
+        #expect(await waitUntil { await gate.isWaiting })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-old") != nil)
+        #expect(!(await storage.getMeta()).groupChangePending)
+        #expect(!events.labels.contains { $0.hasPrefix("quarantine") })
+
+        await gate.open()
+        #expect(await waitUntil { events.labels.contains("bootstrapFinished(groupChange,2)") })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-new") != nil)
+        #expect(await storage.getMeta().authoritativeGroups == reported)
+        await orchestrator.stop()
+    }
+
+    /// The legacy fallback still catches a real removal.
+    @Test func legacySnapshotStillQuarantinesARemoval() async throws {
+        let storage = MockStorageAdapter()
+        var meta = seededMeta(cursor: "10", authoritativeGroups: nil)
+        meta.subscribedGroups = ["ws-1", "ws-2"]
+        try await storage.setMeta(meta)
+        try await storage.put(modelName: TestRecord.modelName, id: "task-private", data: row("task-private"))
+
+        let transport = MockSyncTransport()
+        transport.subscribeStreamProvider = { call in
+            AsyncThrowingStream { continuation in
+                guard call == 1 else { return }
+                continuation.yield(groupChangePacket(syncId: "11", groups: ["ws-1"]))
+            }
+        }
+        transport.bootstrapStreamProvider = {
+            AsyncThrowingStream { $0.finish(throwing: URLError(.notConnectedToInternet)) }
+        }
+
+        let (orchestrator, modelStore) = makeOrchestrator(storage: storage, transport: transport)
+        let events = EventLog()
+        orchestrator.onEvent = events.record
+        try await orchestrator.start(groups: [])
+
+        #expect(await waitUntil { await storage.getMeta().groupChangePending })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-private") == nil)
+        #expect(events.labels.contains("quarantineEntered(groupRemoved)"))
+        await orchestrator.stop()
+    }
+
+    /// A host that pins its own groups may have written them over
+    /// `subscribedGroups`, so a legacy snapshot's old set stays unknown.
+    @Test func legacySnapshotWithHostRequestedGroupsStillQuarantinesAsUnknown() async throws {
+        let storage = MockStorageAdapter()
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: nil))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-1", data: row("task-1"))
+
+        let transport = MockSyncTransport()
+        transport.subscribeStreamProvider = { call in
+            AsyncThrowingStream { continuation in
+                guard call == 1 else { return }
+                continuation.yield(groupChangePacket(syncId: "11", groups: ["ws-1", "ws-2"]))
+            }
+        }
+        transport.bootstrapStreamProvider = {
+            AsyncThrowingStream { $0.finish(throwing: URLError(.notConnectedToInternet)) }
+        }
+
+        let (orchestrator, modelStore) = makeOrchestrator(storage: storage, transport: transport)
+        let events = EventLog()
+        orchestrator.onEvent = events.record
+        try await orchestrator.start(groups: ["ws-1"])
 
         #expect(await waitUntil { await storage.getMeta().groupChangePending })
         #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-1") == nil)
