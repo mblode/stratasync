@@ -7,13 +7,13 @@ Next.js app for the Strata Sync landing page.
 From the repo root:
 
 ```bash
-npm run dev --workspace=web
+pnpm --filter web run dev
 ```
 
 Or run all workspaces:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Open http://localhost:3000/stratasync (basePath `/stratasync`).
@@ -21,13 +21,13 @@ Open http://localhost:3000/stratasync (basePath `/stratasync`).
 ## Scripts
 
 ```bash
-npm run build --workspace=web
-npm run lint --workspace=web
-npm run check-types --workspace=web
+pnpm --filter web run build
+pnpm --filter web run lint
+pnpm --filter web run check-types
 ```
 
 ## Notes
 
-- Uses npm workspaces and Node >= 22.
+- Uses pnpm workspaces and Node >= 22.
 - App entry: `app/page.tsx`.
 - Global styles: `app/globals.css`.

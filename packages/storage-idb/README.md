@@ -47,6 +47,6 @@ The storage adapter handles:
 Tests use `fake-indexeddb` to mock the IndexedDB API in Node.js:
 
 ```bash
-npm run test
+pnpm run test
 # Runs: node --import tsx --test "tests/**/*.test.ts"
 ```

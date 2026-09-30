@@ -6,7 +6,7 @@ Canonical Apple-platform local-first sync engine. SwiftPM entry point is ../../P
 
 - `swift build --package-path ../..`: build from this folder
 - `swift test --package-path ../..`: run package tests
-- From the repository root, `npm run test:swift:consumer` verifies isolated Git package consumption.
+- From the repository root, `pnpm run test:swift:consumer` verifies isolated Git package consumption.
 
 ## Scope
 

@@ -33,11 +33,6 @@
     "type": "git",
     "url": "git+https://github.com/mblode/stratasync.git"
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "examples/*"
-  ],
   "type": "module",
   "scripts": {
     "build": "turbo run build",
@@ -55,9 +50,9 @@
     "prepare": "[ -n \"$CI\" ] || lefthook install",
     "native:corpus:check": "node scripts/check-native-corpus.mjs",
     "native:corpus:sync": "node scripts/check-native-corpus.mjs --sync",
-    "test:swift": "npm run native:corpus:check && swift test",
-    "test:kotlin": "npm run native:corpus:check && cd packages/stratasync-kotlin && ./gradlew test",
-    "test:native": "npm run test:swift && npm run test:kotlin",
+    "test:swift": "pnpm run native:corpus:check && swift test",
+    "test:kotlin": "pnpm run native:corpus:check && cd packages/stratasync-kotlin && ./gradlew test",
+    "test:native": "pnpm run test:swift && pnpm run test:kotlin",
     "test:swift:consumer": "python3 scripts/check-swift-consumer.py"
   },
   "devDependencies": {
@@ -75,5 +70,5 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "npm@11.12.0"
+  "packageManager": "pnpm@12.8.1"
 }

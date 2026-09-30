@@ -1,6 +1,6 @@
 # StrataSync Kotlin SDK
 
-- Run `./gradlew test` here with JDK 21; root `npm run test:kotlin` also checks Swift corpus resources.
+- Run `./gradlew test` here with JDK 21; root `pnpm run test:kotlin` also checks Swift corpus resources.
 - Model-agnostic JVM core only. No Android, Compose, or Done Bear imports.
 - `src/main` is the SDK. `src/test` contains the deterministic driver, fake runtime/transport and scenarios. Never put sync semantics in the driver.
 - Read `../conformance/corpus/README.md` before changing a wire contract. Fix implementations, not golden expectations.
