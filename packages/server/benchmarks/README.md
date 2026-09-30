@@ -12,12 +12,12 @@ export STRATASYNC_TEST_DATABASE_URL=postgres://postgres:benchmark@127.0.0.1:5543
 # Wait until pg_isready succeeds before running tests.
 docker exec stratasync-delta-benchmark pg_isready -U postgres
 pnpm --filter @stratasync/server run test:postgres
-pnpm run check-types:postgres --workspace=packages/server
-pnpm run bench:delta --workspace=packages/server
+pnpm --filter @stratasync/server run check-types:postgres
+pnpm --filter @stratasync/server run bench:delta
 docker stop stratasync-delta-benchmark
 ```
 
-Install dependencies with `npm install` first. The PostgreSQL driver is an explicit development dependency of the server workspace. Ordinary server tests skip database tests unless the URL is set; the dedicated command fails when it is absent. The benchmark additionally requires `DELTA_BENCHMARK=1`, set by its script.
+Install dependencies with `pnpm install` first. The PostgreSQL driver is an explicit development dependency of the server workspace. Ordinary server tests skip database tests unless the URL is set; the dedicated command fails when it is absent. The benchmark additionally requires `DELTA_BENCHMARK=1`, set by its script.
 
 Each fixture creates a randomly named schema, includes Done Bear's relevant read indexes, and drops its own schema in `finally`. Only loopback database hosts are accepted; use the disposable container, not a tunnel to another database. If a process is killed, stopping this `--rm` container removes all test data.
 
