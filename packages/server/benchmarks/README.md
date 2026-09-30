@@ -11,9 +11,9 @@ docker run --detach --rm --name stratasync-delta-benchmark \
 export STRATASYNC_TEST_DATABASE_URL=postgres://postgres:benchmark@127.0.0.1:55439/delta_benchmark
 # Wait until pg_isready succeeds before running tests.
 docker exec stratasync-delta-benchmark pg_isready -U postgres
-npm run test:postgres --workspace=packages/server
-npm run check-types:postgres --workspace=packages/server
-npm run bench:delta --workspace=packages/server
+pnpm --filter @stratasync/server run test:postgres
+pnpm run check-types:postgres --workspace=packages/server
+pnpm run bench:delta --workspace=packages/server
 docker stop stratasync-delta-benchmark
 ```
 

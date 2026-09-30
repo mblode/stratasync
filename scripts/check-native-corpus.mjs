@@ -45,13 +45,13 @@ assert.deepEqual(
   files(canonical)
     .map((path) => relative(canonical, path))
     .toSorted(),
-  "Swift corpus file inventory differs; run npm run native:corpus:sync"
+  "Swift corpus file inventory differs; run pnpm run native:corpus:sync"
 );
 for (const path of files(canonical)) {
   const name = relative(canonical, path);
   assert.ok(
     readFileSync(path).equals(readFileSync(join(swift, name))),
-    `Stale Swift corpus ${name}; run npm run native:corpus:sync`
+    `Stale Swift corpus ${name}; run pnpm run native:corpus:sync`
   );
 }
 process.stdout.write(

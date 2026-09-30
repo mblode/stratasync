@@ -4,10 +4,10 @@ Yjs CRDT utilities and integration for collaborative editing.
 
 ## Commands
 
-- `npm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
-- `npm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
-- `npm run test`: run tests (`vitest run`)
-- `npm run check-types`: type check package sources and tests without emitting
+- `pnpm run build`: compile TypeScript (`tsc -p tsconfig.build.json`)
+- `pnpm run dev`: watch mode (`tsc --watch -p tsconfig.build.json`)
+- `pnpm run test`: run tests (`vitest run`)
+- `pnpm run check-types`: type check package sources and tests without emitting
 
 ## Gotchas
 

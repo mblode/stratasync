@@ -4,10 +4,10 @@ React bindings and hooks for the sync system.
 
 ## Commands
 
-- `npm run build`: compile TypeScript (`tsc`)
-- `npm run dev`: watch mode (`tsc --watch`)
-- `npm run test`: run tests (`vitest`, uses jsdom + React Testing Library)
-- `npm run check-types`: type check without emitting
+- `pnpm run build`: compile TypeScript (`tsc`)
+- `pnpm run dev`: watch mode (`tsc --watch`)
+- `pnpm run test`: run tests (`vitest`, uses jsdom + React Testing Library)
+- `pnpm run check-types`: type check without emitting
 
 ## Gotchas
 
