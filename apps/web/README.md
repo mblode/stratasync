@@ -7,7 +7,7 @@ Next.js app for the Strata Sync landing page.
 From the repo root:
 
 ```bash
-npm run dev --workspace=web
+pnpm --filter web run dev
 ```
 
 Or run all workspaces:

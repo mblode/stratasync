@@ -2,7 +2,7 @@
  * Regenerates `corpus/manifest.json`: the corpus version plus a SHA-256 of
  * every corpus file, so a port that vendors a copy can prove it is in sync.
  *
- * Run with `npm run corpus:manifest --workspace=packages/conformance`.
+ * Run with `pnpm --filter @stratasync/conformance run corpus:manifest`.
  */
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";

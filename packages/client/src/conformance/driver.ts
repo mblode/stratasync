@@ -6,7 +6,7 @@
  * one JSON scenario in, one JSON result out, nothing else on stdout. A Swift or
  * Kotlin runner invokes this the same way the Vitest suite does:
  *
- *   npm run build --workspace=packages/client
+ *   pnpm --filter @stratasync/client run build
  *   node packages/client/dist/conformance/driver.js run < scenario.json
  */
 import { readFileSync } from "node:fs";
