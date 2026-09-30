@@ -28,7 +28,7 @@ let package = Package(
             path: "packages/stratasync-swift/Tests/StrataSyncTests",
             resources: [
                 // Resource copy of this repository's canonical corpus.
-                // npm run native:corpus:sync refreshes it; CI checks exact
+                // pnpm run native:corpus:sync refreshes it; CI checks exact
                 // byte equality, not merely internal manifest integrity.
                 .copy("Resources/corpus"),
             ]

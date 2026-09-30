@@ -3,24 +3,24 @@ pre-commit:
   jobs:
     # Same file set `oxfmt --check .` covers in CI: JSON is included because
     # oxfmt sorts package.json (experimentalSortPackageJson), so a manifest edit
-    # that skips the hook fails `npm run lint` on CI.
+    # that skips the hook fails `pnpm run lint` on CI.
     - name: oxfmt
       glob: "*.{js,jsx,ts,tsx,mjs,cjs,css,scss,md,mdx,json,jsonc}"
-      run: npx oxfmt --write {staged_files}
+      run: pnpm exec oxfmt --write {staged_files}
       stage_fixed: true
     - name: oxlint
       glob: "*.{js,jsx,ts,tsx,mjs,cjs}"
-      run: npx oxlint --fix {staged_files}
+      run: pnpm exec oxlint --fix {staged_files}
       stage_fixed: true
       fail_text: "Lint errors found that could not be auto-fixed."
     # Rung 1: byte-exact corpus resources and real native suites. CI runs the
     # same npm commands, so an unavailable local toolchain is not a silent pass.
     - name: native-corpus
       glob: "{Package.swift,packages/conformance/**,packages/stratasync-swift/**,scripts/check-native-corpus.mjs}"
-      run: npm run native:corpus:check
+      run: pnpm run native:corpus:check
     - name: swift-sdk
       glob: "{Package.swift,packages/stratasync-swift/**,packages/conformance/corpus/**}"
-      run: npm run test:swift
+      run: pnpm run test:swift
     - name: kotlin-sdk
       glob: "{packages/stratasync-kotlin/**,packages/conformance/corpus/**}"
-      run: npm run test:kotlin
+      run: pnpm run test:kotlin

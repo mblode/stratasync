@@ -4,10 +4,10 @@ Core model runtime, schema metadata, sync primitives, and transaction system for
 
 ## Commands
 
-- `npm run build`: compile TypeScript (`tsc`)
-- `npm run dev`: watch mode (`tsc --watch`)
-- `npm run test`: run tests (Vitest)
-- `npm run check-types`: type check without emitting
+- `pnpm run build`: compile TypeScript (`tsc`)
+- `pnpm run dev`: watch mode (`tsc --watch`)
+- `pnpm run test`: run tests (Vitest)
+- `pnpm run check-types`: type check without emitting
 
 ## Gotchas
 
