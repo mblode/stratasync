@@ -435,6 +435,39 @@ describe(registerSyncWebsocket, () => {
     });
   });
 
+  it("requires a fresh bootstrap when retention prunes the cursor during replay", async () => {
+    // The subscribe check passes; retention then deletes ids 6-9 before the
+    // replay page is read, so the page starts at 10 with no sign of the gap.
+    let earliestSyncId = 0n;
+    const getSyncActions = vi.fn(() => {
+      earliestSyncId = 10n;
+      return Promise.resolve([createReplayAction(10n)]);
+    });
+    const harness = setup({
+      getEarliestSyncId: vi.fn(() => Promise.resolve(earliestSyncId)),
+      getSyncActions,
+    });
+
+    harness.socket.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({ afterSyncId: "5", token: "tok", type: "subscribe" })
+      )
+    );
+
+    await waitForAssertion(() => {
+      expect(harness.socket.sent).toHaveLength(1);
+    });
+    expect(getSyncActions).toHaveBeenCalledOnce();
+    expect(parseMessage(harness.socket.sent[0])).toMatchObject({
+      code: "BOOTSTRAP_REQUIRED",
+      type: "error",
+    });
+    await flush();
+    expect(harness.socket.sent).toHaveLength(1);
+    expect(harness.deltaSubscriber.callback).toBeNull();
+  });
+
   it("merges auth and DAO groups before acknowledging the subscription", async () => {
     const resolveGroups = vi
       .fn()
@@ -983,8 +1016,11 @@ describe(registerSyncWebsocket, () => {
   it("forces bootstrap when durable G catch-up falls behind retention", async () => {
     vi.useFakeTimers();
     try {
+      // Subscribe check and the replay page's re-check see everything
+      // retained; the catch-up tick then finds the cursor pruned.
       const getEarliestSyncId = vi
         .fn()
+        .mockResolvedValueOnce(0n)
         .mockResolvedValueOnce(0n)
         .mockResolvedValueOnce(10n);
       const harness = setup({
@@ -1604,6 +1640,46 @@ describe(registerSyncWebsocket, () => {
         ).toBeTruthy();
       });
       expect(deliveredSyncIds(harness)).toEqual(["1", "2"]);
+    });
+
+    it("requires a fresh bootstrap when retention prunes the gap being filled", async () => {
+      let earliestSyncId = 0n;
+      const getSyncActionsThrough = vi.fn(() => {
+        // Ids 1-2 were pruned while the gap-fill page was read.
+        earliestSyncId = 3n;
+        return Promise.resolve([]);
+      });
+      const harness = setup({
+        getEarliestSyncId: vi.fn(() => Promise.resolve(earliestSyncId)),
+        getSyncActionsThrough,
+      });
+      harness.socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({ afterSyncId: "1", token: "tok", type: "subscribe" })
+        )
+      );
+      await waitForAssertion(() => {
+        expect(
+          harness.socket.sent.some(
+            (message) => parseMessage(message).type === "subscribed"
+          )
+        ).toBeTruthy();
+      });
+
+      harness.deltaSubscriber.emit(createLiveAction("4"), []);
+      await waitForAssertion(() => {
+        expect(harness.socket.closeCalls).toEqual([
+          { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
+        ]);
+      });
+      expect(getSyncActionsThrough).toHaveBeenCalledWith(
+        1n,
+        3n,
+        expect.any(Array),
+        1000
+      );
+      expect(deliveredSyncIds(harness)).toEqual([]);
     });
 
     it("closes the socket when the gap-fill read fails", async () => {

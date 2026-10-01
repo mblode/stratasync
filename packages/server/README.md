@@ -349,6 +349,8 @@ Delta catch-up (`getSyncActions`, `getSyncActionsThrough`) reads up to 32 distin
 
 **`syncGroupMemberships`**: Columns are `id` (uuid PK), `userId` (uuid), `groupId` (uuid), `groupType` (varchar), `createdAt` (timestamp).
 
+Retention may delete the oldest `sync_actions` rows while clients catch up, as long as it deletes a prefix of ids (oldest first). `GET /sync/deltas`, WebSocket replay pages and live gap fills read their page first and then re-read the retention floor (`getEarliestSyncId`, one primary-key lookup per page), answering `BOOTSTRAP_REQUIRED` if the cursor fell below it. A check made only before the read could pass, lose the race to a prune, and let the read start silently above the cutoff. Code calling `DeltaService` directly should likewise call `isCursorStale` after `fetchDeltas`.
+
 ## Exports
 
 ```typescript

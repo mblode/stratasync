@@ -537,6 +537,42 @@ describe(registerSyncRoutes, () => {
     }
   });
 
+  it("returns BOOTSTRAP_REQUIRED when retention prunes the cursor during the delta read", async () => {
+    // The floor is still at the cursor when the request starts; retention
+    // deletes the actions above it while the page is being read.
+    let pruned = false;
+    const fetchDeltas = vi.fn(() => {
+      pruned = true;
+      return { actions: [], hasMore: false, lastSyncId: "1" };
+    });
+    const isCursorStale = vi.fn(() => Promise.resolve(pruned));
+    const deltaService = {
+      fetchDeltas,
+      isCursorStale,
+    } as unknown as DeltaService;
+    const { app } = createApp({ deltaService });
+    try {
+      await app.ready();
+
+      const response = await app.inject({
+        headers: {
+          authorization: "Bearer token",
+        },
+        method: "GET",
+        url: "/sync/deltas?after=1",
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: "BOOTSTRAP_REQUIRED" });
+      expect(isCursorStale).toHaveBeenCalledOnce();
+      expect(fetchDeltas.mock.invocationCallOrder[0]).toBeLessThan(
+        isCursorStale.mock.invocationCallOrder[0] ?? 0
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects oversized mutate payloads through the route", async () => {
     const { app } = createApp();
     try {

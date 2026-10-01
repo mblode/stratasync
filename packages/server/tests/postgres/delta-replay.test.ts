@@ -1,4 +1,11 @@
 /* eslint-disable promise/avoid-new -- Explicit gates coordinate two database transactions. */
+import fastify from "fastify";
+
+import type { BootstrapService } from "../../src/bootstrap/bootstrap-service.js";
+import type { SyncDao } from "../../src/dao/sync-dao.js";
+import { DeltaService } from "../../src/delta/delta-service.js";
+import { registerSyncRoutes } from "../../src/fastify/routes.js";
+import type { MutateService } from "../../src/mutate/mutate-service.js";
 import { createFixture, group } from "./fixture.js";
 
 describe.skipIf(!process.env.STRATASYNC_TEST_DATABASE_URL)(
@@ -98,6 +105,62 @@ describe.skipIf(!process.env.STRATASYNC_TEST_DATABASE_URL)(
       expect(await fixture.service.isCursorStale(1n)).toBeTruthy();
       expect(await fixture.service.isCursorStale(2n)).toBeTruthy();
       expect(await fixture.service.isCursorStale(3n)).toBeFalsy();
+    });
+
+    it("answers BOOTSTRAP_REQUIRED when retention prunes the cursor while deltas are read", async () => {
+      await fixture.db.insert(fixture.actions).values(
+        [1, 2, 3, 4, 5].map(() => ({
+          action: "I",
+          data: {},
+          groupId: group(1),
+          model: "Task",
+          modelId: group(10),
+        }))
+      );
+      const getRealActions = fixture.dao.getSyncActions.bind(fixture.dao);
+      const dao = Object.create(fixture.dao) as SyncDao;
+      // A retention batch commits after the request starts and before the
+      // delta read: ids 1-3 are gone, so a read after 1 would start at 4.
+      dao.getSyncActions = async (...args) => {
+        await fixture.client.unsafe(
+          `DELETE FROM "${fixture.schemaName}".sync_actions WHERE id < 4`
+        );
+        return await getRealActions(...args);
+      };
+      const app = fastify();
+      registerSyncRoutes(app, {
+        authMiddleware: (request) => {
+          Object.assign(request, {
+            syncUser: { groups: [group(1)], userId: group(1) },
+          });
+          return Promise.resolve();
+        },
+        bootstrapService: {} as BootstrapService,
+        deltaService: new DeltaService(dao),
+        mutateService: {} as MutateService,
+      });
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/sync/deltas?after=1",
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({ error: "BOOTSTRAP_REQUIRED" });
+
+        // A cursor the prune did not reach still pages normally.
+        const fresh = await app.inject({
+          method: "GET",
+          url: "/sync/deltas?after=3",
+        });
+        expect(fresh.statusCode).toBe(200);
+        expect(
+          fresh
+            .json<{ actions: { syncId: string }[] }>()
+            .actions.map((action) => action.syncId)
+        ).toEqual(["4", "5"]);
+      } finally {
+        await app.close();
+      }
     });
 
     it("reads a closed id window for live gap fill", async () => {
