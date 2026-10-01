@@ -22,6 +22,10 @@ export class DeltaService {
   /**
    * Whether `afterSyncId` has fallen behind the earliest retained action, in
    * which case the caller must re-bootstrap. See {@link isSyncCursorStale}.
+   *
+   * Call it after {@link fetchDeltas}, not only before: retention may prune
+   * between a check and the read, and the read then silently starts above
+   * the cutoff.
    */
   async isCursorStale(afterSyncId: bigint): Promise<boolean> {
     if (afterSyncId <= 0n) {
