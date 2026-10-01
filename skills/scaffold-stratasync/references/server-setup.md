@@ -147,9 +147,11 @@ export default defineConfig({
 The model table matches the client model fields. `syncActions` and `syncGroupMemberships` are required by StrataSync.
 
 ```ts
+import { sql } from "drizzle-orm";
 import {
   bigserial,
   boolean,
+  index,
   jsonb,
   pgTable,
   text,
@@ -188,6 +190,17 @@ export const syncActions = pgTable(
       table.clientId,
       table.clientTxId
     ),
+    groupIdIdx: index("sync_actions_group_id_id_idx").on(
+      table.groupId,
+      table.id
+    ),
+    modelIdx: index("sync_actions_model_model_id_idx").on(
+      table.model,
+      table.modelId
+    ),
+    publicIdIdx: index("sync_actions_public_id_idx")
+      .on(table.id)
+      .where(sql`${table.groupId} IS NULL`),
   })
 );
 

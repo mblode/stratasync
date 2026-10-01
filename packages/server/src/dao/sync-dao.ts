@@ -11,7 +11,8 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+import { getTableConfig, unionAll } from "drizzle-orm/pg-core";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
 import type { RawSyncActionRow } from "../core/sync-action.js";
@@ -35,6 +36,26 @@ export interface SyncActionInsert {
 }
 
 const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Up to this many distinct groups, a delta read is one index range scan per
+ * group (plus the public rows) merged by id. Each branch costs a plan node and
+ * an index descent, so past this point the single filtered id-order scan is
+ * cheaper again. See `benchmarks/README.md`.
+ */
+export const MAX_GROUP_BRANCHES = 32;
+
+interface RowsQuery {
+  orderBy(...columns: unknown[]): {
+    limit(n: number): Promise<Record<string, unknown>[]>;
+  };
+}
+
+// Drizzle's set-operator typing needs concrete PgSelect builders, which the
+// DB-agnostic `SyncDb` interface deliberately does not expose.
+const unionAllRows = unionAll as unknown as (
+  ...selects: unknown[]
+) => RowsQuery;
 
 const isUniqueViolation = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -172,6 +193,71 @@ export class SyncDao {
   }
 
   /**
+   * Reads the actions visible to `groups` (plus public, null-group rows) in
+   * the id window `(afterId, throughId]` (unbounded above when `throughId` is
+   * omitted), ascending by id, at most `limit` rows.
+   *
+   * For a bounded number of groups this is a `UNION ALL` of one branch per
+   * group and one for public rows, each `ORDER BY id LIMIT n` and merged by id.
+   * With a `(group_id, id)` index (and `(id) WHERE group_id IS NULL` for the
+   * public branch) PostgreSQL answers each branch with an ordered index range
+   * scan and a Merge Append stops after `limit` rows, so the cost tracks the
+   * rows returned rather than how many unrelated rows sit between them. The
+   * single `group_id IS NULL OR group_id IN (...)` scan walks the primary key
+   * and filters, which degrades as other groups' rows grow.
+   *
+   * A row has exactly one `group_id`, so the branches are disjoint once the
+   * group list is deduplicated. Both shapes run as one statement, so they see
+   * one snapshot and keep the commit-order guarantee of
+   * `acquireInsertOrderLock`.
+   */
+  private async getVisibleSyncActions(
+    afterId: bigint,
+    throughId: bigint | undefined,
+    groups: string[],
+    limit: number
+  ): Promise<RawSyncActionRow[]> {
+    const idCol = getColumn(this.tables.syncActions, "id");
+    const groupIdCol = getColumn(this.tables.syncActions, "groupId");
+    const window =
+      throughId === undefined
+        ? gt(idCol, afterId)
+        : and(gt(idCol, afterId), lte(idCol, throughId));
+    const distinctGroups = [...new Set(groups)];
+
+    if (
+      distinctGroups.length === 0 ||
+      distinctGroups.length > MAX_GROUP_BRANCHES
+    ) {
+      const rows = await this.db
+        .select()
+        .from(this.tables.syncActions)
+        .where(and(window, this.visibleGroupCondition(distinctGroups)))
+        .orderBy(asc(idCol))
+        .limit(limit);
+      return rows as unknown as RawSyncActionRow[];
+    }
+
+    // Branch builders stay unawaited: drizzle builders only run when awaited,
+    // so these are composed into the single union statement below.
+    const branch = (condition: SQL) =>
+      this.db
+        .select()
+        .from(this.tables.syncActions)
+        .where(and(window, condition))
+        .orderBy(asc(idCol))
+        .limit(limit);
+    const rows = await unionAllRows(
+      branch(isNull(groupIdCol)),
+      ...distinctGroups.map((groupId) => branch(eq(groupIdCol, groupId)))
+    )
+      .orderBy(asc(idCol))
+      .limit(limit);
+
+    return rows as unknown as RawSyncActionRow[];
+  }
+
+  /**
    * Gets sync actions after a given ID.
    */
   async getSyncActions(
@@ -179,15 +265,7 @@ export class SyncDao {
     groups: string[],
     limit: number
   ): Promise<RawSyncActionRow[]> {
-    const idCol = getColumn(this.tables.syncActions, "id");
-    const rows = await this.db
-      .select()
-      .from(this.tables.syncActions)
-      .where(and(gt(idCol, afterId), this.visibleGroupCondition(groups)))
-      .orderBy(asc(idCol))
-      .limit(limit);
-
-    return rows as unknown as RawSyncActionRow[];
+    return await this.getVisibleSyncActions(afterId, undefined, groups, limit);
   }
 
   /**
@@ -202,21 +280,7 @@ export class SyncDao {
     groups: string[],
     limit: number
   ): Promise<RawSyncActionRow[]> {
-    const idCol = getColumn(this.tables.syncActions, "id");
-    const rows = await this.db
-      .select()
-      .from(this.tables.syncActions)
-      .where(
-        and(
-          gt(idCol, afterId),
-          lte(idCol, throughId),
-          this.visibleGroupCondition(groups)
-        )
-      )
-      .orderBy(asc(idCol))
-      .limit(limit);
-
-    return rows as unknown as RawSyncActionRow[];
+    return await this.getVisibleSyncActions(afterId, throughId, groups, limit);
   }
 
   /**
