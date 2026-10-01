@@ -337,6 +337,16 @@ The package requires two Drizzle tables passed via `config.tables`:
 
 **`syncActions`**: Columns are `id` (bigserial PK), `model` (varchar), `modelId` (uuid), `action` (char 1), `data` (jsonb), `groupId` (uuid nullable), `clientId` (varchar nullable), `clientTxId` (uuid nullable), `createdAt` (timestamp). Unique constraint on `(clientId, clientTxId)`.
 
+Recommended indexes on `sync_actions` (see `examples/api/src/db/schema.ts`):
+
+```sql
+CREATE INDEX sync_actions_group_id_id_idx ON sync_actions (group_id, id);
+CREATE INDEX sync_actions_public_id_idx ON sync_actions (id) WHERE group_id IS NULL;
+CREATE INDEX sync_actions_model_model_id_idx ON sync_actions (model, model_id);
+```
+
+Delta catch-up (`getSyncActions`, `getSyncActionsThrough`) reads up to 32 distinct groups as one `ORDER BY id LIMIT n` branch per group plus one for public (null-group) rows, merged by id. With the first two indexes each branch is an ordered index range scan and the read stops after `n` rows, so its cost follows the rows returned rather than how many other groups' rows lie between them. `(group_id, id)` cannot return `group_id IS NULL` rows in id order, hence the partial index; without it the public branch sorts every public row after the cursor (up to `n`). Above 32 groups the read falls back to one `group_id IS NULL OR group_id IN (...)` scan. `(model, model_id)` serves bootstrap's touched-since check.
+
 **`syncGroupMemberships`**: Columns are `id` (uuid PK), `userId` (uuid), `groupId` (uuid), `groupType` (varchar), `createdAt` (timestamp).
 
 ## Exports
