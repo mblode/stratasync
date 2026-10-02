@@ -647,7 +647,7 @@ importers:
         specifier: '*'
         version: link:../core
       '@stratasync/y-doc':
-        specifier: ^2.5.5
+        specifier: ^2.5.6
         version: link:../y-doc
 
   packages/y-doc:
