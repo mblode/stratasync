@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigserial,
   boolean,
+  index,
   jsonb,
   pgTable,
   text,
@@ -39,6 +41,21 @@ export const syncActions = pgTable(
       table.clientId,
       table.clientTxId
     ),
+    // Delta reads: one ordered range scan per subscribed group.
+    groupIdIdx: index("sync_actions_group_id_id_idx").on(
+      table.groupId,
+      table.id
+    ),
+    // Bootstrap's "touched since" check by model row.
+    modelIdx: index("sync_actions_model_model_id_idx").on(
+      table.model,
+      table.modelId
+    ),
+    // Delta reads of public (null-group) rows in id order, which
+    // `(group_id, id)` cannot provide for `IS NULL`.
+    publicIdIdx: index("sync_actions_public_id_idx")
+      .on(table.id)
+      .where(sql`${table.groupId} IS NULL`),
   })
 );
 
