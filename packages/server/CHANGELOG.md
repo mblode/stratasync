@@ -1,5 +1,12 @@
 # @stratasync/server
 
+## 2.5.6
+
+### Patch Changes
+
+- af2cefa: `GET /sync/deltas`, WebSocket replay pages and live gap fills now check the retention floor after reading each page instead of only before. A retention job pruning the oldest `sync_actions` while a client caught up could previously slip between the check and the read, so a cursor just below the cutoff silently skipped the pruned actions; those clients now get `BOOTSTRAP_REQUIRED`. Callers of `DeltaService` should call `isCursorStale` after `fetchDeltas`.
+- af2cefa: Delta catch-up reads (`getSyncActions`, `getSyncActionsThrough`) for up to 32 distinct groups now run one `ORDER BY id LIMIT n` branch per group plus one for public rows, merged by id, instead of one primary-key scan filtered by `group_id IN (...)`. Results are unchanged. Add the recommended `sync_actions` indexes from the server README, `(group_id, id)` and `(id) WHERE group_id IS NULL`, for the faster plan; without the partial index, reads dominated by one dense group can be a few milliseconds slower.
+
 ## 2.5.5
 
 ### Patch Changes
