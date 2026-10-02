@@ -193,13 +193,6 @@ export const registerSyncRoutes = (
         ? parseSyncIdString(request.query.after)
         : 0n;
 
-      if (await deltaService.isCursorStale(afterSyncId)) {
-        return reply.code(409).send({
-          error: BOOTSTRAP_REQUIRED,
-          message: BOOTSTRAP_REQUIRED_HTTP_MESSAGE,
-        });
-      }
-
       let limit = request.query.limit
         ? Number.parseInt(request.query.limit, 10)
         : DEFAULT_LIMIT;
@@ -218,6 +211,18 @@ export const registerSyncRoutes = (
         afterSyncId,
         limit
       );
+
+      // Checked after the read, not before: retention deletes the oldest
+      // actions concurrently, and a read that lands after a prune starts above
+      // the cutoff without any sign of the gap. Retention deletes a prefix of
+      // ids, so a floor still at most `after + 1` once the read is done means
+      // nothing the page needed was gone.
+      if (await deltaService.isCursorStale(afterSyncId)) {
+        return reply.code(409).send({
+          error: BOOTSTRAP_REQUIRED,
+          message: BOOTSTRAP_REQUIRED_HTTP_MESSAGE,
+        });
+      }
 
       return reply.send({
         actions: packet.actions.map((action) => ({

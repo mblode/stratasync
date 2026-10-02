@@ -13,6 +13,7 @@ import type { DeltaSubscriberLike } from "../delta/delta-publisher.js";
 import type { SyncActionOutput, SyncUserContext } from "../types.js";
 import type { AsyncMutex } from "../utils/async-mutex.js";
 import { buildDeltaFrame, buildErrorFrame } from "./messages.js";
+import { isPageBehindRetention } from "./replay.js";
 
 export const MAX_BUFFERED_ACTIONS = 10_000;
 
@@ -271,6 +272,10 @@ export class ClientSession {
           this.groups,
           GAP_FILL_PAGE_SIZE
         );
+        if (await isPageBehindRetention(syncDao, cursor)) {
+          this.requireBootstrap();
+          return;
+        }
         for (const action of actions) {
           await this.sendDeltaAction(toSyncActionOutput(action), {
             scanned: true,

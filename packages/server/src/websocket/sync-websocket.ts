@@ -385,8 +385,14 @@ export const registerSyncWebsocket = (
         session.installDeltaSubscription();
 
         try {
-          await replaySyncActions(syncDao, socket, session);
+          const replay = await replaySyncActions(syncDao, socket, session);
           if (session.isClosed) {
+            return;
+          }
+          // Retention pruned actions above the cursor after the check above.
+          if (replay === "bootstrap-required") {
+            session.reset();
+            sendSocketError(BOOTSTRAP_REQUIRED_WS_MESSAGE, BOOTSTRAP_REQUIRED);
             return;
           }
           await session.flushBufferedActions();

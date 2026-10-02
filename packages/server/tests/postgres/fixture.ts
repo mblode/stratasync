@@ -86,6 +86,11 @@ export const createFixture = async () => {
     await client.unsafe(
       `CREATE INDEX ON "${schemaName}".sync_actions (group_id)`
     );
+    // The recommended public-row index: lets the delta read's null-group
+    // branch scan in id order (see the server README).
+    await client.unsafe(
+      `CREATE INDEX ON "${schemaName}".sync_actions (id) WHERE group_id IS NULL`
+    );
     await client.unsafe(
       `CREATE INDEX ON "${schemaName}".sync_actions (created_at)`
     );
