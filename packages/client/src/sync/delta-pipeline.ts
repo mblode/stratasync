@@ -34,6 +34,8 @@ interface DeferredMapOp {
   id: string;
   data?: Record<string, unknown>;
   clientTxId?: string;
+  /** Fields the action itself carried; `data` is the whole stored row. */
+  actionFields?: readonly string[];
 }
 
 /**
@@ -843,6 +845,14 @@ export class DeltaPipeline {
       this.ctx.getOutboxManager()?.getLocalClientTxIds()
     );
 
+    // Confirmation removes these transactions, so record what each one wrote now.
+    const ownWrittenFields = new Map<string, ReadonlySet<string>>();
+    for (const tx of activeTransactions) {
+      if (localTxIds.has(tx.clientTxId)) {
+        ownWrittenFields.set(tx.clientTxId, new Set(Object.keys(tx.payload)));
+      }
+    }
+
     await this.finishOutboxProcessing(filteredPacket.actions, nextSyncId);
 
     const ownClientTxIds = DeltaPipeline.buildOwnClientTxIds(
@@ -902,6 +912,15 @@ export class DeltaPipeline {
           !writtenKeys.has(key) &&
           map.has(op.id);
         if (isOwnOptimisticEcho) {
+          // The optimistic values already stand, but fields the server derived
+          // on this write (a revision, a sequence number) arrive only here.
+          const derived = DeltaPipeline.serverDerivedFields(
+            op,
+            ownWrittenFields.get(op.clientTxId as string)
+          );
+          if (derived) {
+            map.merge(op.id, derived, { serialized: true });
+          }
           continue;
         }
         if (op.type === "merge" && op.data) {
@@ -953,6 +972,25 @@ export class DeltaPipeline {
    * storage) so that cross-tab transactions sharing the same IndexedDB are
    * not incorrectly treated as own optimistic echoes.
    */
+  /** Echo fields the transaction did not write; undefined when there are none. */
+  private static serverDerivedFields(
+    op: DeferredMapOp,
+    written: ReadonlySet<string> | undefined
+  ): Record<string, unknown> | undefined {
+    if (!(op.data && op.actionFields && written)) {
+      return undefined;
+    }
+    const derived: Record<string, unknown> = {};
+    let found = false;
+    for (const field of op.actionFields) {
+      if (field !== "id" && !written.has(field) && field in op.data) {
+        derived[field] = op.data[field];
+        found = true;
+      }
+    }
+    return found ? derived : undefined;
+  }
+
   private static buildOwnClientTxIds(
     actions: SyncAction[],
     localTxIds: ReadonlySet<string>
@@ -1011,6 +1049,7 @@ export class DeltaPipeline {
       staging.deleted.delete(key);
       staging.writes.set(key, { data: row, modelName, type: "put" });
       ops.push({
+        actionFields: Object.keys(action.data),
         clientTxId: action.clientTxId,
         data: row,
         id,

@@ -519,3 +519,37 @@ describe("own echo after a foreign action in the same packet", () => {
     }
   });
 });
+
+describe("own echo carrying server-derived fields", () => {
+  it("merges fields the transaction did not write, keeping the optimistic ones", async () => {
+    const { client, storage, transport, tx } =
+      await startClientWithPendingTitle();
+    try {
+      const syncWaiter = waitForSync(client, "21");
+      // The server derived `priority` (e.g. a revision trigger) on our write;
+      // the echo is the only place this client learns it.
+      transport.emitDelta({
+        actions: [
+          {
+            action: "U",
+            clientId: client.clientId,
+            clientTxId: tx.clientTxId,
+            data: { id: "task-1", priority: 2, title: "Mine" },
+            id: "21",
+            modelId: "task-1",
+            modelName: "Task",
+          },
+        ],
+        lastSyncId: "21",
+      });
+      await syncWaiter;
+
+      expect(await storage.getOutbox()).toEqual([]);
+      expect(
+        client.getCached<Record<string, unknown>>("Task", "task-1")
+      ).toMatchObject({ priority: 2, title: "Mine" });
+    } finally {
+      await client.stop();
+    }
+  });
+});
