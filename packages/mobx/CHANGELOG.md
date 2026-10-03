@@ -1,5 +1,11 @@
 # @stratasync/mobx
 
+## 2.5.7
+
+### Patch Changes
+
+- @stratasync/core@2.5.7
+
 ## 2.5.6
 
 ### Patch Changes
