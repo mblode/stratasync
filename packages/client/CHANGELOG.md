@@ -1,5 +1,13 @@
 # @stratasync/client
 
+## 2.5.7
+
+### Patch Changes
+
+- b9441c1: Merge server-derived fields from a client's own optimistic echo. The echo was skipped whole, so fields the server set on that write (a revision bumped by a trigger, say) never reached the in-memory model until reload, and a later compare-and-set write sent a stale value.
+- @stratasync/core@2.5.7
+  - @stratasync/y-doc@2.5.7
+
 ## 2.5.6
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @stratasync/storage-idb
 
+## 2.5.7
+
+### Patch Changes
+
+- Updated dependencies [b9441c1]
+  - @stratasync/client@2.5.7
+  - @stratasync/core@2.5.7
+
 ## 2.5.6
 
 ### Patch Changes
