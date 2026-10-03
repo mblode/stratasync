@@ -9,10 +9,10 @@
   --breakpoint-3xl: 1600px;
   --breakpoint-4xl: 2000px;
   --font-sans:
-    var(--font-glide), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
   --font-mono:
-    var(--font-glide-mono), ui-monospace, "SFMono-Regular", "SF Mono", Menlo,
+    var(--font-geist-mono), ui-monospace, "SFMono-Regular", "SF Mono", Menlo,
     Consolas, "Liberation Mono", monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

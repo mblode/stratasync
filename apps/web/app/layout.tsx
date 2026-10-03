@@ -1,31 +1,22 @@
 import { Agentation } from "agentation";
 import type { Metadata, Viewport } from "next";
-import localFont from "next/font/local";
+import { Geist_Mono, Inter } from "next/font/google";
 import type React from "react";
 
 import { siteConfig } from "@/lib/config";
 
 import "./globals.css";
 
-/*
- * The italic face is not loaded. `next/font/local` preloads every `src` in a
- * family, and the italic woff2 is 117 KB competing with the roman on the
- * critical path for a face this app never renders: there is no `<em>`, `<i>`
- * or `italic` class anywhere in it, and docs pages are served with Blode.md's
- * own fonts rather than these. Add it back alongside the first italic text.
- */
-const glide = localFont({
+const inter = Inter({
   display: "swap",
-  src: [{ path: "./fonts/glide-variable.woff2", style: "normal" }],
-  variable: "--font-glide",
-  weight: "100 950",
+  subsets: ["latin"],
+  variable: "--font-inter",
 });
 
-const glideMono = localFont({
+const geistMono = Geist_Mono({
   display: "swap",
-  src: "./fonts/glide-mono.woff2",
-  variable: "--font-glide-mono",
-  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
 });
 
 export const viewport: Viewport = {
@@ -95,7 +86,7 @@ const RootLayout = ({
   children: React.ReactNode;
 }>) => (
   <html
-    className={`${glide.variable} ${glideMono.variable} min-h-screen font-sans antialiased`}
+    className={`${inter.variable} ${geistMono.variable} min-h-screen font-sans antialiased`}
     lang="en"
   >
     <body className="flex min-h-screen flex-col">
