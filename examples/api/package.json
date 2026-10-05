@@ -16,7 +16,7 @@
     "@stratasync/server": "*",
     "dotenv": "^17.3.1",
     "drizzle-orm": "1.0.0-rc.1-929a083",
-    "fastify": "^5.8.4",
+    "fastify": "^5.12.5",
     "postgres": "^3.4.8"
   },
   "devDependencies": {

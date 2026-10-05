@@ -354,8 +354,8 @@ importers:
         specifier: 1.0.0-rc.1-929a083
         version: 1.0.0-rc.1-929a083(@cloudflare/workers-types@4.20260702.1)(postgres@3.4.9)(zod@4.5.4)
       fastify:
-        specifier: ^5.8.4
-        version: 5.12.1
+        specifier: ^5.12.5
+        version: 5.12.5
       postgres:
         specifier: ^3.4.8
         version: 3.4.9
@@ -601,8 +601,8 @@ importers:
         specifier: ^25.5.0
         version: 25.5.0
       fastify:
-        specifier: ^5.12.1
-        version: 5.12.1
+        specifier: ^5.12.5
+        version: 5.12.5
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
@@ -3787,8 +3787,8 @@ packages:
   fastify-plugin@5.1.0:
     resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
 
-  fastify@5.12.1:
-    resolution: {integrity: sha512-FWi+tQvwxR/PeRX7Z2mhfEF5ozJ3jn9asiiclzKXNSzJRHAYcU924aIOKAdHFJ+YIKieh3cqr1IwCOvTr41B3Q==}
+  fastify@5.12.5:
+    resolution: {integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -7744,7 +7744,7 @@ snapshots:
 
   fastify-plugin@5.1.0: {}
 
-  fastify@5.12.1:
+  fastify@5.12.5:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
