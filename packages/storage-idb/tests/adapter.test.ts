@@ -792,6 +792,67 @@ test("pruneSyncActions removes actions numerically <= the floor", async () => {
   await deleteDatabases(["stratasync_databases", dbName]);
 });
 
+test("getSyncActions honors afterSyncId and limit across a large write", async () => {
+  const userId = `user-${randomUUID()}`;
+  const version = 1;
+  const userVersion = 1;
+  const dbName = computeWorkspaceDatabaseName({ userId, userVersion, version });
+
+  const adapter = createIndexedDbStorage();
+  await adapter.open({ schema: baseSchema, userId, userVersion, version });
+
+  const ids = Array.from({ length: 1200 }, (_, i) => String(i + 1));
+  await adapter.addSyncActions(ids.map((id) => makeSyncAction(id)));
+
+  const page = await adapter.getSyncActions("9", 3);
+  assert.deepEqual(
+    page.map((action) => action.id),
+    ["10", "11", "12"]
+  );
+  assert.equal("idKey" in page[0], false);
+  const everything = await adapter.getSyncActions("0");
+  assert.equal(everything.length, 1200);
+  assert.deepEqual(await adapter.getSyncActions("1200"), []);
+
+  await adapter.close();
+  await deleteDatabases(["stratasync_databases", dbName]);
+});
+
+test("getSyncActions upgrades a database that predates the numeric index", async () => {
+  const userId = `user-${randomUUID()}`;
+  const version = 1;
+  const userVersion = 1;
+  const dbName = computeWorkspaceDatabaseName({ userId, userVersion, version });
+
+  const first = createIndexedDbStorage();
+  await first.open({ schema: baseSchema, userId, userVersion, version });
+  await first.close();
+
+  // Simulate a legacy database: no index, rows without the key.
+  const legacy = await openDB(dbName, 50, {
+    upgrade(_db, _old, _new, tx) {
+      tx.objectStore(SYNC_ACTION_STORE).deleteIndex("byIdKey");
+    },
+  });
+  const legacyTx = legacy.transaction(SYNC_ACTION_STORE, "readwrite");
+  for (const id of ["9", "10", "100"]) {
+    legacyTx.objectStore(SYNC_ACTION_STORE).put(makeSyncAction(id));
+  }
+  await legacyTx.done;
+  legacy.close();
+
+  const adapter = createIndexedDbStorage();
+  await adapter.open({ schema: baseSchema, userId, userVersion, version });
+  const actions = await adapter.getSyncActions("9", 5);
+  assert.deepEqual(
+    actions.map((action) => action.id),
+    ["10", "100"]
+  );
+
+  await adapter.close();
+  await deleteDatabases(["stratasync_databases", dbName]);
+});
+
 test("open() runs migration hooks newer than the previous version", async () => {
   const userId = `user-${randomUUID()}`;
   const version = 1;

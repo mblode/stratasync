@@ -93,14 +93,28 @@ export class LocalStorageAdapter implements StorageAdapter {
     return Promise.resolve(results);
   }
 
-  async writeBatch(ops: BatchOperation[]): Promise<void> {
+  writeBatch(ops: BatchOperation[]): Promise<void> {
+    const stores = new Map<string, Record<string, Record<string, unknown>>>();
     for (const op of ops) {
+      let store = stores.get(op.modelName);
+      if (!store) {
+        store = this.readModelStore(op.modelName);
+        stores.set(op.modelName, store);
+      }
       if (op.type === "put" && op.data) {
-        await this.put(op.modelName, op.data);
+        const { id } = op.data;
+        if (typeof id !== "string") {
+          throw new TypeError(`Missing id for model ${op.modelName}`);
+        }
+        store[id] = { ...op.data };
       } else if (op.type === "delete" && op.id) {
-        await this.delete(op.modelName, op.id);
+        Reflect.deleteProperty(store, op.id);
       }
     }
+    for (const [modelName, store] of stores) {
+      this.writeModelStore(modelName, store);
+    }
+    return Promise.resolve();
   }
 
   getMeta(): Promise<StorageMeta> {

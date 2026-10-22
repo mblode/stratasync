@@ -74,6 +74,7 @@ interface SyncDBSchema extends IDBSchema {
   _sync_action: {
     key: string;
     value: SyncAction;
+    indexes: { byIdKey: string };
   };
   [key: string]: {
     key: string | number;
@@ -87,6 +88,44 @@ interface PartialIndexDBSchema extends IDBSchema {
     key: string;
     value: PartialIndexEntry;
   };
+}
+
+const SYNC_ACTION_ID_INDEX = "byIdKey";
+const SYNC_ACTION_ID_KEY = "idKey";
+const SYNC_ID_LEADING_ZEROS = /^0+/;
+
+/**
+ * Sync ids are variable-length numeric strings, so they do not sort
+ * lexicographically. Prefixing the digit count makes string order match
+ * numeric order for ids of any length.
+ */
+const toSyncIdKey = (id: string): string => {
+  const stripped = id.replace(SYNC_ID_LEADING_ZEROS, "") || "0";
+  return `${String(stripped.length).padStart(4, "0")}${stripped}`;
+};
+
+const withSyncIdKey = (action: SyncAction): SyncAction =>
+  ({
+    ...action,
+    [SYNC_ACTION_ID_KEY]: toSyncIdKey(action.id),
+  }) as SyncAction;
+
+const stripSyncIdKey = (action: SyncAction): SyncAction => {
+  const { [SYNC_ACTION_ID_KEY]: _key, ...rest } = action as SyncAction &
+    Record<string, unknown>;
+  return rest as SyncAction;
+};
+
+interface SyncActionUpgradeCursor {
+  value: unknown;
+  update: (value: unknown) => Promise<unknown>;
+  continue: () => Promise<SyncActionUpgradeCursor | null>;
+}
+
+interface SyncActionUpgradeStore {
+  createIndex: (name: string, keyPath: string) => unknown;
+  indexNames: DOMStringList;
+  openCursor: () => Promise<SyncActionUpgradeCursor | null>;
 }
 
 type StoreHandle = ReturnType<IDBPDatabase<unknown>["createObjectStore"]>;
@@ -230,7 +269,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
         _newVersion: number | null,
         transaction: unknown
       ) => {
-        this.upgradeDatabase(database);
+        this.upgradeDatabase(database, transaction);
         this.runMigrations(database, oldVersion, transaction);
       },
     };
@@ -298,10 +337,13 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     }
   }
 
-  private upgradeDatabase(db: IDBPDatabase<SyncDBSchema>): void {
+  private upgradeDatabase(
+    db: IDBPDatabase<SyncDBSchema>,
+    transaction?: unknown
+  ): void {
     IndexedDbStorageAdapter.ensureMetaStore(db);
     IndexedDbStorageAdapter.ensureTransactionStore(db);
-    IndexedDbStorageAdapter.ensureSyncActionStore(db);
+    IndexedDbStorageAdapter.ensureSyncActionStore(db, transaction);
     this.ensureModelStores(db as IDBPDatabase<unknown>);
   }
 
@@ -343,11 +385,55 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     txStore.createIndex("byBatchIndex", "batchIndex");
   }
 
-  private static ensureSyncActionStore(db: IDBPDatabase<SyncDBSchema>): void {
-    if (db.objectStoreNames.contains(SYNC_ACTION_STORE)) {
+  private static ensureSyncActionStore(
+    db: IDBPDatabase<SyncDBSchema>,
+    transaction?: unknown
+  ): void {
+    if (!db.objectStoreNames.contains(SYNC_ACTION_STORE)) {
+      const created = db.createObjectStore(SYNC_ACTION_STORE, {
+        keyPath: "id",
+      });
+      created.createIndex(SYNC_ACTION_ID_INDEX, SYNC_ACTION_ID_KEY);
       return;
     }
-    db.createObjectStore(SYNC_ACTION_STORE, { keyPath: "id" });
+    // Databases created before the numeric index existed: add it and backfill
+    // the key onto stored actions inside the upgrade transaction.
+    const upgradeTx = transaction as
+      | {
+          abort: () => void;
+          objectStore: (name: string) => SyncActionUpgradeStore;
+        }
+      | undefined;
+    const store = upgradeTx?.objectStore(SYNC_ACTION_STORE);
+    if (
+      !upgradeTx ||
+      !store ||
+      store.indexNames.contains(SYNC_ACTION_ID_INDEX)
+    ) {
+      return;
+    }
+    store.createIndex(SYNC_ACTION_ID_INDEX, SYNC_ACTION_ID_KEY);
+    IndexedDbStorageAdapter.backfillSyncActionKeys(store, upgradeTx);
+  }
+
+  private static async backfillSyncActionKeys(
+    store: SyncActionUpgradeStore,
+    upgradeTx: { abort: () => void }
+  ): Promise<void> {
+    try {
+      let cursor = await store.openCursor();
+      while (cursor) {
+        const action = cursor.value as SyncAction;
+        await cursor.update({
+          ...action,
+          [SYNC_ACTION_ID_KEY]: toSyncIdKey(action.id),
+        });
+        cursor = await cursor.continue();
+      }
+    } catch {
+      // Abort the upgrade so the database is never left with unindexed rows.
+      upgradeTx.abort();
+    }
   }
 
   private ensureModelStores(db: IDBPDatabase<unknown>): void {
@@ -510,6 +596,15 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       return false;
     }
 
+    const actionStore = db
+      .transaction(SYNC_ACTION_STORE, "readonly")
+      .objectStore(SYNC_ACTION_STORE) as StoreLayoutHandle;
+    if (
+      !(actionStore.indexNames as DOMStringList).contains(SYNC_ACTION_ID_INDEX)
+    ) {
+      return false;
+    }
+
     if (!this.registry) {
       return true;
     }
@@ -622,15 +717,14 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
 
     await wrapQuotaErrors(async () => {
       const tx = db.transaction(
-        ops.map((op) => this.getStoreName(op.modelName)),
+        [...new Set(ops.map((op) => this.getStoreName(op.modelName)))],
         "readwrite"
       );
 
       const promises: Promise<unknown>[] = [];
 
       for (const op of ops) {
-        const storeName = this.getStoreName(op.modelName);
-        const store = tx.objectStore(storeName);
+        const store = tx.objectStore(this.getStoreName(op.modelName));
 
         if (op.type === "put" && op.data) {
           promises.push(store.put(op.data));
@@ -738,7 +832,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
       const store = tx.objectStore(SYNC_ACTION_STORE);
       const writes: Promise<unknown>[] = [];
       for (const action of actions) {
-        writes.push(store.put(action));
+        writes.push(store.put(withSyncIdKey(action)));
       }
       await Promise.all([...writes, tx.done]);
     });
@@ -752,7 +846,26 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     if (!db.objectStoreNames.contains(SYNC_ACTION_STORE)) {
       return [];
     }
-    const all = (await db.getAll(SYNC_ACTION_STORE)) as SyncAction[];
+    const readTx = db.transaction(SYNC_ACTION_STORE, "readonly");
+    const store = readTx.objectStore(SYNC_ACTION_STORE);
+    if (store.indexNames.contains(SYNC_ACTION_ID_INDEX)) {
+      const results: SyncAction[] = [];
+      if (limit === 0) {
+        return results;
+      }
+      const range = IDBKeyRange.lowerBound(toSyncIdKey(afterSyncId), true);
+      let cursor = await store.index(SYNC_ACTION_ID_INDEX).openCursor(range);
+      while (cursor) {
+        results.push(stripSyncIdKey(cursor.value as SyncAction));
+        if (typeof limit === "number" && results.length >= limit) {
+          break;
+        }
+        cursor = await cursor.continue();
+      }
+      return results;
+    }
+    // Index missing (not yet upgraded): fall back to a full scan.
+    const all = (await store.getAll()) as SyncAction[];
     const filtered = all
       .filter((action) => isSyncIdGreaterThan(action.id, afterSyncId))
       .toSorted((a, b) => compareSyncId(a.id, b.id));

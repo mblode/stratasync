@@ -147,6 +147,29 @@ describe(LocalStorageAdapter, () => {
     });
   });
 
+  describe("writeBatch write count", () => {
+    it("writes each model store once per batch", async () => {
+      const writes = vi.fn();
+      const original = adapter as unknown as {
+        writeModelStore: (...args: unknown[]) => void;
+      };
+      const real = original.writeModelStore.bind(adapter);
+      original.writeModelStore = (...args) => {
+        writes(...args);
+        real(...args);
+      };
+      await adapter.writeBatch(
+        Array.from({ length: 50 }, (_, i) => ({
+          data: { id: String(i) },
+          modelName: "Todo",
+          type: "put" as const,
+        }))
+      );
+      expect(writes).toHaveBeenCalledOnce();
+      expect(await adapter.get("Todo", "49")).not.toBeNull();
+    });
+  });
+
   describe("metadata", () => {
     it("should return default meta when empty", async () => {
       const meta = await adapter.getMeta();
