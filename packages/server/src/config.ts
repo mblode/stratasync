@@ -353,6 +353,8 @@ export interface SyncServerConfig {
   models: Record<string, SyncModelConfig>;
   auth: SyncAuthConfig;
   logger?: SyncLogger;
+  /** 0..1 fraction of catch-up reads also checked against the legacy scan (default 0, off). */
+  shadowCompareRate?: number;
   compositeIdNamespace?: string;
 }
 

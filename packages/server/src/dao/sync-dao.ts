@@ -90,19 +90,27 @@ export class SyncDao {
   private readonly db: SyncDb;
   private readonly tables: SyncDaoTables;
   private readonly logger: SyncLogger;
+  private readonly shadowCompareRate: number;
 
+  /**
+   * `shadowCompareRate` (0..1, default 0 = off) is the fraction of union-path
+   * reads that also run the legacy single filtered scan and log a warning when
+   * the id lists differ. The union result is always the one returned.
+   */
   constructor(
     db: unknown,
     tables: SyncDaoTables,
-    logger: SyncLogger = noopLogger
+    logger: SyncLogger = noopLogger,
+    shadowCompareRate = 0
   ) {
     this.db = db as SyncDb;
     this.tables = tables;
     this.logger = logger;
+    this.shadowCompareRate = shadowCompareRate;
   }
 
   withDb(db: unknown): SyncDao {
-    return new SyncDao(db, this.tables, this.logger);
+    return new SyncDao(db, this.tables, this.logger, this.shadowCompareRate);
   }
 
   private visibleGroupCondition(groups: string[]) {
@@ -280,7 +288,49 @@ export class SyncDao {
       .orderBy(asc(idCol))
       .limit(limit);
 
-    return rows as unknown as RawSyncActionRow[];
+    const result = rows as unknown as RawSyncActionRow[];
+    if (this.shadowCompareRate > 0 && Math.random() < this.shadowCompareRate) {
+      await this.shadowCompare(result, window, distinctGroups, limit);
+    }
+    return result;
+  }
+
+  /** Runs the legacy scan and logs a mismatch; never throws. */
+  private async shadowCompare(
+    actual: RawSyncActionRow[],
+    window: SQL | undefined,
+    groups: string[],
+    limit: number
+  ): Promise<void> {
+    try {
+      const idCol = getColumn(this.tables.syncActions, "id");
+      const legacy = (await this.db
+        .select()
+        .from(this.tables.syncActions)
+        .where(and(window, this.visibleGroupCondition(groups)))
+        .orderBy(asc(idCol))
+        .limit(limit)) as unknown as RawSyncActionRow[];
+      const actualIds = actual.map((row) => String(row.id));
+      const legacyIds = legacy.map((row) => String(row.id));
+      const index = actualIds.findIndex((id, i) => id !== legacyIds[i]);
+      const firstDiff =
+        index === -1 && actualIds.length !== legacyIds.length
+          ? actualIds.length
+          : index;
+      if (firstDiff === -1) {
+        return;
+      }
+      this.logger.warn(
+        {
+          firstDifferingId: actualIds[firstDiff] ?? legacyIds[firstDiff],
+          legacyCount: legacyIds.length,
+          unionCount: actualIds.length,
+        },
+        "Shadow compare: union read differs from the legacy sync_actions scan"
+      );
+    } catch (error) {
+      this.logger.warn({ error }, "Shadow compare failed; ignoring");
+    }
   }
 
   /**

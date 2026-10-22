@@ -4,6 +4,12 @@ import { pgTable, text } from "drizzle-orm/pg-core";
 import { MAX_GROUP_BRANCHES, SyncDao } from "../../src/dao/sync-dao.js";
 import type { SyncDb } from "../../src/db.js";
 
+const unionAllMock = vi.hoisted(() => vi.fn());
+vi.mock(import("drizzle-orm/pg-core"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  unionAll: unionAllMock,
+}));
+
 const syncActions = pgTable("sync_actions", {
   action: text("action"),
   clientId: text("client_id"),
@@ -181,5 +187,80 @@ describe("SyncDao suite", () => {
 
     expect(created.id).toBe(42n);
     expect(calls).toEqual(["execute", "insert"]);
+  });
+});
+
+const makeLogger = () => ({
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+});
+describe("SyncDao shadow compare", () => {
+  const tables = { syncActions, syncGroupMemberships };
+  // Union path result vs legacy scan result, with a call counter for the latter.
+  const makeDb = (legacy: () => Promise<unknown[]>) => {
+    const legacyCalls = { n: 0 };
+    let calls = 0;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: () => {
+                calls += 1;
+                // The first two calls are the union branch builders (public + g1).
+                if (calls <= 2) {
+                  return {};
+                }
+                legacyCalls.n += 1;
+                return legacy();
+              },
+            }),
+          }),
+        }),
+      }),
+    } as unknown as SyncDb;
+    return { db, legacyCalls };
+  };
+  const unionRows = [{ id: 1n }, { id: 2n }];
+
+  beforeEach(() => {
+    unionAllMock.mockReturnValue({
+      orderBy: () => ({ limit: () => Promise.resolve(unionRows) }),
+    });
+  });
+
+  it("does no extra query when off", async () => {
+    const { db, legacyCalls } = makeDb(() => Promise.resolve([]));
+    const dao = new SyncDao(db, tables, makeLogger());
+    await dao.getSyncActions(0n, ["g1"], 10);
+    expect(legacyCalls.n).toBe(0);
+  });
+
+  it("logs a mismatch and returns the union result", async () => {
+    const logger = makeLogger();
+    const { db } = makeDb(() => Promise.resolve([{ id: 1n }, { id: 3n }]));
+    const dao = new SyncDao(db, tables, logger, 1);
+    await expect(dao.getSyncActions(0n, ["g1"], 10)).resolves.toBe(unionRows);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstDifferingId: "2",
+        legacyCount: 2,
+        unionCount: 2,
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("swallows shadow failures", async () => {
+    const logger = makeLogger();
+    const { db } = makeDb(() => Promise.reject(new Error("boom")));
+    const dao = new SyncDao(db, tables, logger, 1);
+    await expect(dao.getSyncActions(0n, ["g1"], 10)).resolves.toBe(unionRows);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.any(Error) }),
+      expect.any(String)
+    );
   });
 });

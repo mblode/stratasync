@@ -36,7 +36,12 @@ export const createSyncServer = async (
   const logger: SyncLogger = config.logger ?? noopLogger;
 
   // Create DAO
-  const syncDao = new SyncDao(config.db, config.tables, logger);
+  const syncDao = new SyncDao(
+    config.db,
+    config.tables,
+    logger,
+    config.shadowCompareRate
+  );
 
   // The in-process bus is the local subscriber the WebSocket listens on and the
   // local-first publish target. Redis (if present) fans deltas across processes
