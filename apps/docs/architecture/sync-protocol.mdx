@@ -88,6 +88,20 @@ stateDiagram-v2
 
 On disconnect, the client retries with exponential backoff. After reconnecting, it fetches deltas after `lastSyncId` via the HTTP catch-up endpoint, transitions to `syncing`, and retries pending outbox transactions.
 
+### Retention floor
+
+The server prunes old rows from `sync_actions`, so the log has a floor: the lowest sync ID a client can still be caught up from (`getEarliestSyncId`). It is the lowest retained ID. When retention has emptied the table, it is one above the highest ID the sequence has allocated, which can only cause a needless bootstrap, never a silent gap.
+
+A cursor is stale when it falls behind that floor. The catch-up endpoint (`GET /sync/deltas`) then answers `409` with `bootstrapRequired` instead of deltas, and the client takes a fresh snapshot rather than retrying. A cursor of `0` is never stale.
+
+The server checks the floor after reading the page, not only before. Retention deletes a prefix of IDs while reads run, so a read that lands after a prune would start above the cutoff with no sign of the gap. A floor still at most `after + 1` once the read finishes means nothing the page needed was pruned. The WebSocket replay path applies the same post-read check.
+
+### Catch-up sizing
+
+`GET /sync/deltas` takes an optional `limit`. The default is 1000 and the maximum is 5000. A missing, non-numeric, or non-positive value falls back to the default, and a larger value is clamped to the maximum.
+
+The server reads `limit + 1` rows and sets `hasMore` when the extra row exists. The response carries `lastSyncId`, the last action in the page. While `hasMore` is true, the client fetches again from `lastSyncId`. It buffers the pages and applies them in a single flush, so a long gap is one store update rather than a visible step per page. The buffer is capped and flushed early for very stale clients, and a page that reports `hasMore` without advancing the cursor ends the loop.
+
 ## Bootstrap modes
 
 Set via `bootstrapMode` on `SyncClientOptions`.

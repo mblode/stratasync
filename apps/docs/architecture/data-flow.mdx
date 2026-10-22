@@ -143,7 +143,7 @@ sequenceDiagram
   Transport-->>Outbox: Acknowledge
 ```
 
-On reconnection, the client fetches missed deltas, then replays the outbox. Idempotency keys make retry safe, even if a mutation was sent but not acknowledged before the disconnect.
+On reconnection, the client fetches missed deltas page by page (up to 1000 actions per page by default, 5000 at most) while `hasMore` is true, applies them in one flush, then replays the outbox. If the cursor has fallen behind the server's retention floor, the fetch returns `bootstrapRequired` and the client re-bootstraps instead; see [Retention floor](/architecture/sync-protocol#retention-floor). Idempotency keys make retry safe, even if a mutation was sent but not acknowledged before the disconnect.
 
 See [Offline-first guide](/guides/offline-first) for configuration and best practices.
 
