@@ -1575,6 +1575,28 @@ describe(registerSyncWebsocket, () => {
       expect(harness.socket.closeCalls).toHaveLength(0);
     });
 
+    it("requires bootstrap instead of paging a far-behind gap without bound", async () => {
+      let next = 0n;
+      const getSyncActionsThrough = vi.fn(() =>
+        Promise.resolve(
+          Array.from({ length: 1000 }, () => {
+            next += 1n;
+            return createReplayAction(next);
+          }) as unknown[]
+        )
+      );
+      const harness = setup({ getSyncActionsThrough });
+      await subscribeLive(harness);
+
+      harness.deltaSubscriber.emit(createLiveAction("1000000"), []);
+      await waitForAssertion(() => {
+        expect(harness.socket.closeCalls).toEqual([
+          { code: 4009, reason: BOOTSTRAP_REQUIRED_WS_MESSAGE },
+        ]);
+      });
+      expect(getSyncActionsThrough).toHaveBeenCalledTimes(100);
+    });
+
     it("skips an id consumed by a rolled-back transaction", async () => {
       const getSyncActionsThrough = committedLog([{ id: 2n }]);
       const harness = setup({ getSyncActionsThrough });

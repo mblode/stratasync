@@ -232,6 +232,45 @@ describe(BootstrapService, () => {
     expect(lines.at(-2)).toContain('"sequence":1001');
   });
 
+  it("pages an indexed batch load past 50k rows instead of throwing", async () => {
+    const total = 60_000;
+    const pages = Array.from({ length: total / 1000 }, (_unused, page) =>
+      Array.from({ length: 1000 }, (_, index) => ({
+        sequence: page * 1000 + index + 1,
+        title: "t",
+      }))
+    );
+    const db = createBootstrapDb({ numeric_tasks: [...pages, []] }, {});
+    const dao = {
+      getTouchedModelIdsAfter: vi.fn().mockResolvedValue(new Set<string>()),
+    };
+    const models: Record<string, SyncModelConfig> = {
+      NumericTask: {
+        bootstrap: {
+          allowedIndexedKeys: ["title"],
+          buildScopeWhere: () => sql`true`,
+          cursor: { idField: "sequence", type: "simple" },
+          fields: ["sequence", "title"],
+        },
+        groupKey: null,
+        mutate: {
+          actions: new Set(["I"]),
+          idField: "sequence",
+          insertFields: { title: { type: "string" } },
+          kind: "standard",
+        },
+        table: numericTasks,
+      },
+    };
+    const service = new BootstrapService(db, dao as never, models);
+    const lines = await collectLines(
+      service.batchLoadNdjson({ groups: [], userId: "user-1" }, [
+        { indexedKey: "title", keyValue: "t", modelName: "NumericTask" },
+      ])
+    );
+    expect(lines).toHaveLength(total);
+  });
+
   it("filters touched rows during bootstrap even when the primary key is not named id", async () => {
     const touchedCalls: {
       firstSyncId: bigint;

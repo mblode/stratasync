@@ -17,7 +17,7 @@ import { resolveRequestedSyncGroups } from "../utils/sync-scope.js";
 import { getColumn } from "../utils/sync-utils.js";
 import { streamModel } from "./cursor.js";
 import type { BootstrapFieldDef } from "./row-mapper.js";
-import { mapRow, normalizeModelId, serializeBatchRow } from "./row-mapper.js";
+import { normalizeModelId, serializeBatchRow } from "./row-mapper.js";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -324,36 +324,14 @@ export class BootstrapService {
     const scopeWhereVal = def.buildScopeWhere(filter, this.db);
     const where = scopedWhere(scopeWhereVal, indexedCondition);
 
-    if (!indexedWhere) {
-      yield* this.streamFilteredModelRows(
-        modelName,
-        filter,
-        groups,
-        firstSyncId
-      );
-      return;
-    }
-
-    const MAX_INDEXED_ROWS = 50_000;
-    const rows = (await this.db
-      .select()
-      .from(def.table)
-      .where(where)
-      .orderBy()
-      .limit(MAX_INDEXED_ROWS + 1)) as Record<string, unknown>[];
-
-    if (rows.length > MAX_INDEXED_ROWS) {
-      throw new Error(
-        `Indexed batch load exceeded ${MAX_INDEXED_ROWS} rows for model "${modelName}"`
-      );
-    }
-
-    const mappedRows = rows.map((row) => mapRow(row, def.fieldDef, def.cursor));
-    yield* this.filterBatchRowsByFirstSyncId(
+    // Keyset-paged by the model's cursor (ordered, ends in the primary key),
+    // so large indexed sets stream deterministically instead of failing.
+    yield* this.streamFilteredModelRows(
       modelName,
-      mappedRows,
+      filter,
       groups,
-      firstSyncId
+      firstSyncId,
+      where
     );
   }
 
@@ -395,10 +373,11 @@ export class BootstrapService {
     modelName: string,
     filter: BootstrapFilterContext,
     groups: string[],
-    firstSyncId?: bigint
+    firstSyncId?: bigint,
+    where?: SQL<unknown>
   ): AsyncGenerator<string, void, unknown> {
     let bufferedRows: Record<string, unknown>[] = [];
-    for await (const row of this.streamModelRows(modelName, filter)) {
+    for await (const row of this.streamModelRows(modelName, filter, where)) {
       bufferedRows.push(row);
       if (bufferedRows.length < 250) {
         continue;
@@ -449,7 +428,8 @@ export class BootstrapService {
 
   private streamModelRows(
     modelName: string,
-    filter: BootstrapFilterContext
+    filter: BootstrapFilterContext,
+    where?: SQL<unknown>
   ): AsyncGenerator<Record<string, unknown>, void, unknown> {
     const def = this.modelRegistry[modelName];
     if (!def) {
@@ -459,7 +439,7 @@ export class BootstrapService {
     return streamModel(
       this.db,
       def.table,
-      def.buildScopeWhere(filter, this.db),
+      where ?? def.buildScopeWhere(filter, this.db),
       def.fieldDef,
       def.cursor
     );

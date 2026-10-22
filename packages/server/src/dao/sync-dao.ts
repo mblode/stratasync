@@ -15,6 +15,8 @@ import type { SQL } from "drizzle-orm";
 import { getTableConfig, unionAll } from "drizzle-orm/pg-core";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 
+import type { SyncLogger } from "../config.js";
+import { noopLogger } from "../config.js";
 import type { RawSyncActionRow } from "../core/sync-action.js";
 import { SYNC_GROUPS_ACTION, SYNC_GROUPS_MODEL } from "../core/sync-groups.js";
 import type { SyncDb } from "../db.js";
@@ -44,6 +46,9 @@ const UNIQUE_VIOLATION = "23505";
  * cheaper again. See `benchmarks/README.md`.
  */
 export const MAX_GROUP_BRANCHES = 32;
+
+const GROUP_SCAN_WARN_INTERVAL_MS = 60_000;
+let lastGroupScanWarnAt = Number.NEGATIVE_INFINITY;
 
 interface RowsQuery {
   orderBy(...columns: unknown[]): {
@@ -84,14 +89,20 @@ const ensureBigint = (value: bigint | string): bigint => {
 export class SyncDao {
   private readonly db: SyncDb;
   private readonly tables: SyncDaoTables;
+  private readonly logger: SyncLogger;
 
-  constructor(db: unknown, tables: SyncDaoTables) {
+  constructor(
+    db: unknown,
+    tables: SyncDaoTables,
+    logger: SyncLogger = noopLogger
+  ) {
     this.db = db as SyncDb;
     this.tables = tables;
+    this.logger = logger;
   }
 
   withDb(db: unknown): SyncDao {
-    return new SyncDao(db, this.tables);
+    return new SyncDao(db, this.tables, this.logger);
   }
 
   private visibleGroupCondition(groups: string[]) {
@@ -211,6 +222,18 @@ export class SyncDao {
    * one snapshot and keep the commit-order guarantee of
    * `acquireInsertOrderLock`.
    */
+  private warnGroupScanFallback(groupCount: number): void {
+    const now = Date.now();
+    if (now - lastGroupScanWarnAt < GROUP_SCAN_WARN_INTERVAL_MS) {
+      return;
+    }
+    lastGroupScanWarnAt = now;
+    this.logger.warn(
+      { groupCount, maxGroupBranches: MAX_GROUP_BRANCHES },
+      "Group count exceeds MAX_GROUP_BRANCHES; falling back to the single sync_actions scan"
+    );
+  }
+
   private async getVisibleSyncActions(
     afterId: bigint,
     throughId: bigint | undefined,
@@ -225,6 +248,9 @@ export class SyncDao {
         : and(gt(idCol, afterId), lte(idCol, throughId));
     const distinctGroups = [...new Set(groups)];
 
+    if (distinctGroups.length > MAX_GROUP_BRANCHES) {
+      this.warnGroupScanFallback(distinctGroups.length);
+    }
     if (
       distinctGroups.length === 0 ||
       distinctGroups.length > MAX_GROUP_BRANCHES

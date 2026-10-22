@@ -18,6 +18,11 @@ import { isPageBehindRetention } from "./replay.js";
 export const MAX_BUFFERED_ACTIONS = 10_000;
 
 const GAP_FILL_PAGE_SIZE = 1000;
+/**
+ * Upper bound on gap-fill pages per call. A session further behind than this
+ * is told to re-bootstrap rather than hold the socket while paging.
+ */
+export const GAP_FILL_MAX_PAGES = 100;
 
 export type SessionPhase = "idle" | "replaying" | "live" | "closed";
 
@@ -265,7 +270,13 @@ export class ClientSession {
     const throughSyncId = syncId - 1n;
     if (syncDao) {
       let cursor = this.scannedThrough;
+      let pages = 0;
       while (!this.isClosed && cursor < throughSyncId) {
+        if (pages >= GAP_FILL_MAX_PAGES) {
+          this.requireBootstrap();
+          return;
+        }
+        pages += 1;
         const actions = await syncDao.getSyncActionsThrough(
           cursor,
           throughSyncId,

@@ -1,7 +1,7 @@
 /* eslint-disable promise/prefer-await-to-callbacks -- test double matches SyncDb.transaction signature */
 import { pgTable, text } from "drizzle-orm/pg-core";
 
-import { SyncDao } from "../../src/dao/sync-dao.js";
+import { MAX_GROUP_BRANCHES, SyncDao } from "../../src/dao/sync-dao.js";
 import type { SyncDb } from "../../src/db.js";
 
 const syncActions = pgTable("sync_actions", {
@@ -111,6 +111,29 @@ describe("SyncDao suite", () => {
 
     await expect(postgresJs.getEarliestSyncId()).resolves.toBe(8n);
     await expect(nodePostgres.getEarliestSyncId()).resolves.toBe(8n);
+  });
+
+  it("warns when the group count forces the single-scan fallback", async () => {
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+    };
+    const dao = new SyncDao(
+      createSelectDb({ sync_actions: [] }),
+      { syncActions, syncGroupMemberships },
+      logger
+    );
+    const groups = Array.from(
+      { length: MAX_GROUP_BRANCHES + 1 },
+      (_, i) => `g${i}`
+    );
+    await dao.getSyncActionsThrough(0n, 10n, groups, 10);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ groupCount: MAX_GROUP_BRANCHES + 1 }),
+      expect.any(String)
+    );
   });
 
   it("returns the first sync id when rows exist", async () => {
