@@ -74,6 +74,7 @@
     "test": "vitest run",
     "test:postgres": ": \"${STRATASYNC_TEST_DATABASE_URL:?Set an isolated local database URL}\" && vitest run tests/postgres",
     "bench:delta": ": \"${STRATASYNC_TEST_DATABASE_URL:?Set an isolated local database URL}\" && DELTA_BENCHMARK=1 vitest run benchmarks/delta-read.bench.test.ts",
+    "bench:catchup": ": \"${STRATASYNC_TEST_DATABASE_URL:?Set an isolated local database URL}\" && CATCHUP_BENCHMARK=1 vitest run benchmarks/catch-up.bench.test.ts",
     "check-types:postgres": "tsc -p tsconfig.postgres.json"
   },
   "dependencies": {
