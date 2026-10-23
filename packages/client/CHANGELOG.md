@@ -1,5 +1,12 @@
 # @stratasync/client
 
+## 2.6.0
+
+### Patch Changes
+
+- @stratasync/core@2.6.0
+  - @stratasync/y-doc@2.6.0
+
 ## 2.5.7
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @stratasync/react
 
+## 2.6.0
+
+### Patch Changes
+
+- @stratasync/client@2.6.0
+  - @stratasync/core@2.6.0
+
 ## 2.5.7
 
 ### Patch Changes
