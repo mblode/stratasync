@@ -104,7 +104,9 @@ export class LocalStorageAdapter implements StorageAdapter {
       if (op.type === "put" && op.data) {
         const { id } = op.data;
         if (typeof id !== "string") {
-          throw new TypeError(`Missing id for model ${op.modelName}`);
+          return Promise.reject(
+            new TypeError(`Missing id for model ${op.modelName}`)
+          );
         }
         store[id] = { ...op.data };
       } else if (op.type === "delete" && op.id) {

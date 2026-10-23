@@ -106,7 +106,9 @@ export class SyncDao {
     this.db = db as SyncDb;
     this.tables = tables;
     this.logger = logger;
-    this.shadowCompareRate = shadowCompareRate;
+    this.shadowCompareRate = Number.isFinite(shadowCompareRate)
+      ? Math.min(Math.max(shadowCompareRate, 0), 1)
+      : 0;
   }
 
   withDb(db: unknown): SyncDao {
@@ -311,7 +313,13 @@ export class SyncDao {
         .orderBy(asc(idCol))
         .limit(limit)) as unknown as RawSyncActionRow[];
       const actualIds = actual.map((row) => String(row.id));
-      const legacyIds = legacy.map((row) => String(row.id));
+      let legacyIds = legacy.map((row) => String(row.id));
+      // The two reads are separate statements: a commit between them can add
+      // rows past the union result's tail. Only a full page can hide that, so
+      // a short union result ignores legacy rows beyond it.
+      if (actualIds.length < limit && legacyIds.length > actualIds.length) {
+        legacyIds = legacyIds.slice(0, actualIds.length);
+      }
       const index = actualIds.findIndex((id, i) => id !== legacyIds[i]);
       const firstDiff =
         index === -1 && actualIds.length !== legacyIds.length

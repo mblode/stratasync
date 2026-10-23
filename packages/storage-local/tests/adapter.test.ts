@@ -147,6 +147,18 @@ describe(LocalStorageAdapter, () => {
     });
   });
 
+  describe("writeBatch validation", () => {
+    it("rejects a put without an id and writes nothing", async () => {
+      await expect(
+        adapter.writeBatch([
+          { data: { id: "1" }, modelName: "Todo", type: "put" },
+          { data: { title: "no id" }, modelName: "Todo", type: "put" },
+        ])
+      ).rejects.toThrow(TypeError);
+      expect(await adapter.get("Todo", "1")).toBeNull();
+    });
+  });
+
   describe("writeBatch write count", () => {
     it("writes each model store once per batch", async () => {
       const writes = vi.fn();

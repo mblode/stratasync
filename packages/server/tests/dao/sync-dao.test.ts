@@ -253,6 +253,23 @@ describe("SyncDao shadow compare", () => {
     );
   });
 
+  it("ignores legacy rows committed past a short union result", async () => {
+    const logger = makeLogger();
+    const { db } = makeDb(() =>
+      Promise.resolve([{ id: 1n }, { id: 2n }, { id: 3n }])
+    );
+    const dao = new SyncDao(db, tables, logger, 1);
+    await dao.getSyncActions(0n, ["g1"], 10);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("treats a non-finite rate as off", async () => {
+    const { db, legacyCalls } = makeDb(() => Promise.resolve([]));
+    const dao = new SyncDao(db, tables, makeLogger(), Number.NaN);
+    await dao.getSyncActions(0n, ["g1"], 10);
+    expect(legacyCalls.n).toBe(0);
+  });
+
   it("swallows shadow failures", async () => {
     const logger = makeLogger();
     const { db } = makeDb(() => Promise.reject(new Error("boom")));
