@@ -1,5 +1,15 @@
 # @stratasync/server
 
+## 2.6.0
+
+### Minor Changes
+
+- d22d71f: Add opt-in `shadowCompareRate` (0..1, default off) to `createSyncServer`: a sampled fraction of grouped catch-up reads also run the legacy single scan and log a warning when the returned ids differ. The returned result is never changed.
+
+### Patch Changes
+
+- 1a037b5: Page indexed batch loads by keyset instead of throwing above 50,000 rows, bound the live gap-fill loop (a far-behind session is told to re-bootstrap), and warn when a user's group count falls back to the single `sync_actions` scan.
+
 ## 2.5.7
 
 ## 2.5.6

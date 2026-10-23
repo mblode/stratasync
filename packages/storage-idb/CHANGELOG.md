@@ -1,5 +1,13 @@
 # @stratasync/storage-idb
 
+## 2.6.0
+
+### Patch Changes
+
+- 89e85f1: storage-idb reads sync actions through a numeric index range cursor (added by an automatic upgrade that backfills existing rows). storage-local applies a write batch with one read and one write per model store.
+- @stratasync/client@2.6.0
+  - @stratasync/core@2.6.0
+
 ## 2.5.7
 
 ### Patch Changes
