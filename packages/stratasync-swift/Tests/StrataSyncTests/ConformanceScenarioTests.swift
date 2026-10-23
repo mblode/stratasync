@@ -170,7 +170,7 @@ struct ConformanceScenarioTests {
         "outbox-delta-echo-is-idempotent", "outbox-offline-replay-acked-once",
         "rebase-disjoint-fields-both-survive", "rebase-same-field-server-wins",
         "reconnect-backoff-closes-the-gap", "rejected-mutation-rolls-back",
-        "schema-hash-mismatch-rebootstraps",
+        "schema-hash-mismatch-rebootstraps", "catchup-multipage-hasmore",
     ]
     nonisolated static let pending: Set<String> = []
 

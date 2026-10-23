@@ -1,0 +1,149 @@
+{
+  "id": "catchup-multipage-hasmore",
+  "description": "A long offline gap spans several delta pages. The client keeps fetching while hasMore is true, advancing the cursor from each page's lastSyncId, and stops on the first page without hasMore. Every page's actions end up in the store.",
+  "requires": ["bootstrap", "deltaFetch", "websocket"],
+  "seed": {
+    "clientId": "c_test",
+    "clock": 1700000000000
+  },
+  "models": [
+    {
+      "name": "Task",
+      "groupKey": "workspaceId",
+      "fields": {
+        "id": "id",
+        "workspaceId": "id",
+        "title": "string",
+        "sortOrder": "number"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "op": "respondBootstrap",
+      "lastSyncId": "100",
+      "rows": []
+    },
+    {
+      "op": "start",
+      "groups": ["w1"]
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "expect",
+      "label": "caught up on the snapshot",
+      "state": "syncing",
+      "cursor": "100",
+      "transport": {
+        "deltaFetchCount": 0
+      }
+    },
+    {
+      "op": "socketClose",
+      "code": 1006
+    },
+    {
+      "op": "respondDeltas",
+      "packet": {
+        "lastSyncId": "101",
+        "hasMore": true,
+        "actions": [
+          {
+            "syncId": "101",
+            "modelName": "Task",
+            "modelId": "t1",
+            "action": "I",
+            "clientId": "c_other",
+            "data": {
+              "id": "t1",
+              "workspaceId": "w1",
+              "title": "Page t1",
+              "sortOrder": 101
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "respondDeltas",
+      "packet": {
+        "lastSyncId": "102",
+        "hasMore": true,
+        "actions": [
+          {
+            "syncId": "102",
+            "modelName": "Task",
+            "modelId": "t2",
+            "action": "I",
+            "clientId": "c_other",
+            "data": {
+              "id": "t2",
+              "workspaceId": "w1",
+              "title": "Page t2",
+              "sortOrder": 102
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "respondDeltas",
+      "packet": {
+        "lastSyncId": "103",
+        "hasMore": false,
+        "actions": [
+          {
+            "syncId": "103",
+            "modelName": "Task",
+            "modelId": "t3",
+            "action": "I",
+            "clientId": "c_other",
+            "data": {
+              "id": "t3",
+              "workspaceId": "w1",
+              "title": "Page t3",
+              "sortOrder": 103
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "socketOpen"
+    },
+    {
+      "op": "expect",
+      "label": "three pages fetched, no fourth fetch after hasMore turned false, all rows applied",
+      "state": "syncing",
+      "cursor": "103",
+      "store": [
+        {
+          "model": "Task",
+          "id": "t1",
+          "fields": {
+            "title": "Page t1"
+          }
+        },
+        {
+          "model": "Task",
+          "id": "t2",
+          "fields": {
+            "title": "Page t2"
+          }
+        },
+        {
+          "model": "Task",
+          "id": "t3",
+          "fields": {
+            "title": "Page t3"
+          }
+        }
+      ],
+      "transport": {
+        "deltaFetchCount": 3
+      }
+    }
+  ]
+}

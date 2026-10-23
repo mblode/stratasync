@@ -6,6 +6,7 @@
     "capabilities/stratasync-ts.json": "89f460a07e9006d26d445728666f24ccc99557401e2eddadef7a318b6d829872",
     "scenarios/archive-then-unarchive-round-trip.json": "f3fe18ad1cd33fa7fc527675d1d186fcb22eff86bc651a7dd07463ba72d895e1",
     "scenarios/bootstrap-then-delta.json": "0c5066519b032ff8a52a290ade98c32e4a4348d1685dd3791356cdf1c4fc338d",
+    "scenarios/catchup-multipage-hasmore.json": "bcc8992db52122df7e69517a80aba465ee03fa8ed31b8b7b383fefbbac69cc5a",
     "scenarios/cursor-too-old-forces-rebootstrap.json": "17dd310a09d16b82fffb001da2f1136e5db289c11652ef62bf7a217dd0d4b38e",
     "scenarios/delta-during-bootstrap-ordering.json": "50f7d97d5232cab179b17389a51b9607a4d9013afcb08742a0f17e99df2bded4",
     "scenarios/outbox-delta-echo-is-idempotent.json": "91c33ceacdbd99e7f3307b0c5325b0d0513f4728aaff8e27e125fd95fd108747",
@@ -34,5 +35,5 @@
     "vectors/serialize-sync-data.json": "95f29a028b34cc03aecbe75a6021f25b33f9f40d0813b82af5a8680258b098a2"
   },
   "protocolVersion": 1,
-  "version": "2.5.1"
+  "version": "2.5.3"
 }
