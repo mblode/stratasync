@@ -43,7 +43,9 @@ jobs:
           matrix.node == 22 &&
           github.event_name == 'pull_request' &&
           github.head_ref != 'changeset-release/main'
-        run: npx changeset status --since origin/main
+        env:
+          CHANGESET_BASE: ${{ github.base_ref || 'main' }}
+        run: npx changeset status --since "origin/$CHANGESET_BASE"
 
       - name: Lint
         run: npm run lint
