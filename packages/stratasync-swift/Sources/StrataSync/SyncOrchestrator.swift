@@ -126,31 +126,29 @@ final class SyncOrchestrator {
             self?.lastSyncId ?? zeroSyncId
         }
 
-        // The transport invokes this from its nonisolated networking task, so hop
-        // back to the main actor before touching main-isolated engine state.
+        // Transport state is main-actor isolated. Record connection intent
+        // synchronously: a queued callback can otherwise outlive the managed
+        // restart that caused an intentional disconnect.
         transport.onConnectionStateChange = { [weak self] state in
-            Task { @MainActor in
-                guard let self else { return }
-                self.onConnectionStateChange?(state)
-                self.onEvent?(.connectionChange(state))
-
-                // Connectivity is back: flush any mutations queued while
-                // offline. (During start() the initial flush is handled by
-                // the start flow itself, and state is not .syncing yet then.)
-                if state == .connected {
-                    let needsCatchUp = self.reconnectPending
-                    self.hasConnected = true
-                    self.reconnectPending = false
-                    if self.running, self.state == .syncing {
+            guard let self else { return }
+            self.onConnectionStateChange?(state)
+            self.onEvent?(.connectionChange(state))
+            if state == .connected {
+                let needsCatchUp = self.reconnectPending
+                self.hasConnected = true
+                self.reconnectPending = false
+                if self.running, self.state == .syncing {
+                    Task { @MainActor [weak self] in
+                        guard let self, self.running else { return }
                         if needsCatchUp {
                             await self.restartSubscription(forceBootstrap: false, skipDelay: true)
                         } else {
                             try? await self.outboxManager.processPendingTransactions()
                         }
                     }
-                } else if self.hasConnected {
-                    self.reconnectPending = true
                 }
+            } else if self.hasConnected, state != .connecting, !self.isRestarting {
+                self.reconnectPending = true
             }
         }
     }
