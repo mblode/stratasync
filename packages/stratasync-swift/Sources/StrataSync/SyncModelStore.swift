@@ -107,6 +107,14 @@ public final class SyncModelStore {
     /// number of rows loaded.
     @discardableResult
     public func hydrateFromStorage(_ storage: StorageAdapter) async throws -> Int {
+        let records = try await persistedRecords(in: storage)
+        try replaceAll(with: records)
+        return records.count
+    }
+
+    /// Every persisted row of every registered model. Reads only; the store is
+    /// untouched until the caller swaps them in.
+    func persistedRecords(in storage: StorageAdapter) async throws -> [StoredModelRecord] {
         var records: [StoredModelRecord] = []
         for modelName in supportedModelNames {
             for item in await storage.getAll(modelName: modelName) {
@@ -116,8 +124,7 @@ public final class SyncModelStore {
                 records.append(StoredModelRecord(modelName: modelName, id: id, data: item))
             }
         }
-        try replaceAll(with: records)
-        return records.count
+        return records
     }
 
     public func applyPendingOutbox(_ outbox: [Transaction]) {
@@ -170,7 +177,20 @@ public final class SyncModelStore {
         }
     }
 
-    func replaceAll(with records: [StoredModelRecord]) throws {
+    /// Swaps the store to `records`, then replays `pending` on top, in one
+    /// synchronous batch.
+    ///
+    /// The replay has to share the batch. An optimistic insert lives only in
+    /// memory and the outbox, never in `records`, so a swap that left the
+    /// replay to a later step, after more storage reads that yield the main
+    /// actor, rendered frames without it: a task just created vanished from
+    /// its list, and an editor open on it unmounted mid-edit. `shouldReplay`
+    /// runs once `records` are in, so it sees the new rows.
+    func replaceAll(
+        with records: [StoredModelRecord],
+        replaying pending: [Transaction] = [],
+        where shouldReplay: (Transaction) -> Bool = { _ in true }
+    ) throws {
         for record in records {
             try validate(modelName: record.modelName, data: record.data)
         }
@@ -181,6 +201,7 @@ public final class SyncModelStore {
                 guard let map = maps[record.modelName] else { continue }
                 try map.setFromDictionary(record.id, data: record.data)
             }
+            applyPendingOutbox(pending.filter(shouldReplay))
         }
     }
 
