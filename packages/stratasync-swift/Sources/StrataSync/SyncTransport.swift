@@ -44,6 +44,8 @@ open class SyncTransport {
     public let getToken: () async -> String?
 
     private var webSocketTask: URLSessionWebSocketTask?
+    private var subscriptionTask: Task<Void, Never>?
+    private var subscriptionGeneration: UInt64 = 0
     private var shouldReconnect = false
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 10
@@ -53,7 +55,7 @@ open class SyncTransport {
     private let keepAlivePongTimeout: TimeInterval = 10.0
 
     public private(set) var connectionState: ConnectionState = .disconnected
-    public var onConnectionStateChange: ((ConnectionState) -> Void)?
+    public var onConnectionStateChange: (@MainActor (ConnectionState) -> Void)?
 
     public init(syncEndpoint: String, wsEndpoint: String, getToken: @escaping () async -> String?) {
         self.syncEndpoint = syncEndpoint
@@ -203,16 +205,28 @@ open class SyncTransport {
         cursorProvider: @escaping () -> SyncId,
         groups: [String]
     ) -> AsyncThrowingStream<DeltaPacket, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                self.shouldReconnect = true
-                self.reconnectAttempts = 0
-
+        subscriptionGeneration &+= 1
+        let generation = subscriptionGeneration
+        subscriptionTask?.cancel()
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        shouldReconnect = true
+        reconnectAttempts = 0
+        return AsyncThrowingStream { continuation in
+            subscriptionTask = Task { [weak self] in
+                guard let self else { continuation.finish(); return }
                 await self.connectAndSubscribe(
                     cursorProvider: cursorProvider,
                     groups: groups,
-                    continuation: continuation
+                    continuation: continuation,
+                    generation: generation
                 )
+            }
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.subscriptionGeneration == generation else { return }
+                    await self.close()
+                }
             }
         }
     }
@@ -220,9 +234,10 @@ open class SyncTransport {
     private func connectAndSubscribe(
         cursorProvider: @escaping () -> SyncId,
         groups: [String],
-        continuation: AsyncThrowingStream<DeltaPacket, Error>.Continuation
+        continuation: AsyncThrowingStream<DeltaPacket, Error>.Continuation,
+        generation: UInt64
     ) async {
-        guard self.shouldReconnect else {
+        guard isCurrentSubscription(generation) else {
             continuation.finish()
             return
         }
@@ -234,6 +249,7 @@ open class SyncTransport {
             guard let token = await getToken() else {
                 throw SyncTransportError.noToken
             }
+            guard isCurrentSubscription(generation) else { continuation.finish(); return }
 
             let request = try Self.makeWebSocketRequest(endpoint: wsEndpoint, token: token)
             let afterSyncId = cursorProvider()
@@ -262,8 +278,9 @@ open class SyncTransport {
             // after replaying any missed actions as `delta` frames, so we must not
             // assume the first frame is the ack, and must deliver deltas that arrive
             // before it.
-            while shouldReconnect {
+            while isCurrentSubscription(generation) {
                 let message = try await task.receive()
+                guard isCurrentSubscription(generation) else { continuation.finish(); return }
 
                 let json: Any
                 switch message {
@@ -311,8 +328,10 @@ open class SyncTransport {
                     }
                 }
             }
+            continuation.finish()
         } catch {
             keepAliveTask?.cancel()
+            guard isCurrentSubscription(generation) else { continuation.finish(); return }
             setConnectionState(.disconnected)
 
             // A stale cursor can't be fixed by reconnecting, so surface it so the
@@ -338,7 +357,8 @@ open class SyncTransport {
                 await connectAndSubscribe(
                     cursorProvider: cursorProvider,
                     groups: groups,
-                    continuation: continuation
+                    continuation: continuation,
+                    generation: generation
                 )
             } else {
                 setConnectionState(.error)
@@ -438,13 +458,20 @@ open class SyncTransport {
     // MARK: - Close
 
     open func close() async {
+        subscriptionGeneration &+= 1
         shouldReconnect = false
+        subscriptionTask?.cancel()
+        subscriptionTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         setConnectionState(.disconnected)
     }
 
     // MARK: - Private Helpers
+
+    private func isCurrentSubscription(_ generation: UInt64) -> Bool {
+        shouldReconnect && subscriptionGeneration == generation && !Task.isCancelled
+    }
 
     /// Keeps bearer credentials out of URLs, which may be retained by logs,
     /// proxies, crash reports, and URL history. Existing non-auth query items

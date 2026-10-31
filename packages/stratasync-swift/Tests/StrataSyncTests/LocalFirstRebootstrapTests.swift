@@ -135,6 +135,88 @@ struct LocalFirstRebootstrapTests {
         await orchestrator.stop()
     }
 
+    /// The swap itself must not show a frame without pending work. The replay
+    /// used to follow the swap after more storage calls, and every one of them
+    /// yielded the main actor with the insert gone: a task created moments
+    /// earlier left its list and an editor open on it unmounted. The probe
+    /// samples the store from inside the metadata write, where the main actor
+    /// is free, as SwiftUI's render would be.
+    @Test func routineRebootstrapNeverShowsTheStoreWithoutPendingWork() async throws {
+        let storage = MockStorageAdapter()
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: ["ws-1"]))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-old", data: row("task-old"))
+        try await storage.addToOutbox(createInsertTransaction(
+            clientId: "client-a",
+            modelName: TestRecord.modelName,
+            modelId: "task-pending",
+            data: row("task-pending")
+        ))
+
+        let gate = Gate()
+        let transport = MockSyncTransport()
+        transport.fetchDeltasHandler = { after, _ in
+            if after == "10" { throw SyncTransportError.bootstrapRequired }
+            return DeltaPacket(lastSyncId: after, actions: [], hasMore: false)
+        }
+        transport.bootstrapStreamProvider = gatedSnapshot(
+            gate: gate,
+            events: snapshot(lastSyncId: "42", groups: ["ws-1"], ids: ["task-new"])
+        )
+        transport.mutateHandler = { _ in throw URLError(.notConnectedToInternet) }
+
+        let (orchestrator, modelStore) = makeOrchestrator(storage: storage, transport: transport)
+        let startTask = Task { try await orchestrator.start(groups: []) }
+        #expect(await waitUntil { await gate.isWaiting })
+
+        let probe = PendingRowProbe()
+        storage.beforeSetMeta = { _ in
+            await MainActor.run { probe.sample(modelStore, id: "task-pending") }
+        }
+        await gate.open()
+        try await startTask.value
+
+        #expect(!probe.samples.isEmpty)
+        #expect(probe.samples.allSatisfy { $0 })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-new") != nil)
+        await orchestrator.stop()
+    }
+
+    /// Same guarantee for the second hydrate a launch runs: the shell is
+    /// already up from `hydrateSelectedAccount`, then `start` reloads from
+    /// disk, which holds no row for an insert that is still only in the outbox.
+    @Test func startRehydrateNeverShowsTheStoreWithoutPendingWork() async throws {
+        let storage = MockStorageAdapter()
+        try await storage.setMeta(seededMeta(cursor: "10", authoritativeGroups: ["ws-1"]))
+        try await storage.put(modelName: TestRecord.modelName, id: "task-old", data: row("task-old"))
+        try await storage.addToOutbox(createInsertTransaction(
+            clientId: "client-a",
+            modelName: TestRecord.modelName,
+            modelId: "task-pending",
+            data: row("task-pending")
+        ))
+
+        let transport = MockSyncTransport()
+        transport.fetchDeltasHandler = { after, _ in
+            DeltaPacket(lastSyncId: after, actions: [], hasMore: false)
+        }
+        transport.mutateHandler = { _ in throw URLError(.notConnectedToInternet) }
+
+        let (orchestrator, modelStore) = makeOrchestrator(storage: storage, transport: transport)
+        _ = try await orchestrator.hydrateSelectedAccount()
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-pending") != nil)
+
+        let probe = PendingRowProbe()
+        storage.beforeSetMeta = { _ in
+            await MainActor.run { probe.sample(modelStore, id: "task-pending") }
+        }
+        try await orchestrator.start(groups: [])
+
+        #expect(!probe.samples.isEmpty)
+        #expect(probe.samples.allSatisfy { $0 })
+        #expect(modelStore.snapshot(modelName: TestRecord.modelName, id: "task-old") != nil)
+        await orchestrator.stop()
+    }
+
     /// A routine replacement that drops a row must not let a rejected pending
     /// update restore it from `original`, while a local insert and its
     /// follow-up update still replay. Nothing is latched or cleared.
@@ -605,6 +687,17 @@ private final class EventLog {
 
     func record(_ event: SyncClientEvent) {
         events.append(event)
+    }
+}
+
+/// Whether a row was in the store each time a storage call let the main actor
+/// run, which is when the UI could have rendered it.
+@MainActor
+private final class PendingRowProbe {
+    private(set) var samples: [Bool] = []
+
+    func sample(_ modelStore: SyncModelStore, id: String) {
+        samples.append(modelStore.snapshot(modelName: TestRecord.modelName, id: id) != nil)
     }
 }
 

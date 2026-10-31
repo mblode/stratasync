@@ -126,31 +126,29 @@ final class SyncOrchestrator {
             self?.lastSyncId ?? zeroSyncId
         }
 
-        // The transport invokes this from its nonisolated networking task, so hop
-        // back to the main actor before touching main-isolated engine state.
+        // Transport state is main-actor isolated. Record connection intent
+        // synchronously: a queued callback can otherwise outlive the managed
+        // restart that caused an intentional disconnect.
         transport.onConnectionStateChange = { [weak self] state in
-            Task { @MainActor in
-                guard let self else { return }
-                self.onConnectionStateChange?(state)
-                self.onEvent?(.connectionChange(state))
-
-                // Connectivity is back: flush any mutations queued while
-                // offline. (During start() the initial flush is handled by
-                // the start flow itself, and state is not .syncing yet then.)
-                if state == .connected {
-                    let needsCatchUp = self.reconnectPending
-                    self.hasConnected = true
-                    self.reconnectPending = false
-                    if self.running, self.state == .syncing {
+            guard let self else { return }
+            self.onConnectionStateChange?(state)
+            self.onEvent?(.connectionChange(state))
+            if state == .connected {
+                let needsCatchUp = self.reconnectPending
+                self.hasConnected = true
+                self.reconnectPending = false
+                if self.running, self.state == .syncing {
+                    Task { @MainActor [weak self] in
+                        guard let self, self.running else { return }
                         if needsCatchUp {
                             await self.restartSubscription(forceBootstrap: false, skipDelay: true)
                         } else {
                             try? await self.outboxManager.processPendingTransactions()
                         }
                     }
-                } else if self.hasConnected {
-                    self.reconnectPending = true
                 }
+            } else if self.hasConnected, state != .connecting, !self.isRestarting {
+                self.reconnectPending = true
             }
         }
     }
@@ -213,7 +211,8 @@ final class SyncOrchestrator {
         // metadata/cursor writes, and pending replay share the queue with
         // optimistic mutation persist and delta apply, so a delta cannot
         // land in a half-replaced store. A create that finishes during the
-        // download is durable in the outbox and is replayed after replaceAll.
+        // download is durable in the outbox and is replayed in the same batch
+        // as replaceAll.
         //
         // A routine re-bootstrap (schema hash, stale cursor) leaves the cached
         // rows visible and on disk until the replacement commits: nothing says
@@ -237,9 +236,19 @@ final class SyncOrchestrator {
 
             try await stateQueue.run { [self] in
                 var pendingForReplay: [Transaction]?
+                // A routine replacement and a hydrate replay the outbox inside
+                // their own swap (see `SyncModelStore.replaceAll`), so the
+                // store never shows a frame without the user's pending work.
+                // A privacy reconcile swaps out of quarantine, where nothing
+                // was visible, and replays only once sanitation is durable.
+                var replayedPending = false
                 if let snapshot = fetchedBootstrap {
-                    try await applyBootstrapSnapshot(snapshot, groups: subscribedGroups)
                     let privacyReconcile = groupChangeBootstrapPending
+                    try await applyBootstrapSnapshot(
+                        snapshot,
+                        groups: subscribedGroups,
+                        replaysPendingWork: !privacyReconcile
+                    )
                     if privacyReconcile {
                         pendingForReplay = try await preparePendingTransactionsForPrivacySnapshot()
                         pendingForReplay = await restoreInsertsCreatedDuringBootstrapFetch(
@@ -247,7 +256,7 @@ final class SyncOrchestrator {
                             alreadyReplaying: pendingForReplay ?? []
                         )
                     } else {
-                        try await withholdPendingChangesToRowsMissingFromSnapshot()
+                        replayedPending = true
                     }
                     // The authoritative snapshot and all pending rollback
                     // sanitation are durable. Only now may restart hydration
@@ -259,7 +268,8 @@ final class SyncOrchestrator {
                     groupChangeRetryTask?.cancel()
                     groupChangeRetryTask = nil
                 } else {
-                    try await hydrateFromStorage()
+                    try await hydrateFromStorageReplayingPendingWork()
+                    replayedPending = !groupChangeBootstrapPending
                     bootstrapComplete = true
                     if firstSyncId == zeroSyncId, isSyncIdGreaterThan(lastSyncId, zeroSyncId) {
                         firstSyncId = lastSyncId
@@ -267,7 +277,9 @@ final class SyncOrchestrator {
                     try await persistMetadata()
                 }
 
-                await applyPendingToIdentityMaps(pendingForReplay)
+                if !replayedPending {
+                    await applyPendingToIdentityMaps(pendingForReplay)
+                }
             }
         } catch {
             if let bootstrapReason {
@@ -391,8 +403,7 @@ final class SyncOrchestrator {
             modelStore.clearAll()
             onEvent?(.localHydration(outcome: .quarantined, rowCount: 0))
         } else {
-            let rowCount = try await hydrateFromStorage()
-            await applyPendingToIdentityMaps()
+            let rowCount = try await hydrateFromStorageReplayingPendingWork()
             onEvent?(.localHydration(outcome: .storage, rowCount: rowCount))
         }
         return (meta, await outboxManager.getPendingCount())
@@ -457,7 +468,15 @@ final class SyncOrchestrator {
 
     /// Local half of a bootstrap. Must run inside `stateQueue.run` so a delta
     /// or mutation cannot observe a half-replaced store. Does not fetch.
-    private func applyBootstrapSnapshot(_ snapshot: BootstrapSnapshot, groups: [String]) async throws {
+    ///
+    /// `replaysPendingWork` replays the outbox in the same in-memory swap,
+    /// after withholding changes to rows the snapshot dropped. A privacy
+    /// reconcile passes false and replays its own sanitized set later.
+    private func applyBootstrapSnapshot(
+        _ snapshot: BootstrapSnapshot,
+        groups: [String],
+        replaysPendingWork: Bool
+    ) async throws {
         let meta = snapshot.metadata
         guard let bootstrapSyncId = meta.lastSyncId else {
             throw SyncTransportError.invalidResponse
@@ -465,8 +484,9 @@ final class SyncOrchestrator {
 
         // No quarantine here. A replacement with no known revocation swaps
         // atomically: `replaceSnapshot` commits rows and meta in one
-        // transaction and `replaceAll` swaps the in-memory store in one batch,
-        // so the UI goes straight from the old rows to the new ones and a
+        // transaction and `replaceAll` swaps the in-memory store, pending work
+        // included, in one batch, so the UI goes straight from the old rows to
+        // the new ones and a
         // crash before the commit leaves the old snapshot, which the user was
         // already seeing. A known revocation latched quarantine before the
         // fetch (`beginPrivacyReconciliation`), and that latch is carried
@@ -497,7 +517,16 @@ final class SyncOrchestrator {
         )
 
         try await storage.replaceSnapshot(records: snapshot.records, meta: replacementMeta)
-        try modelStore.replaceAll(with: snapshot.records)
+        var pending: [Transaction] = []
+        if replaysPendingWork {
+            try await withholdPendingChangesToRowsMissingFromSnapshot(snapshot.records)
+            pending = await storage.getOutbox()
+        }
+        try modelStore.replaceAll(
+            with: snapshot.records,
+            replaying: pending,
+            where: shouldReplayPendingTransaction
+        )
 
         lastSyncId = bootstrapSyncId
         firstSyncId = replacementFirstSyncId
@@ -1228,9 +1257,19 @@ final class SyncOrchestrator {
         return nil
     }
 
+    /// Reloads the store from disk with the outbox replayed in the same swap.
+    /// Every storage read happens first, the outbox last, so nothing queued
+    /// before the swap is missed and nothing renders between the two.
     @discardableResult
-    private func hydrateFromStorage() async throws -> Int {
-        try await modelStore.hydrateFromStorage(storage)
+    private func hydrateFromStorageReplayingPendingWork() async throws -> Int {
+        let records = try await modelStore.persistedRecords(in: storage)
+        let pending = groupChangeBootstrapPending ? [] : await storage.getOutbox()
+        try modelStore.replaceAll(
+            with: records,
+            replaying: pending,
+            where: shouldReplayPendingTransaction
+        )
+        return records.count
     }
 
     /// Whether a group change reporting `reportedGroups` may have revoked
@@ -1312,16 +1351,20 @@ final class SyncOrchestrator {
     /// A server rejection then cannot restore the row. Local inserts, and
     /// later changes to rows those inserts create, stay replayable. Nothing
     /// visible is cleared and nothing is latched; the caller persists the
-    /// withheld ids with the replacement's metadata.
-    private func withholdPendingChangesToRowsMissingFromSnapshot() async throws {
+    /// withheld ids with the replacement's metadata. Judged against the
+    /// snapshot's rows rather than the store, which has not swapped yet.
+    private func withholdPendingChangesToRowsMissingFromSnapshot(
+        _ snapshotRecords: [StoredModelRecord]
+    ) async throws {
         let pending = await storage.getOutbox().filter {
             $0.state != .completed && $0.state != .failed
         }
         func key(_ tx: Transaction) -> String { "\(tx.modelName):\(tx.modelId)" }
+        let inSnapshot = Set(snapshotRecords.map { "\($0.modelName):\($0.id)" })
         let locallyInserted = Set(pending.filter { $0.action == .insert }.map(key))
 
         for transaction in pending where transaction.action != .insert {
-            if modelStore.snapshot(modelName: transaction.modelName, id: transaction.modelId) != nil
+            if inSnapshot.contains(key(transaction))
                 || locallyInserted.contains(key(transaction)) {
                 continue
             }
